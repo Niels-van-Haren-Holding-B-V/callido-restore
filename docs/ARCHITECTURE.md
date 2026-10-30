@@ -6,10 +6,12 @@
 * `static/index.html` — single-page UI, no build step, no external dependencies. Shown in a native window (pywebview, WebKit on macOS)
   by `run_window`; the HTTP server listens on 127.0.0.1 only and the process exits when the window closes (`_exit_app`).
 * `~/.hbk-explorer/` — `sources.json`, `index/<source>/<share>__<ver>.sqlite` (derived, queryable snapshot), `index/<source>/pool/`
-  (`listing.json`, `runs_set*.bin`, `recsize_set*.json`, `poolmap.json`), `jobs/` (persisted restore jobs).
+  (`listing.json`, `runs_set*.bin`, `recsize_set*.json`, `poolmap.json`), `cache/<source>/` (bytes fetched from a remote;
+  same relative paths as in the `.hbk`), `jobs/` (persisted restore jobs).
 
-Data flow: a **Source** is a local folder plus optional rclone remotes (first wins) plus extra local roots; `Source.ensure(rel)`
-returns a local path, fetching with retries if needed. **Backup** scans version list and shares. Loading a snapshot = fetching
+Data flow: a **Source** is a local folder plus optional rclone remotes (first wins) plus extra local roots. Those folders and
+the remotes are read-only. `Source.ensure(rel)` returns a file that is already in the app cache or in a source folder, and
+downloads a missing file from the remote into `cache/<source>/` only. **Backup** scans version list and shares. Loading a snapshot = fetching
 `<ver>.db` and building a derived SQLite with resolved paths and flags. Timeline/search/compare query that SQLite.
 Restore: `restore_plan` (rows) → `PoolReader.extract` per file (file_pool or chunks via pool map) → local path or `rclone moveto` to a remote;
 buckets are prefetched 4-wide and evicted LRU (≤ `HBK_CACHE_GB`, default 20). Jobs are persisted every 50 files; pause = cancel flag;

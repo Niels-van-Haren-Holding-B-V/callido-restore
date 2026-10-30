@@ -18,6 +18,7 @@ The Drive step already asks for your own client id and secret. Opening a backup 
 
 Repo: https://github.com/Niels-van-Haren-Holding-B-V/hyperbackup-desktop · read `docs/HANDOVER.md` and `docs/FORMAT.md` first.
 Status snapshot at 2026-10-30 21:21: bucket-index download "dir 11 done: 2048 21:21:31"; mapper test (first 6144 buckets): "still running".
+T4 (resumable index fetch, per-directory stats, Stop) and T6 (parser unit tests + ubuntu CI) are implemented in code. T1 and T2 still need the real backup and are not touched here.
 
 ## T1 — Full pool map (blocking for restores) — owner: claude-hbk-1, in progress
 Approach changed on 2026-10-30 23:30 (see docs/handovers): the sequential mapper (`hbk_poolmap.py`) is obsolete. The map is now built
@@ -41,8 +42,10 @@ Serves the goal: shipping this as a `.app` / `.dmg` is what makes the app usable
 Signing and notarisation are a later step.
 
 ## T4 — Robustness of the pool map step inside the app
-`Backup.build_pool` fetches indexes per directory with one rclone call each; add per-directory progress from rclone `--stats` output,
-resume on failure, and a "stop" button. Acceptance: closing/reopening the app continues where it left off.
+**Done in code.** `Backup.build_pool` fetches indexes per directory with one rclone `copy` (remote → `~/.hbk-explorer/cache/<source>/` only; `--ignore-existing`, `--stats=1s --stats-one-line`). Files already at the listing size in that cache or in a configured source/mirror folder are reused and not refetched; those folders are not written. `index/<src>/pool/` is unchanged. A wrong-size cache file is renamed to `*.mismatch` inside the cache; a wrong-size source file is left in place and does not count. Either way the job errors before mapping until a correct copy exists. The restore wizard shows "Continue pool map" once any correct index file is readable, reports per-directory progress, and has Stop, which terminates the rclone copy and does not start mapping.
+Acceptance still to confirm on the real download: quit mid-fetch, reopen, Continue, and check that finished index files are
+unchanged and not downloaded again. Also confirm the installed rclone's `--stats` lines match the samples in
+`tests/test_indexfetch.py` (parsed from rclone's current `stats.go` one-line form).
 Serves the goal: the one-time pool map has to be resumable inside the app, so a restore can be finished from the app.
 
 ## T5 — Encrypted Hyper Backup tasks (client-side encryption)
@@ -51,8 +54,13 @@ until T1–T3 are done.
 Serves the goal: client-side-encrypted backups are the same restore, later, once the unencrypted path works for everyone.
 
 ## T6 — Quality
-Flag heuristics produce noise on Synology Drive files (mode 711). Ideas: whitelist by share, per-extension lists in settings UI.
-Unit tests for `hbk_pool` parsers against small fixture files (a 2-chunk file_pool object, one bucket index header).
+**Parser tests done.** `tests/test_hbk_pool.py` builds synthetic fixtures for a 2-chunk file_pool object, a bucket index
+(header + entries + crc32), LZ4 decode with the `PoolReader.read_chunk` md5 check, and the 56-byte virtual file entry
+(including a slice boundary). `tests/test_indexfetch.py` covers resume, stop, and "do not overwrite". CI is
+`.github/workflows/test.yml` (ubuntu-latest, `python -m unittest`, on push and pull_request). Assumptions where the format
+note is ambiguous are in the test module docstring and in `docs/HANDOVER.md`.
+Flag heuristics still produce noise on Synology Drive files (mode 711). Not in this PR and still open: whitelist by share, per-extension lists in
+the settings UI.
 Serves the goal: quieter flags and parser tests so someone restoring their own files can trust what the app shows.
 
 ## T7 — NAS destination preparation wizard
