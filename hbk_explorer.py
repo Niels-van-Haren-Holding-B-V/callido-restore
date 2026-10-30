@@ -108,21 +108,18 @@ def human(n):
     return f"{n:.1f} PB"
 
 def dest_inside_source(dest, remote, local):
-    """True when a restore destination is the backup itself or lies inside it: its remote folder, any mirror remote, or any
-    local copy/cache/extra root. dest is an rclone path like "nas:share/folder" or a local path; remote and local are a single
-    path or a list of paths (a Source has ``remotes`` and ``read_roots()``). Two rclone remotes that point at the same folder
-    under different names are not recognised; that needs the remote config, not the paths."""
-    def norm(p): return re.sub(r"/+$", "", str(p).replace("\\", "/")) if p else p
+    """True when a restore destination is the backup itself or lies inside it (its remote folder or its local copy/cache).
+    dest and remote are rclone paths like "nas:share/folder" or local paths; local is the source's local folder."""
+    def norm(p): return re.sub(r"/+$", "", p.replace("\\", "/")) if p else p
     def inside(child, parent):
         child, parent = norm(child), norm(parent)
         return bool(parent) and (child == parent or child.startswith(parent + "/"))
-    def many(x): return [str(v) for v in (x if isinstance(x, (list, tuple)) else [x]) if v]
-    remotes, locals_ = many(remote), many(local)
     if ":" in dest and not dest.startswith("/"):
-        return any(inside(dest, r) for r in remotes)
+        return inside(dest, remote or "")
     try: d = os.path.realpath(os.path.expanduser(dest))
     except OSError: d = dest
-    for p in locals_ + [r for r in remotes if r.startswith("/")]:
+    for p in (local, remote if remote and remote.startswith("/") else None):
+        if not p: continue
         try: p = os.path.realpath(os.path.expanduser(p))
         except OSError: pass
         if inside(d, p): return True
@@ -1002,7 +999,7 @@ class H(BaseHTTPRequestHandler):
                 s = add_source(body["name"], body["local"], body.get("remote"), body.get("extra")); return self._json(s.to_json())
             if u.path == "/api/restore":
                 b = backup_for(body["src"]); dest = os.path.expanduser(body["dest"].strip())
-                if dest_inside_source(dest, b.src.remotes, b.src.read_roots()):
+                if dest_inside_source(dest, b.src.remote, b.src.local):
                     return self._json({"error": f"the destination {dest} is inside the backup itself; restore into a new, empty folder elsewhere"}, 400)
                 if ":" in dest and not dest.startswith("/"):
                     r = subprocess.run([RCLONE, "mkdir", dest], capture_output=True, text=True)

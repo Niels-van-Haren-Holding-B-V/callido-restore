@@ -6,7 +6,7 @@
 * ``Backup.restore`` has no overwrite parameter any more.
 * ``place_file`` never replaces what is at the destination, even when it appeared after the existence check.
 * The restore loop itself (local and remote target) leaves an existing file with a different size or mtime unchanged and
-  counts it as skipped, and ``dest_inside_source`` also covers mirror remotes and extra local roots.
+  counts it as skipped.
 """
 import inspect, json, os, shutil, subprocess, tempfile, unittest
 from pathlib import Path
@@ -36,16 +36,6 @@ class DestInsideSource(unittest.TestCase):
     def test_local_source_given_as_remote_path(self):
         with tempfile.TemporaryDirectory() as d:
             self.assertTrue(hbk_explorer.dest_inside_source(os.path.join(d, "sub"), d, "/nonexistent/cache"))
-
-    def test_mirror_remotes_and_extra_roots(self):
-        remotes = ["gdrive:Synology/droopy_1.hbk", "nas:Mirror/droopy_1.hbk"]
-        self.assertTrue(hbk_explorer.dest_inside_source("nas:Mirror/droopy_1.hbk/restore", remotes, []))
-        self.assertFalse(hbk_explorer.dest_inside_source("nas:Restore/2333", remotes, []))
-        with tempfile.TemporaryDirectory() as d:
-            roots = [Path(d) / "backup.hbk", Path(d) / "extra-root"]
-            for r in roots: r.mkdir()
-            self.assertTrue(hbk_explorer.dest_inside_source(os.path.join(d, "extra-root", "x"), remotes, roots))
-            self.assertFalse(hbk_explorer.dest_inside_source(os.path.join(d, "restore"), remotes, roots))
 
 
 class ListDestination(unittest.TestCase):
