@@ -15,7 +15,7 @@ Layout facts
 * bucket: Pool/0/<id//2048>/<id%2048>.bucket.<rev> raw concatenated LZ4 blocks; .index = 64-byte header +
   32-byte entries [u32 clen][u32 off][u32 ulen][md5 16][crc32 of first 28 bytes].
 """
-import struct, os, re, json, glob, hashlib, collections
+import struct, os, re, json, glob, hashlib, collections, bisect
 try:
     import lz4.block as _lz4
     def lz4_decompress(src, usize): return _lz4.decompress(src, uncompressed_size=usize)
@@ -157,6 +157,45 @@ class PoolMap:
 def bucket_index_entries(path):
     d = open(path, "rb").read()
     return [struct.unpack_from(">III", d, p) + (d[p + 12:p + 28],) for p in range(64, len(d) - 31, 32)]
+
+def tag_parts(tag):
+    """Split a snapshot `version_list.tag` (20 raw bytes, or 40 hex chars) into (md5 hex of the first K chunk hashes, tail).
+    tag = md5(concat of the 16-byte md5 fields of the file's first K chunk index entries) + u32 big-endian total uncompressed
+    length of those K chunks (`tail`). K is the number of leading chunks whose ulen sums to exactly `tail` (empirically ≤ 9)."""
+    if isinstance(tag, str): tag = bytes.fromhex(tag)
+    if len(tag) != 20: raise ValueError(f"tag must be 20 bytes, got {len(tag)}")
+    return tag[:16].hex(), struct.unpack(">I", tag[16:])[0]
+
+def iter_file_starts(entries_by_bucket, tag16_hex, tail):
+    """Yield every (bucket, entry index, K) where a run of K consecutive bucket-index entries matches the file tag:
+    their ulen sum == `tail` and md5(concat of their md5 fields) == `tag16_hex`. Needs only bucket index files, no pool map.
+    `entries_by_bucket` is an ordered mapping {bucket: entries} (entries as from `bucket_index_entries`), in the order the
+    buckets were filled by one writer; a run that reaches the end of a bucket continues into the next listed bucket."""
+    want = tag16_hex.lower(); tail = int(tail)
+    if tail <= 0: return
+    buckets = list(entries_by_bucket); n = len(buckets)
+    for bi, b in enumerate(buckets):
+        ents = entries_by_bucket[b]; m = len(ents)
+        pre = [0] * (m + 1)
+        for i, e in enumerate(ents): pre[i + 1] = pre[i] + e[2]
+        for i in range(m):
+            j = bisect.bisect_left(pre, pre[i] + tail, i + 1)      # first j with pre[j] - pre[i] >= tail
+            if j <= m:
+                if pre[j] - pre[i] != tail: continue
+                hashes = [e[3] for e in ents[i:j]]
+            else:                                                 # run crosses into the next bucket (same writer)
+                cum = pre[m] - pre[i]; hashes = [e[3] for e in ents[i:]]; k = bi + 1
+                while cum < tail and k < n:
+                    for e in entries_by_bucket[buckets[k]]:
+                        cum += e[2]; hashes.append(e[3])
+                        if cum >= tail: break
+                    k += 1
+                if cum != tail: continue
+            if hashlib.md5(b"".join(hashes)).hexdigest() == want: yield b, i, len(hashes)
+
+def find_file_start(entries_by_bucket, tag16_hex, tail):
+    """First (bucket, entry index, K) matching the file tag, or None. See `iter_file_starts`; `tag_parts` splits the tag."""
+    return next(iter_file_starts(entries_by_bucket, tag16_hex, tail), None)
 
 def file_pool_chunks(path):
     d = open(path, "rb").read(); p = 0x140; out = []
