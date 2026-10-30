@@ -5,11 +5,12 @@ share, against every local root and every source remote. It returns the offendin
 the original shares (dest = the NAS root) passes as long as the backup does not live inside one of the restored shares.
 ``/api/dest/check`` reports that verdict together with whether the folder exists and is empty (rclone mocked here).
 """
-import json, os, subprocess, tempfile, threading, unittest
+import json, os, subprocess, tempfile, threading, time, unittest
 from http.server import ThreadingHTTPServer
 from unittest import mock
 from urllib.parse import urlencode
-from urllib.request import urlopen
+from urllib.error import HTTPError
+from urllib.request import Request, urlopen
 
 import hbk_explorer
 
@@ -125,6 +126,33 @@ class DestCheckApiTests(SourceFixture):
         out = self.check(src="t7", dest=full); self.assertEqual((out["empty"], out["files"]), (False, 1))
         out = self.check(src="t7", dest=self.local, shares=json.dumps(["homes"])); self.assertTrue(out["inside_source"])
         self.assertEqual(self.check(src="t7", dest="")["error"], "no destination")
+        out = self.check(src="t7", dest=os.path.join(self.tmp.name, "nope", "new"))     # parent missing: /api/restore would refuse it too
+        self.assertFalse(out["exists"]); self.assertIn("does not exist", out["error"])
+
+    def test_connect_password_goes_over_stdin_and_post_only(self):
+        calls = []
+        def run(args, **kw):
+            calls.append((args, kw.get("input")))
+            if args[1] == "obscure": return subprocess.CompletedProcess(args, 0, stdout="OBSCURED\n", stderr="")
+            if args[1] == "config": return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+            return subprocess.CompletedProcess(args, 0, stdout=json.dumps([{"Name": "Restore"}]), stderr="")
+        body = json.dumps({"kind": "smb", "name": "nas", "host": "10.0.0.2", "user": "restore", "password": "s3cret pw"}).encode()
+        base = f"http://127.0.0.1:{self.srv.server_address[1]}/api/rclone/connect"
+        with mock.patch.object(hbk_explorer.subprocess, "run", run):
+            with urlopen(Request(base, data=body, headers={"Content-Type": "application/json"})) as r: job = json.loads(r.read())
+            for _ in range(50):
+                with urlopen(f"http://127.0.0.1:{self.srv.server_address[1]}/api/job?id={job['id']}") as r: j = json.loads(r.read())
+                if j["state"] != "running": break
+                time.sleep(0.05)
+        self.assertEqual(j["state"], "done", j); self.assertEqual(j["result"]["shares"], ["Restore"])
+        obscure = [c for c in calls if c[0][1] == "obscure"][0]
+        self.assertEqual(obscure[0][2], "-"); self.assertEqual(obscure[1], "s3cret pw\n")             # stdin, not argv
+        create = [c for c in calls if c[0][1] == "config"][0][0]
+        self.assertIn("pass=OBSCURED", create); self.assertNotIn("s3cret pw", " ".join(create))
+        try:
+            urlopen(base + "?kind=smb&password=x"); self.fail("GET must be refused")
+        except HTTPError as e:
+            self.assertEqual(e.code, 405)
 
 
 if __name__ == "__main__":
