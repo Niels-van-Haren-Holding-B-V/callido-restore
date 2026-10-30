@@ -97,7 +97,7 @@ it (H13 rule), no version or source folder in between. "Check targets and previe
 Advanced keeps "everything under one folder" (`<folder>/<share>/<path>`). Tests: `tests/test_restore_mapping.py`.
 
 ## H13 — Folder tree selection (Niels, 2026-10-31 00:01; see docs/handovers/2026-10-30-2318-nas-triage.md)
-IN REVIEW (hbk-3): branch `hbk3/tree-select`, stacked on H8 (`hbk3/dest-mapping3`). Step 2 of the restore wizard is a tree with
+IN REVIEW (hbk-3): PR #50 (branch `hbk3/tree-select2`), stacked on H8 (#49); replaces #48. Step 2 of the restore wizard is a tree with
 checkboxes: shared folders at the top, ▸ loads children on demand (`/api/children`), ticking a folder takes everything under it,
 unticking a subfolder under a ticked folder replaces that folder by its other children (so the basket stays an inclusion list and the
 restore plan, pause/resume and the H8 mapping need nothing new), parents with a partial selection show an indeterminate checkbox.
