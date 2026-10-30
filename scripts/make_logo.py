@@ -62,6 +62,8 @@ def embed(png_path, html_path):
     uri = "data:image/png;base64," + b64
     html, n1 = re.subn(r'(<img id="logo" src=")data:image/png;base64,[A-Za-z0-9+/=]+(")', lambda m: m.group(1) + uri + m.group(2), html, count=1)
     html, n2 = re.subn(r'(<link rel="icon"[^>]*href=")data:image/png;base64,[A-Za-z0-9+/=]+(")', lambda m: m.group(1) + uri + m.group(2), html, count=1)
+    if n1 == 0:
+        raise SystemExit('static/index.html has no <img id="logo" src="data:image/png;base64,..."> to rewrite; nothing embedded')
     open(html_path, "w").write(html)
     return n1 + n2
 
