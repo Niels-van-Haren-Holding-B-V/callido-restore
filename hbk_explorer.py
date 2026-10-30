@@ -241,7 +241,10 @@ class Source:
                 r = subprocess.run([RCLONE, "copyto", f"{remote}/{rel}", str(tmp), "--retries", "5", "--low-level-retries", "20",
                                     "--retries-sleep", "5s", "--tpslimit", "8", "--drive-pacer-min-sleep", "100ms"], capture_output=True, text=True)
                 if r.returncode == 0 and tmp.is_file():
-                    tmp.rename(dest); return dest
+                    tmp.rename(dest)
+                    parent = str(Path(rel).parent).strip("/")
+                    with self._lock: self._list.pop("" if parent == "." else parent, None)   # that listing is stale now (root key is "")
+                    return dest
                 errs.append(f"{remote}: {r.stderr.strip()[-160:]}")
                 if tmp.exists(): tmp.unlink()
             time.sleep([3, 15, 60, 0][attempt])
