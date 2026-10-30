@@ -1,3 +1,23 @@
+## T13 App name + footer (Niels, 2026-10-30 22:31 CET) — claim in docs/TASKS.md first
+
+- App name: **Callido Restore** (window title, .app/.dmg name, About, README; keep it in one constant). Subtitle/tagline: "Restore Synology Hyper Backup (.hbk) files". About screen + README: "Not affiliated with or endorsed by Synology. Hyper Backup is a trademark of Synology Inc." Never use "Hyper Backup"/"HyperBackup" as (part of) our product name or logo, and no Synology logos/look.
+- Footer (subtle, part of the T12 clean design): small Callido raccoon logo (the one used on https://callido.nl; get the file from Niels or the site, store as assets/callido-raccoon.svg/png) + "Made by Callido · callido.nl · callido.dev", both clickable links (https://callido.nl, https://callido.dev) opening in the default browser.
+
+## T12 UI design (Niels, 2026-10-30 22:28 CET) — claim in docs/TASKS.md first
+
+The app must look like a clean 2026 macOS app, not an 80s app, and stay simple for beginners:
+- Native macOS feel: system font (-apple-system / SF Pro), generous spacing, rounded corners, subtle shadows, light + dark mode (prefers-color-scheme).
+- Colours from the logo (purple to coral) as accent only; neutral background.
+- One clear step at a time (wizard style), plain-language labels, one primary button per screen, helpful empty states and progress bars with ETA.
+- Hide advanced options behind "Advanced"; no jargon on the main path.
+- No heavy framework needed; plain CSS variables are fine. Keep it accessible (contrast, keyboard focus).
+
+## New tasks from Niels (2026-10-30 22:20 CET) — pick one, claim it in docs/TASKS.md first ("IN PROGRESS (hbk-N): ...")
+
+- **T10 Logo**: use `assets/logo-source.jpg` (original design, no Synology look) everywhere needed: crop white margin to a transparent PNG, generate `assets/AppIcon.icns` (all macOS sizes via iconutil), use it in build_app.sh / the PyInstaller .app and the .dmg, add favicon + header logo in static/index.html, put it at the top of README.md.
+- **T11 Desktop window**: the app must run as a real desktop app, not open a browser. Use pywebview to show static/index.html (local server on 127.0.0.1 only) in a native macOS window with the app name and logo. Remove webbrowser.open, stop the server when the window closes, bundle pywebview in the .app via build_app.sh, add a smoke test.
+- Note: "Hyper Backup" is Synology's product name; consider an own app name before v0.1.0 (Niels to decide).
+
 # Handover (state as of 2026-10-30 evening)
 
 ## Situation

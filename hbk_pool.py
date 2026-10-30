@@ -254,10 +254,12 @@ class PoolReader:
     def __init__(self, source, pool_dir, log=None):
         self.src, self.pool_dir = source, pool_dir
         self.vf = VirtualFileIndex(source); self.recs = ChunkRecords(source)
-        self.map = None; self.idx_cache = collections.OrderedDict(); self.names = None
+        self.map = None; self.idx_cache = collections.OrderedDict(); self.names = None; self.v2 = False
         self.load_map()
     # --- map
     def load_map(self):
+        p2 = os.path.join(self.pool_dir, "poolmap2.json")
+        if os.path.isfile(p2): return self.load_map2(p2)
         p = os.path.join(self.pool_dir, "poolmap.json")
         if not os.path.isfile(p): self.map = None; return False
         d = json.load(open(p)); import bisect
@@ -292,8 +294,58 @@ class PoolReader:
                 k = (e["b"], e["t"])
                 if k not in self.names or e["rev"] > self.names[k][1]: self.names[k] = (e["name"], e["rev"])
         return f"Pool/0/{b // 2048}/{self.names[(b, kind)][0]}"
+    def load_map2(self, p):
+        """v2 map: per record placement segments + new-id ranges (storage order != id order)."""
+        import bisect
+        d = json.load(open(p)); self.v2 = True
+        self.counts = {int(k): v for k, v in d["counts"].items()}
+        self.place2 = {int(s): {int(k): v for k, v in m.items()} for s, m in d["placements"].items()}
+        self.rng2 = {}
+        for s, lst in d["ranges"].items():
+            lst = sorted(lst); self.rng2[int(s)] = ([x[0] for x in lst], [x[1] for x in lst], [x[2] for x in lst])
+        self.map = d; self.mapped_upto = d.get("mapped_upto", 0)
+        return True
+    def _rec_of_id(self, g):
+        import bisect
+        for s, (st, ln, ro) in self.rng2.items():
+            i = bisect.bisect_right(st, g) - 1
+            if i >= 0 and g < st[i] + ln[i]: return s, ro[i]
+        return None
+    def _segs_lookup(self, s, rec_off, k):
+        segs = self.place2.get(s, {}).get(rec_off)
+        if segs is None: raise KeyError(f"record {rec_off:#x} (set {s}) not placed yet (map covers up to bucket {self.mapped_upto})")
+        for b, e0, c in segs:
+            if k < c: return b, e0 + k
+            k -= c
+        raise KeyError(f"record {rec_off:#x}: chunk index {k} beyond its placement")
+    def locate2(self, set_no, rec_off, ids):
+        """All chunk locations of a record (set, rec_off) with its id list, in file order."""
+        out = []; own = self.place2.get(set_no, {}).get(rec_off)
+        # own new-id ranges of this record in id order
+        st, ln, ro = self.rng2.get(set_no, ([], [], []))
+        own_ranges = sorted((st[i], ln[i]) for i in range(len(st)) if ro[i] == rec_off)
+        for g in ids:
+            k = 0; found = False
+            for a, L in own_ranges:
+                if a <= g < a + L: k += g - a; found = True; break
+                k += L
+            if found and own is not None: out.append(self._segs_lookup(set_no, rec_off, k)); continue
+            owner = self._rec_of_id(g)
+            if owner is None: raise KeyError(f"chunk id {g}: no record owns it")
+            s2, r2 = owner; st2, ln2, ro2 = self.rng2[s2]
+            k = 0
+            for i in range(len(st2)):
+                if ro2[i] != r2: continue
+                if st2[i] <= g < st2[i] + ln2[i]: k += g - st2[i]; break
+                k += ln2[i]
+            out.append(self._segs_lookup(s2, r2, k))
+        return out
     def locate(self, g):
         import bisect
+        if getattr(self, "v2", False):
+            owner = self._rec_of_id(g)
+            if owner is None: raise KeyError(f"chunk id {g}: no record owns it")
+            return self.locate2(owner[0], owner[1], [g])[0]
         bp = self.block_pos.get(g // BLOCK)
         if bp is None: raise KeyError(f"chunk {g}: unknown id block {g // BLOCK}")
         w, bi = bp; p = bi * BLOCK + g % BLOCK; pc = self.pieces[w]
@@ -316,6 +368,7 @@ class PoolReader:
     def plan(self, off):
         """off = off_virtual_file (>=0). Returns list of (bucket, entry) in file order."""
         e = self.vf.entry(off); rec = self.recs.record(e["set"], e["rec_off"])
+        if getattr(self, "v2", False): return self.locate2(e["set"], e["rec_off"], rec["ids"]), rec
         return [self.locate(g) for g in rec["ids"]], rec
     def read_chunk(self, b, i, fh_cache, job=None):
         clen, off, ulen, h = self.entries(b, job)[i]
@@ -362,3 +415,38 @@ class PoolReader:
                 try: bs.update(b for b, _ in self.plan(off)[0])
                 except Exception: pass
         return bs
+
+# ----------------------------------------------------------------------------- record -> (size, tag) from raw snapshots
+def build_recmeta(source, snapshot_dbs, outdir, log=print):
+    """Raw Hyper Backup <ver>.db files -> recmeta_set<s>.json: {rec_off: [size, tag16hex, tag_tail]}.
+    tag = md5(concat of the 16-byte md5 of the file's first K chunks), tail = total ulen of those K chunks (K = min(n, 9))."""
+    import sqlite3, mmap
+    vf = SlicedStream(source, "Config/virtual_file.index"); names = vf.names(); maps = {}
+    for k in sorted(names):
+        fh = open(vf.slice_path(k), "rb"); maps[k] = mmap.mmap(fh.fileno(), 0, access=mmap.ACCESS_READ)
+    def entry(off):
+        k, lo = divmod(off, SLICE); m = maps.get(k)
+        if m is None: return None
+        b = m[lo:lo + 56]
+        if len(b) < 56:
+            m2 = maps.get(k + 1)
+            if m2 is None: return None
+            b += m2[:56 - len(b)]
+        f = struct.unpack(">14I", b); return f[12] >> 16, ((f[12] & 0xffff) << 32) | f[13]
+    meta = {1: {}, 2: {}, 3: {}, 4: {}}; n = 0
+    for path in snapshot_dbs:
+        con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        for off, size, tag in con.execute("select off_virtual_file, size, tag from version_list where off_virtual_file>=0 and (mode & 61440)=32768"):
+            e = entry(off)
+            if not e or e[0] not in meta: continue
+            s, ro = e; cur = meta[s].get(ro)
+            t16 = tag[:16].hex() if tag and len(tag) == 20 else None
+            tail = struct.unpack(">I", tag[16:20])[0] if tag and len(tag) == 20 else None
+            if cur is None: meta[s][ro] = [size, t16, tail]
+            else:
+                if cur[1] is None and t16: cur[1] = t16; cur[2] = tail
+            n += 1
+        con.close()
+    for s in meta: json.dump(meta[s], open(os.path.join(outdir, f"recmeta_set{s}.json"), "w"))
+    tagged = sum(1 for v in meta.values() for x in v.values() if x[1])
+    log(f"record meta: {sum(len(v) for v in meta.values()):,} records ({tagged:,} with tag) from {n:,} rows")

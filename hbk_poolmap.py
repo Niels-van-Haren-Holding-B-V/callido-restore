@@ -14,20 +14,33 @@ class WriterModel:
 def _is_new(g, frontier):
     return g == frontier + 1 or (g % BLOCK == 0 and g > frontier)
 
+def new_range(g, L, frontier):
+    """Part of run [g, g+L) that is newly stored given the writer's allocation frontier: ids <= frontier are dedup refs
+    (a file may reference the chunk it just stored again), ids continuing from frontier+1 are new; a run starting at a
+    block boundary beyond the frontier is a new block."""
+    end = g + L
+    if g <= frontier + 1 < end: return frontier + 1, end
+    if g > frontier + 1 and g % BLOCK == 0: return g, end
+    return None
+
 def build_models(outdir, log=print):
     owner = {}; conflicts = 0; runs = {}
+    claims = collections.defaultdict(set); votes = collections.defaultdict(lambda: [0, 0, 0, 0])
     for s in (1, 2, 3, 4):
         w = WRITER_OF_SET[s]; rec, g0, ln = load_runs(outdir, s); runs[w] = (rec, g0, ln)
         frontier = -1
         for i in range(len(g0)):
-            g = g0[i]
-            if _is_new(g, frontier):
-                b0, b1 = g // BLOCK, (g + ln[i] - 1) // BLOCK
-                for b in range(b0, b1 + 1):
-                    if b in owner and owner[b] != w: conflicts += 1
-                    else: owner[b] = w
-                frontier = g + ln[i] - 1
-    log(f"blocks owned: {len(owner):,} conflicts={conflicts}")
+            g = g0[i]; L = ln[i]; b0, b1 = g // BLOCK, (g + L - 1) // BLOCK
+            for b in range(b0, b1 + 1):
+                lo, hi = max(g, b * BLOCK), min(g + L, (b + 1) * BLOCK); votes[b][w] += hi - lo
+            nr = new_range(g, L, frontier)
+            if nr:
+                for b in range(nr[0] // BLOCK, (nr[1] - 1) // BLOCK + 1): claims[b].add(w)
+                frontier = nr[1] - 1
+    for b, ws in claims.items():
+        if len(ws) == 1: owner[b] = next(iter(ws))
+        else: conflicts += 1; owner[b] = max(ws, key=lambda w: votes[b][w])   # the owner stores the whole block
+    log(f"blocks owned: {len(owner):,} conflicts resolved by reference count={conflicts}")
     models = {w: WriterModel(w) for w in range(4)}
     for b, w in owner.items(): models[w].blocks.append(b)
     for m in models.values(): m.blocks.sort(); m.pos = {b: i for i, b in enumerate(m.blocks)}
@@ -40,14 +53,22 @@ def build_models(outdir, log=print):
             while j < n and rec[j] == r: j += 1
             cur = None; dedup = []
             for k in range(i, j):
-                g = g0[k]; L = ln[k]; blk = g // BLOCK
-                if owner.get(blk) == w and _is_new(g, frontier):
-                    p = m.pos[blk] * BLOCK + g % BLOCK
-                    if cur is not None and p == cur[0] + cur[1]: cur[1] += L
-                    else:
-                        if cur is not None: pieces.append(cur)
-                        cur = [p, L, r]
-                    frontier = g + L - 1
+                g = g0[k]; L = ln[k]
+                nr = new_range(g, L, frontier)
+                if nr and owner.get(nr[0] // BLOCK) == w:
+                    ns, ne = nr
+                    dedup.extend(range(g, ns))
+                    # a new range may cross a block boundary only if the writer owns the next block too (consecutive ids)
+                    while ns < ne:
+                        blk = ns // BLOCK; seg_end = min(ne, (blk + 1) * BLOCK)
+                        if owner.get(blk) != w: dedup.extend(range(ns, seg_end)); ns = seg_end; continue
+                        p = m.pos[blk] * BLOCK + ns % BLOCK; Lp = seg_end - ns
+                        if cur is not None and p == cur[0] + cur[1]: cur[1] += Lp
+                        else:
+                            if cur is not None: pieces.append(cur)
+                            cur = [p, Lp, r]
+                        ns = seg_end
+                    frontier = ne - 1
                 else:
                     dedup.extend(range(g, g + L))
             if cur is not None: pieces.append(cur)
@@ -101,10 +122,22 @@ class Mapper:
             s0, b = lst[k]
             return self.ulens(b)[sp - s0] if sp - s0 < self.counts[b] else None
         return None
+    def stored_pos(self, g):
+        """global chunk id -> (writer, stored position) via the piece tables, or None."""
+        blk = g // BLOCK
+        for w, m in self.models.items():
+            bp = m.pos.get(blk)
+            if bp is None: continue
+            p = bp * BLOCK + g % BLOCK
+            i = bisect.bisect_right(m.raw_start, p) - 1
+            if i < 0 or p >= m.raw_start[i] + m.length[i]: return None
+            return w, m.stored_start[i] + (p - m.raw_start[i])
+        return None
     def try_assign(self, w, b, state):
         """state = (piece idx, offset in piece, running sum). Returns (new state, verified checks) or (None, reason)."""
         m = self.models[w]; pi, off, run = state
         u = self.ulens(b); c = len(u); k = 0; np_ = len(m.length); verified = 0
+        sp0 = (m.stored_start[pi] + off) if pi < np_ else m.total      # stored position of this bucket's first entry
         while k < c:
             if pi >= np_: return None, "beyond last piece"
             L = m.length[pi]; take = min(L - off, c - k)
@@ -115,17 +148,33 @@ class Mapper:
                     extra = 0; ok = True
                     for g in m.dedup[pi]:
                         ul = self.chunk_ulen(g)
-                        if ul is None: ok = False; break
+                        if ul is None:
+                            sp = self.stored_pos(g)
+                            if sp and sp[0] == w and sp0 <= sp[1] < sp0 + c: ul = u[sp[1] - sp0]
+                        if ul is None: ok = False; self.stats["unverifiable"] += 1; break
                         extra += ul
                     if ok and run + extra != size: self.stats["reject"] += 1; return None, f"size mismatch piece {pi}: got {run + extra} want {size}"
-                    if ok: self.stats["verified"] += 1; verified += 1
+                    if ok:
+                        self.stats["verified"] += 1
+                        # evidence weight: tiny 1-chunk files (741-byte @SynoResource etc.) match by coincidence; weigh by chunk count
+                        verified += L if L >= 3 else 0
                 if size is not None: run = 0
                 pi += 1; off = 0
         return (pi, off, run), verified
-    def run(self, max_bucket=None, budget=100000, verbose=False):
+    def run(self, max_bucket=None, max_disc=10, verbose=False, budget=400000):
+        """Limited-discrepancy search: candidates are ordered by which writer is 'due' (writers fill buckets at steady
+        rates), and at most D deviations from that order are allowed; D grows until the whole range is consistent."""
         buckets = sorted(b for b in self.counts if max_bucket is None or b <= max_bucket)
-        state = {w: (0, 0, 0) for w in range(4)}; result = {}; stack = []
-        i = 0; backtracks = 0; t0 = time.time(); last_log = 0
+        last = ({}, 0)
+        for D in range(0, max_disc + 1):
+            res, upto, ok = self._search(buckets, D, verbose, budget)
+            if ok: self.log(f"done: {len(res)} buckets with D={D} discrepancies"); return res, upto
+            self.log(f"D={D}: reached bucket index {upto}/{len(buckets)}; retrying with more discrepancies")
+            if upto > last[1]: last = (res, upto)
+        return last
+    def _search(self, buckets, D, verbose, budget):
+        state = {w: (0, 0, 0) for w in range(4)}; self.assigned = {w: [] for w in range(4)}; result = {}
+        stack = []; owners = []; i = 0; backtracks = 0; disc = 0; t0 = time.time(); last_log = 0
         while i < len(buckets):
             b = buckets[i]; cands = []; reasons = {}
             for w in range(4):
@@ -133,32 +182,41 @@ class Mapper:
                 if ns is not None: cands.append((w, ns, why))
                 else: reasons[w] = why
             strong = [c for c in cands if c[2] > 0]
-            if strong: cands = strong                      # positive evidence beats "not contradicted"
-            cands.sort(key=lambda c: -c[2]); cands = [(c[0], c[1]) for c in cands]
+            if strong: cands = sorted(strong, key=lambda c: -c[2])
+            elif len(cands) > 1:
+                # bucket ids are handed out in aligned groups of 4 per writer, round-robin: predict from the rhythm
+                pred = None
+                if b % 4 != 0 and (b - 1) in result: pred = result[b - 1][0]
+                elif (b - 16) in result: pred = result[b - 16][0]
+                if pred is not None and any(c[0] == pred for c in cands):
+                    cands.sort(key=lambda c: 0 if c[0] == pred else 1)
+                else:
+                    win = owners[-24:]; n = len(win); active = [c[0] for c in cands]
+                    cnt = collections.Counter(win)
+                    cands.sort(key=lambda c: -((n / max(1, len(active))) - cnt[c[0]]))
+            cands = [(c[0], c[1]) for c in cands]
             if not cands:
                 if verbose: self.log(f"  bucket {b}: no candidate: {reasons}")
                 while stack:
-                    bi, alts, saved_state, saved_len = stack.pop()
+                    bi, alts, saved_state, saved_len, saved_own, fdisc = stack.pop()
                     state = dict(saved_state)
                     for w in range(4): del self.assigned[w][saved_len[w]:]
                     for bb in buckets[bi:i]: result.pop(bb, None)
-                    i = bi; backtracks += 1
-                    if alts:
-                        w, ns = alts.pop(0)
-                        if alts: stack.append((bi, alts, saved_state, saved_len))
-                        self._apply(w, buckets[bi], ns, state, result); i += 1
+                    del owners[saved_own:]; i = bi; backtracks += 1
+                    if alts and fdisc + 1 <= D:
+                        w, ns = alts.pop(0); disc = fdisc + 1
+                        if alts: stack.append((bi, alts, saved_state, saved_len, saved_own, fdisc))
+                        self._apply(w, buckets[bi], ns, state, result); owners.append(w); i += 1
                         break
                 else:
-                    self.log(f"STUCK at bucket {b} (index {i}) after {backtracks} backtracks: {reasons}"); return result, i
-                if backtracks > budget: self.log("backtrack budget exhausted"); return result, i
+                    return result, i, False
+                if backtracks > budget: self.log("backtrack budget exhausted"); return result, i, False
                 continue
-            self.stats["cands%d" % len(cands)] += 1
             w, ns = cands[0]; alts = cands[1:]
-            if alts: stack.append((i, alts, dict(state), {ww: len(self.assigned[ww]) for ww in range(4)}))
-            self._apply(w, b, ns, state, result); i += 1
-            if i - last_log >= 500: last_log = i; self.log(f"  mapped {i}/{len(buckets)} buckets, backtracks={backtracks}, open branches={len(stack)}, {time.time()-t0:.0f}s")
-        self.log(f"done: {len(result)} buckets, backtracks={backtracks}, open branches={len(stack)}")
-        return result, i
+            if alts and disc < D: stack.append((i, alts, dict(state), {ww: len(self.assigned[ww]) for ww in range(4)}, len(owners), disc))
+            self._apply(w, b, ns, state, result); owners.append(w); i += 1
+            if i - last_log >= 1000: last_log = i; self.log(f"  D={D}: mapped {i}/{len(buckets)} buckets, backtracks={backtracks}, {time.time()-t0:.0f}s")
+        return result, i, True
     def _apply(self, w, b, ns, state, result):
         s0 = self.models[w].stored_start[state[w][0]] + state[w][1] if state[w][0] < len(self.models[w].length) else self.models[w].total
         state[w] = ns; self.assigned[w].append((s0, b)); result[b] = (w, s0)

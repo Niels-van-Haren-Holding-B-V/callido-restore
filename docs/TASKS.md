@@ -58,6 +58,12 @@ The restore target step lists an existing rclone remote, a share and a folder, o
 ## T8 — Never overwrite on restore
 Requirement, not current behaviour. A local file is skipped only when size and mtime both match, and is otherwise written over; a remote file whose size differs is replaced; the restore wizard has an overwrite checkbox. Remove that checkbox. Skip every file that already exists, and never overwrite or delete anything already at the destination, including a restore back into the original shares. Acceptance: an existing file with a different size or mtime is left unchanged and counted as skipped, there is no overwrite control, and the destination loses no files. Abort if the destination listing fails (never treat it as an empty target).
 
+## T10 — Logo (see docs/HANDOVER.md, 2026-10-30 22:20)
+DONE (hbk-2): PR #8 (branch `hbk2/logo`, stacked on PR #5 → PR #2). Regenerate assets with `scripts/make_logo.py --embed`. Crop `assets/logo-source.jpg` to a transparent PNG, generate `assets/AppIcon.icns`, use it in the .app/.dmg, favicon + header logo in `static/index.html`, top of README.md.
+
+## T11 — Desktop window (pywebview)
+DONE in PR #7 (hbk-3, branch hbk3/desktop-window, stacked on #5): show static/index.html in a native macOS window (pywebview), local server on 127.0.0.1 only, no webbrowser.open, server stops when the window closes, pywebview bundled via build_app.sh, smoke test.
+
 ## Do not
 * Do not change the on-disk layout of `~/.hbk-explorer/index/<src>/pool/*` without a migration; the full map build takes hours of downloads.
 * Do not commit anything from `~/.hbk-explorer` or user paths/remotes into the repo.
