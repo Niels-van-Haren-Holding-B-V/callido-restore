@@ -11,6 +11,8 @@
    **Compare versions**, **Restore wizard**.
 5. **Restore wizard**: pick the run → pick everything or folders (+ buttons) → build the pool map once (downloads ~200 KB per bucket;
    progress bar; Stop keeps index files already downloaded, and running it again continues) → choose the target: back into the
-   original NAS shares, one folder on a NAS share, or a local path → Preview → Start.
+   original NAS shares, one folder on a NAS share, or a local path → Preview → Start. No NAS connection yet? Open “Prepare the NAS and
+   connect” on that step: it explains the shared folder, user and SMB settings and connects from there. “Check target” tells you whether
+   the folder is new, empty or already has files; a folder inside the backup itself is refused.
    The bar at the top shows running jobs. Pause/Resume from the wizard; after a crash or reboot the job is listed for resuming.
 Encrypted (`.L0CK3D`) copies are detected and reported as unreadable.
