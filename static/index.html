@@ -448,8 +448,8 @@ async function tabRestore(){const el=$('#tab-restore');
     $('#wzRem').onchange=loadShares;$('#wzShare').onchange=()=>{localStorage.setItem('wzShare',$('#wzShare').value);upd()};if(r.remotes.length)loadShares()}catch(e){$('#wzShare').innerHTML='<option value="">(rclone not available)</option>'}
   upd();
   const checkDest=async(quiet)=>{const dest=target();const out=$('#wzCheckOut');if(!dest){out.textContent='';return null}
-    out.textContent='checking…';try{const r=await api('/api/dest/check',{src:S.src,dest});
-      const msg=r.inside_source?'✗ This is the backup itself (or a folder inside it). Choose another folder.':r.error?'? '+r.error:!r.exists?'✓ New folder, it will be created.':r.empty?'✓ Empty folder.':`! Folder already has ${r.files} entries: files that are already there are skipped, nothing is deleted.`;
+    out.textContent='checking…';try{const r=await api('/api/dest/check',{src:S.src,dest,shares:JSON.stringify([...new Set(S.basket.map(b=>b.share))])});
+      const msg=r.inside_source?`✗ ${r.conflict||dest} is the backup itself, a folder inside it, or the folder around it. Choose another folder.`:r.error?'? '+r.error:!r.exists?'✓ New folder, it will be created.':r.empty?'✓ Empty folder.':`! Folder already has ${r.files} entries: files that are already there are skipped, nothing is deleted.`;
       out.textContent=msg;out.className='status '+(r.inside_source?'bad':r.error?'':'ok');return r}catch(e){out.textContent='? '+e.message;return null}};
   $('#wzCheck').onclick=()=>checkDest();
   $('#wdConnect').onclick=async()=>{const q={kind:'smb',name:$('#wdName').value.trim()||'nas',host:$('#wdHost').value.trim(),user:$('#wdUser').value.trim(),password:$('#wdPass').value};
@@ -467,7 +467,7 @@ async function tabRestore(){const el=$('#tab-restore');
   showSaved();
   $('#rsPlan').onclick=async()=>{$('#rsPlanOut').textContent='counting…';const r=await api('/api/restore_plan',{src:S.src,items:JSON.stringify(S.basket),skip_meta:$('#rsMeta').checked?1:0});$('#rsPlanOut').innerHTML=`<b>${r.files.toLocaleString()} files · ${human(r.bytes)}</b> → <span class="mono">${esc(target())}</span><br><span class="mono">${r.sample.map(esc).join('<br>')}${r.files>20?'<br>…':''}</span>`};
   $('#rsGo').onclick=async()=>{const dest=target();if(!dest){alert('Choose a target first');return}
-    const chk=await checkDest();if(chk&&chk.inside_source){alert('That target is the backup itself or a folder inside it. Choose a new, empty folder.');return}
+    const chk=await checkDest();if(chk&&chk.inside_source){alert(`${chk.conflict||dest} is the backup itself, a folder inside it, or the folder around it. Choose a new, empty folder.`);return}
     if(chk&&chk.exists&&chk.empty===false&&!confirm(`The target already has ${chk.files} entries. Files already there are skipped and nothing is deleted. Continue?`))return;
     try{const j=await post('/api/restore',{src:S.src,dest,items:S.basket,skip_meta:$('#rsMeta').checked});
       showSaved();

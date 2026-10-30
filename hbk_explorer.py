@@ -107,24 +107,6 @@ def human(n):
         n /= 1024
     return f"{n:.1f} PB"
 
-def dest_inside_source(dest, remote, local):
-    """True when a restore destination is the backup itself or lies inside it (its remote folder or its local copy/cache).
-    dest and remote are rclone paths like "nas:share/folder" or local paths; local is the source's local folder."""
-    def norm(p): return re.sub(r"/+$", "", p.replace("\\", "/")) if p else p
-    def inside(child, parent):
-        child, parent = norm(child), norm(parent)
-        return bool(parent) and (child == parent or child.startswith(parent + "/"))
-    if ":" in dest and not dest.startswith("/"):
-        return inside(dest, remote or "")
-    try: d = os.path.realpath(os.path.expanduser(dest))
-    except OSError: d = dest
-    for p in (local, remote if remote and remote.startswith("/") else None):
-        if not p: continue
-        try: p = os.path.realpath(os.path.expanduser(p))
-        except OSError: pass
-        if inside(d, p): return True
-    return False
-
 def list_destination(dest):
     """Paths of every file already at a remote destination (recursive). Raises when the listing fails: an unknown
     destination must never be treated as empty, because the restore never writes over what is there."""
@@ -201,23 +183,43 @@ class Source:
                 continue
         return False
 
-    def contains_dest(self, dest):
-        """True when a restore destination (local path or rclone 'remote:path') is the backup itself or lies inside it.
-        The source is read-only: a restore must never write into or next to the .hbk."""
-        d = dest.strip().rstrip("/")
-        if ":" in d and not d.startswith("/"):
-            rem, _, path = d.partition(":"); path = path.strip("/")
+    def contains_dest(self, dest, shares=()):
+        """The restore writes dest/<share>/<path> for every selected share. Return the first such written root that is the
+        backup itself, lies inside it, or has the backup inside it (checked on every local root and every source remote),
+        else "". With no shares only dest itself is checked and a parent of the backup passes: nothing is written into the
+        .hbk then. The source is read-only, so a restore must never write into or around the .hbk; a restore back into the
+        original shares (dest = the NAS root) is fine as long as the backup does not live in one of the restored shares."""
+        d = dest.strip().replace("\\", "/").rstrip("/")
+        remote = ":" in d and not d.startswith("/")
+        def join(base, share):
+            share = share.strip("/")
+            if remote:
+                rem, _, path = base.partition(":"); path = path.strip("/")
+                return f"{rem}:{path}/{share}" if path else f"{rem}:{share}"
+            return os.path.join(base, share)
+        roots = [join(d, sh) for sh in shares if sh and sh.strip("/")] if shares else [d]
+        for w in roots:
+            if self._writes_into_source(w, remote, both_ways=bool(shares)): return w
+        return ""
+
+    def _writes_into_source(self, w, remote, both_ways):
+        """True when the written root w equals or lies inside a source path, or (both_ways) has a source path inside it."""
+        if remote:
+            rem, _, path = w.partition(":"); path = path.strip("/")
             for r in self.remotes:
                 rr, _, rp = r.partition(":"); rp = rp.strip("/")
-                if rem == rr and (path == rp or path.startswith(rp + "/") or rp.startswith(path + "/") or path == ""):
-                    return True
+                if rem != rr: continue
+                if path == rp or path.startswith(rp + "/"): return True
+                if both_ways and (path == "" or rp.startswith(path + "/")): return True
             return False
-        try: dp = Path(os.path.expanduser(d)).resolve()
-        except OSError: dp = Path(os.path.expanduser(d))
-        for root in [self.local, *self.extra]:
+        try: dp = Path(os.path.expanduser(w)).resolve()
+        except OSError: dp = Path(os.path.expanduser(w))
+        roots = self.read_roots() + [Path(r) for r in self.remotes if r.startswith("/")]     # a "remote" may be a plain folder
+        for root in roots:
             try: rr = root.resolve()
             except OSError: rr = root
-            if dp == rr or rr in dp.parents or dp in rr.parents: return True
+            if dp == rr or rr in dp.parents: return True
+            if both_ways and dp in rr.parents: return True
         return False
 
     def to_json(self):
@@ -873,7 +875,9 @@ class H(BaseHTTPRequestHandler):
                 return self._json({"path": str(p), "parent": str(p.parent), "dirs": items})
             if u.path == "/api/dest/check":   # restore destination: is it inside the backup? does it exist? is it empty?
                 dest = (q.get("dest") or "").strip(); src = SOURCES.get(q.get("src") or "")     # no backup scan needed for this
-                out = {"dest": dest, "inside_source": bool(src and src.contains_dest(dest)), "exists": False, "empty": None, "files": 0}
+                shares = json.loads(q.get("shares") or "[]")                                    # selected shares: the restore writes dest/<share>/...
+                conflict = src.contains_dest(dest, shares) if src and dest else ""
+                out = {"dest": dest, "inside_source": bool(conflict), "conflict": conflict or None, "exists": False, "empty": None, "files": 0}
                 if not dest: return self._json(out | {"error": "no destination"})
                 if ":" in dest and not dest.startswith("/"):
                     r = subprocess.run([RCLONE, "lsjson", "--no-mimetype", "--max-depth", "1", dest], capture_output=True, text=True, timeout=120)
@@ -881,7 +885,7 @@ class H(BaseHTTPRequestHandler):
                         ents = json.loads(r.stdout or "[]"); out["exists"] = True; out["files"] = len(ents); out["empty"] = not ents
                     else:
                         err = r.stderr.strip()[-200:]
-                        if "directory not found" in err or "not found" in err: out["exists"] = False
+                        if "directory not found" in err: out["exists"] = False      # rclone's wording for a missing folder; "remote not found" etc. are errors
                         else: out["error"] = err
                 else:
                     pp = Path(os.path.expanduser(dest))
@@ -929,9 +933,9 @@ class H(BaseHTTPRequestHandler):
                     job["message"] = "waiting for Google sign-in in your browser…" if kind == "drive" else "creating remote"
                     r = subprocess.run(args, capture_output=True, text=True, timeout=600)
                     if r.returncode != 0: raise RuntimeError(r.stderr.strip()[-400:] or "rclone config failed")
-                    t = subprocess.run([RCLONE, "lsd", f"{name}:"], capture_output=True, text=True, timeout=60)
+                    t = subprocess.run([RCLONE, "lsjson", "--no-mimetype", "--dirs-only", f"{name}:"], capture_output=True, text=True, timeout=60)
                     if t.returncode != 0: raise RuntimeError("remote created but listing failed: " + t.stderr.strip()[-300:])
-                    shares = [ln.split(None, 4)[-1] for ln in t.stdout.splitlines() if ln.strip()]
+                    shares = [e["Name"] for e in json.loads(t.stdout or "[]")]
                     return {"remote": name + ":", "shares": shares}
                 return self._json(start_job(run, f"connect {kind}"))
             if u.path == "/api/jobs/saved":
@@ -1006,7 +1010,8 @@ class H(BaseHTTPRequestHandler):
                 s = add_source(body["name"], body["local"], body.get("remote"), body.get("extra")); return self._json(s.to_json())
             if u.path == "/api/restore":
                 b = backup_for(body["src"]); dest = os.path.expanduser(body["dest"].strip())
-                if b.src.contains_dest(dest): return self._json({"error": f"refusing to restore into the backup itself: {dest} is the source or lies inside it"}, 400)
+                bad = b.src.contains_dest(dest, sorted({it["share"] for it in body["items"]}))
+                if bad: return self._json({"error": f"refusing to write {bad}: it is the backup itself, lies inside it, or the backup lies inside it (the source is read-only)"}, 400)
                 if ":" in dest and not dest.startswith("/"):
                     r = subprocess.run([RCLONE, "mkdir", dest], capture_output=True, text=True)
                     if r.returncode != 0: return self._json({"error": f"cannot use remote destination {dest}: {r.stderr.strip()[-200:]}"}, 400)
