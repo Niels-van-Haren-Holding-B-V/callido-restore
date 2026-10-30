@@ -3,54 +3,125 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<link rel="icon" type="image/png" href="data:image/png;base64,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">
+<link rel="icon" id="favicon" type="image/png">
 <title>Callido Restore</title>
 <style>
-:root{--bg:#f6f7f9;--panel:#fff;--ink:#1c2128;--muted:#6b7280;--line:#e2e5ea;--accent:#2563eb;--accent2:#0ea5e9;
-  --new:#2563eb;--mod:#d97706;--rem:#dc2626;--ok:#16a34a;--warn:#b45309;--bad:#b91c1c;--chip:#eef1f5;--sel:#dbeafe;--mono:ui-monospace,SFMono-Regular,Menlo,monospace}
-@media (prefers-color-scheme:dark){:root{--bg:#0f1217;--panel:#171b22;--ink:#e6e8ec;--muted:#9aa3af;--line:#2a313c;--chip:#232a35;--sel:#1e3a8a;--new:#60a5fa;--mod:#fbbf24;--rem:#f87171}}
-*{box-sizing:border-box}body{margin:0;font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--ink)}
-header{display:flex;gap:12px;align-items:center;padding:10px 16px;background:var(--panel);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:5;flex-wrap:wrap}
-header h1{font-size:16px;margin:0 8px 0 0}
-select,input,button{font:inherit;color:inherit;background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:5px 8px}
-button{cursor:pointer}button.primary{background:var(--accent);color:#fff;border-color:var(--accent)}button:disabled{opacity:.5;cursor:default}
-button.small{padding:2px 7px;font-size:12px}
-main{padding:12px 16px;display:grid;gap:12px}
-.panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px}
-.panel h2{font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin:0 0 8px}
+:root{color-scheme:light dark;
+  --bg:#f5f5f7;--panel:#ffffff;--panel2:#fafafa;--ink:#1d1d1f;--muted:#6e6e73;--faint:#aeaeb2;--line:#e5e5ea;--line2:#d2d2d7;
+  --accent:#6a4bc9;--accent-ink:#5a3db4;--accent-soft:#efeafd;--coral:#ef6b5b;--accent2:#b55aa6;--grad:linear-gradient(135deg,#6a4bc9 0%,#b55aa6 55%,#ef6b5b 100%);
+  --new:#4f7df3;--mod:#e8a33c;--rem:#e5534b;--ok:#2e9e5b;--warn:#c47a15;--bad:#d1382c;--chip:#f0f0f3;--sel:#efeafd;
+  --shadow:0 1px 2px rgba(0,0,0,.04),0 6px 20px rgba(0,0,0,.06);--shadow-lg:0 2px 8px rgba(0,0,0,.08),0 24px 60px rgba(0,0,0,.18);
+  --r:12px;--r-sm:8px;--mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,monospace}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#1c1c1e;--panel:#2c2c2e;--panel2:#242426;--ink:#f5f5f7;--muted:#a1a1a6;--faint:#636366;--line:#3a3a3c;--line2:#48484a;
+  --accent:#a98cf5;--accent-ink:#b8a0ff;--accent-soft:#3a2f62;--coral:#f58474;--accent2:#d08ad0;
+  --new:#7ea0ff;--mod:#f2b95a;--rem:#f0776b;--ok:#4fc27a;--warn:#e0a24a;--bad:#f0665b;--chip:#3a3a3c;--sel:#3a2f62;
+  --shadow:0 1px 2px rgba(0,0,0,.3),0 6px 20px rgba(0,0,0,.25);--shadow-lg:0 2px 8px rgba(0,0,0,.4),0 24px 60px rgba(0,0,0,.5)}}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;font:14px/1.5 -apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--ink);-webkit-font-smoothing:antialiased}
+h1,h2,h3,h4{font-weight:600;letter-spacing:-.01em}
+a{color:var(--accent-ink)}
+code{font-family:var(--mono);font-size:.92em;background:var(--chip);padding:1px 5px;border-radius:5px}
+/* toolbar */
+header{display:flex;gap:10px;align-items:center;padding:10px 20px;background:color-mix(in srgb,var(--panel) 85%,transparent);-webkit-backdrop-filter:saturate(180%) blur(16px);backdrop-filter:saturate(180%) blur(16px);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:5;flex-wrap:wrap}
+header h1{font-size:15px;margin:0 10px 0 0}
+#logo{border-radius:7px;box-shadow:0 1px 3px rgba(0,0,0,.18)}
+/* controls */
+select,input,button{font:inherit;color:inherit;background:var(--panel);border:1px solid var(--line2);border-radius:var(--r-sm);padding:6px 10px;line-height:1.3}
+input::placeholder{color:var(--faint)}
+select{padding-right:26px;appearance:none;-webkit-appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%238e8e93' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 9px center}
+button{cursor:pointer;background:var(--panel);transition:background .12s,box-shadow .12s,transform .05s}
+button:hover:not(:disabled){background:var(--panel2);border-color:var(--line2)}
+button:active:not(:disabled){transform:translateY(.5px)}
+button.primary{background:var(--grad);color:#fff;border-color:transparent;font-weight:600;box-shadow:0 1px 2px rgba(0,0,0,.15)}
+button.primary:hover:not(:disabled){background:var(--grad);filter:brightness(1.06)}
+button:disabled{opacity:.45;cursor:default}
+button.small{padding:3px 9px;font-size:12.5px;border-radius:7px}
+button.ghost{border-color:transparent;background:transparent;color:var(--muted)}
+button.ghost:hover:not(:disabled){background:var(--chip);color:var(--ink)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:6px}
+input:focus-visible,select:focus-visible{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 25%,transparent)}
+/* layout */
+main{padding:16px 20px 32px;display:grid;gap:14px;max-width:1500px;margin:0 auto;width:100%}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:16px 18px;box-shadow:var(--shadow)}
+.panel h2{font-size:15px;margin:0 0 10px}
+.panel h2 .help{font-weight:400;margin-left:6px}
 .muted{color:var(--muted)}.mono{font-family:var(--mono);font-size:12px}
 .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-.chip{display:inline-flex;gap:6px;align-items:center;background:var(--chip);border-radius:999px;padding:3px 10px;font-size:12px;border:1px solid transparent;cursor:pointer}
+.help{font-size:12px;color:var(--muted);line-height:1.45}
+/* flow bar */
+.flow{display:flex;gap:4px;list-style:none;margin:0;padding:4px;background:var(--panel);border:1px solid var(--line);border-radius:999px;box-shadow:var(--shadow);width:max-content;max-width:100%;overflow:auto}
+.flow li{display:flex;align-items:center;gap:8px;padding:6px 14px 6px 8px;border-radius:999px;color:var(--muted);cursor:pointer;white-space:nowrap;font-size:13px}
+.flow li i{display:inline-grid;place-items:center;width:22px;height:22px;border-radius:50%;background:var(--chip);color:var(--muted);font-style:normal;font-size:12px;font-weight:600}
+.flow li.done i{background:var(--ok);color:#fff}
+.flow li.on{background:var(--sel);color:var(--ink)}.flow li.on i{background:var(--grad);color:#fff}
+.flow li:hover{color:var(--ink)}
+/* chips, tabs */
+.chip{display:inline-flex;gap:6px;align-items:center;background:var(--chip);border-radius:999px;padding:4px 11px;font-size:12.5px;border:1px solid transparent;cursor:pointer;transition:background .12s}
+.chip:hover{background:var(--line)}
 .chip.on{border-color:var(--accent);background:var(--sel)}
-.chip .dot{width:8px;height:8px;border-radius:50%;background:var(--muted)}.dot.ok{background:var(--ok)}.dot.dl{background:var(--accent2)}.dot.bad{background:var(--bad)}.dot.warn{background:var(--warn)}
-.tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin-bottom:10px}
-.tabs button{border:none;background:none;padding:8px 12px;border-bottom:2px solid transparent;border-radius:0;color:var(--muted)}
-.tabs button.on{color:var(--ink);border-bottom-color:var(--accent)}
-table{width:100%;border-collapse:collapse;font-size:12.5px}th,td{text-align:left;padding:5px 8px;border-bottom:1px solid var(--line);vertical-align:top}
-th{color:var(--muted);font-weight:600;position:sticky;top:0;background:var(--panel);cursor:pointer;white-space:nowrap}
+.chip .dot{width:8px;height:8px;border-radius:50%;background:var(--faint)}.dot.ok{background:var(--ok)}.dot.dl{background:var(--accent)}.dot.bad{background:var(--bad)}.dot.warn{background:var(--warn)}
+.tabs{display:flex;gap:2px;padding:3px;background:var(--chip);border-radius:10px;margin-bottom:14px;width:max-content;max-width:100%;overflow:auto}
+.tabs button{border:none;background:none;padding:6px 13px;border-radius:8px;color:var(--muted);font-weight:500}
+.tabs button:hover{background:transparent;color:var(--ink)}
+.tabs button.on{color:var(--ink);background:var(--panel);box-shadow:0 1px 3px rgba(0,0,0,.12)}
+.tabs button[data-t=restore].on{background:var(--grad);color:#fff}
+/* tables */
+table{width:100%;border-collapse:collapse;font-size:12.5px}th,td{text-align:left;padding:6px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--muted);font-weight:600;position:sticky;top:0;background:var(--panel);cursor:pointer;white-space:nowrap;font-size:12px}
+tr:last-child td{border-bottom:none}
 tr.f:hover{background:var(--chip);cursor:pointer}td.num{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
 td.path{word-break:break-all}td.path b{font-weight:600}
-.flag{display:inline-block;font-size:10.5px;padding:0 5px;border-radius:4px;margin-right:3px;background:var(--chip);color:var(--muted)}
-.flag.exec,.flag.script,.flag.ransom,.flag.ssh,.flag.double-ext,.flag.timestomp{background:#fee2e2;color:#991b1b}
-@media (prefers-color-scheme:dark){.flag.exec,.flag.script,.flag.ransom,.flag.ssh,.flag.double-ext,.flag.timestomp{background:#4c1d1d;color:#fecaca}}
-.flag.changed,.flag.N{background:#dbeafe;color:#1e40af}.flag.M{background:#fef3c7;color:#92400e}.flag.D{background:#fee2e2;color:#991b1b}
-.tablewrap{max-height:60vh;overflow:auto;border:1px solid var(--line);border-radius:8px}
+.flag{display:inline-block;font-size:10.5px;padding:0 6px;border-radius:5px;margin-right:3px;background:var(--chip);color:var(--muted);line-height:17px}
+.flag.exec,.flag.script,.flag.ransom,.flag.ssh,.flag.double-ext,.flag.timestomp{background:#fde4e1;color:#9a2a20}
+@media (prefers-color-scheme:dark){.flag.exec,.flag.script,.flag.ransom,.flag.ssh,.flag.double-ext,.flag.timestomp{background:#4c2320;color:#f6b0a8}}
+.flag.changed,.flag.N{background:#e1e9fe;color:#2a4fb8}.flag.M{background:#fdf0d8;color:#8a5a0c}.flag.D{background:#fde4e1;color:#9a2a20}
+@media (prefers-color-scheme:dark){.flag.changed,.flag.N{background:#27375f;color:#a9c0ff}.flag.M{background:#4a3a1c;color:#f2cf8a}.flag.D{background:#4c2320;color:#f6b0a8}}
+.tablewrap{max-height:60vh;overflow:auto;border:1px solid var(--line);border-radius:10px;background:var(--panel)}
+/* charts */
 svg text{fill:var(--muted);font-size:10px}
 .bar{cursor:pointer}.bar:hover{opacity:.7}
-.tip{position:fixed;background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:6px 9px;font-size:12px;pointer-events:none;z-index:50;box-shadow:0 4px 14px rgba(0,0,0,.15);display:none;max-width:360px}
-#drawer{position:fixed;top:0;right:0;width:460px;max-width:100vw;height:100vh;background:var(--panel);border-left:1px solid var(--line);box-shadow:-8px 0 24px rgba(0,0,0,.15);transform:translateX(100%);transition:transform .15s;z-index:20;overflow:auto;padding:14px}
+.tip{position:fixed;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:8px 11px;font-size:12px;pointer-events:none;z-index:50;box-shadow:var(--shadow-lg);display:none;max-width:360px}
+/* drawer */
+#drawer{position:fixed;top:0;right:0;width:480px;max-width:100vw;height:100vh;background:var(--panel);border-left:1px solid var(--line);box-shadow:var(--shadow-lg);transform:translateX(100%);transition:transform .2s ease;z-index:20;overflow:auto;padding:18px 20px}
 #drawer.open{transform:none}
-dl{display:grid;grid-template-columns:110px 1fr;gap:3px 10px;margin:8px 0}dt{color:var(--muted)}dd{margin:0;word-break:break-all}
-.crumbs a{cursor:pointer;color:var(--accent)}.crumbs span{color:var(--muted);margin:0 4px}
+#closeDrawer{float:right;width:30px;height:30px;padding:0;border-radius:50%;border-color:transparent;background:var(--chip)}
+dl{display:grid;grid-template-columns:110px 1fr;gap:4px 12px;margin:10px 0}dt{color:var(--muted)}dd{margin:0;word-break:break-all}
+.crumbs a{cursor:pointer;color:var(--accent-ink);text-decoration:none}.crumbs a:hover{text-decoration:underline}.crumbs span{color:var(--faint);margin:0 4px}
 .status{font-size:12px;color:var(--muted)}
-.prog{height:6px;background:var(--chip);border-radius:3px;overflow:hidden;width:220px}.prog i{display:block;height:100%;background:var(--accent)}
-dialog{border:1px solid var(--line);border-radius:10px;background:var(--panel);color:var(--ink);padding:16px;min-width:420px}
-dialog::backdrop{background:rgba(0,0,0,.4)}
-label.f{display:grid;gap:3px;margin-bottom:8px;font-size:12px;color:var(--muted)}label.f input{color:var(--ink)}
-.kpi{display:flex;gap:16px;flex-wrap:wrap}.kpi div{background:var(--chip);border-radius:8px;padding:8px 12px;min-width:120px}.kpi b{display:block;font-size:18px}.kpi span{font-size:11px;color:var(--muted)}
-.alert{border-left:4px solid var(--bad);padding:8px 12px;background:var(--chip);border-radius:6px}
-.help{font-size:11.5px;color:var(--muted)}
-.basket li{display:flex;gap:8px;align-items:center;padding:3px 0}
+/* progress */
+.prog{height:6px;background:var(--chip);border-radius:3px;overflow:hidden;width:220px;flex:none}.prog i{display:block;height:100%;background:var(--grad);border-radius:3px;transition:width .4s ease}
+.progress{display:grid;gap:6px;padding:10px 12px;background:var(--panel2);border:1px solid var(--line);border-radius:10px}
+.progress .prog{width:100%}.progress .meta{display:flex;justify-content:space-between;gap:12px;font-size:12.5px}.progress .eta{color:var(--muted);white-space:nowrap}
+/* dialogs */
+dialog{border:1px solid var(--line);border-radius:16px;background:var(--panel);color:var(--ink);padding:22px 24px;min-width:420px;box-shadow:var(--shadow-lg)}
+dialog::backdrop{background:rgba(0,0,0,.35);-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px)}
+dialog h3{margin:0 0 12px;font-size:17px}
+label.f{display:grid;gap:4px;margin-bottom:10px;font-size:12.5px;color:var(--muted)}label.f input{color:var(--ink)}
+/* kpis, alerts, empty states */
+.kpi{display:flex;gap:12px;flex-wrap:wrap}.kpi div{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:10px 14px;min-width:130px}.kpi b{display:block;font-size:20px;font-weight:600;letter-spacing:-.02em}.kpi span{font-size:11.5px;color:var(--muted)}
+.alert{border-left:4px solid var(--bad);padding:10px 14px;background:color-mix(in srgb,var(--bad) 8%,var(--panel));border-radius:8px;margin-bottom:10px}
+.empty{display:grid;justify-items:center;text-align:center;gap:10px;padding:34px 20px;color:var(--muted)}
+.empty b{color:var(--ink);font-size:15px;font-weight:600}.empty p{margin:0;max-width:460px}
+.empty img{width:72px;height:72px;border-radius:16px;box-shadow:var(--shadow)}
+details.adv{margin:8px 0 0}details.adv summary{cursor:pointer;color:var(--muted);font-size:12.5px;list-style:none;display:inline-flex;align-items:center;gap:4px;user-select:none}
+details.adv summary::-webkit-details-marker{display:none}details.adv summary::before{content:"▸";font-size:11px;transition:transform .15s;display:inline-block}details.adv[open] summary::before{transform:rotate(90deg)}
+details.adv>*:not(summary){margin-top:8px}
+/* restore wizard steps */
+.basket li{display:flex;gap:8px;align-items:center;padding:4px 0}.basket{padding-left:0;list-style:none}
+.step{position:relative;padding:14px 18px 14px 56px;border:1px solid var(--line);border-radius:var(--r);background:var(--panel);margin-bottom:10px}
+.step .n{position:absolute;left:16px;top:14px;width:28px;height:28px;border-radius:50%;display:grid;place-items:center;font-weight:600;font-size:13px;background:var(--chip);color:var(--muted)}
+.step.done .n{background:var(--ok);color:#fff}.step.on .n{background:var(--grad);color:#fff}
+.step.on{border-color:color-mix(in srgb,var(--accent) 50%,var(--line));box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 12%,transparent)}
+.step h2{font-size:14px;margin:4px 0 8px}
+.step.done h2::after{content:" ✓";color:var(--ok)}
+.step .body{display:grid;gap:8px}
+/* footer (T13 adds <footer id="madeBy" class="madeBy">) */
+footer.madeBy{display:flex;justify-content:center;align-items:center;gap:8px;padding:18px 20px 26px;font-size:12px;color:var(--muted)}
+footer.madeBy img{width:18px;height:18px;border-radius:5px;vertical-align:middle}footer.madeBy a{color:var(--muted);text-decoration:none}footer.madeBy a:hover{color:var(--ink);text-decoration:underline}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+@media (max-width:760px){main{padding:12px}dialog{min-width:auto;width:calc(100vw - 24px)}#drawer{width:100vw}}
 </style>
 </head>
 <body>
@@ -58,23 +129,24 @@ label.f{display:grid;gap:3px;margin-bottom:8px;font-size:12px;color:var(--muted)
   <img id="logo" src="data:image/png;base64,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" width="28" height="28" alt="" style="border-radius:6px"><h1>Callido Restore</h1>
   <select id="srcSel"></select>
   <button id="addSrc">+ Add backup</button>
-  <button id="refreshSrc" title="Re-scan source">↻</button>
+  <button id="refreshSrc" class="ghost" title="Re-scan this backup" aria-label="Re-scan">↻</button>
   <span id="srcStatus" class="status"></span>
   <span id="jobs" class="row" style="flex:1;justify-content:flex-end;gap:14px"></span>
-  <button id="about" class="small" title="Version and bundled tools">About</button>
-  <button id="quit" class="small" title="Stop the app">Quit</button>
+  <button id="about" class="small ghost" title="Version and bundled tools">About</button>
+  <button id="quit" class="small ghost" title="Stop the app">Quit</button>
 </header>
 <dialog id="dlgAbout" style="max-width:520px"><h3 style="margin-top:0">Callido Restore</h3><div id="aboutBody" class="help">loading…</div>
   <div class="row" style="justify-content:flex-end;margin-top:10px"><button id="aboutClose" class="small">Close</button></div></dialog>
 <main>
+  <ol id="flow" class="flow" aria-label="Steps"><li data-s="1"><i>1</i>Backup</li><li data-s="2"><i>2</i>Backup run</li><li data-s="3"><i>3</i>Files</li><li data-s="4"><i>4</i>Restore</li></ol>
   <div id="overview" class="panel"></div>
   <div id="versions" class="panel">
-    <h2>Backup versions <span class="help">· bar = files new / modified / removed in that run (log scale). Click a bar to select a version.</span></h2>
+    <h2>Pick the backup run <span class="help">· each bar is one run: files new / modified / removed (log scale). Click a bar to pick that run; the last clean run before an incident is usually the one you want.</span></h2>
     <div class="row" style="margin-bottom:6px">
       <span>Range:</span>
       <button class="small rng" data-d="30">30 d</button><button class="small rng" data-d="90">90 d</button><button class="small rng on" data-d="365">1 y</button><button class="small rng" data-d="0">all</button>
       <span style="flex:1"></span>
-      <label>Go to version <input id="verInput" style="width:90px"></label>
+      <label>Go to run <input id="verInput" style="width:90px" inputmode="numeric"></label>
       <select id="verList" style="max-width:260px"></select>
     </div>
     <div id="verChart"></div>
@@ -83,12 +155,12 @@ label.f{display:grid;gap:3px;margin-bottom:8px;font-size:12px;color:var(--muted)
     <div id="snapHead" class="row"></div>
     <div id="snapShares" class="row" style="margin:8px 0"></div>
     <div class="tabs">
-      <button data-t="changes" class="on">Changes in this version</button>
-      <button data-t="timeline">File timeline</button>
-      <button data-t="browse">Browse folders</button>
-      <button data-t="search">Search &amp; flags</button>
-      <button data-t="compare">Compare versions</button>
-      <button data-t="restore">Restore wizard</button>
+      <button data-t="changes" class="on">What changed</button>
+      <button data-t="browse">Folders</button>
+      <button data-t="search">Search</button>
+      <button data-t="timeline">Timeline</button>
+      <button data-t="compare">Compare runs</button>
+      <button data-t="restore">Restore</button>
     </div>
     <div id="tab-changes"></div>
     <div id="tab-timeline" style="display:none"></div>
@@ -98,23 +170,23 @@ label.f{display:grid;gap:3px;margin-bottom:8px;font-size:12px;color:var(--muted)
     <div id="tab-restore" style="display:none"></div>
   </div>
 </main>
-<style id="madeByStyle">.madeBy{display:flex;align-items:center;justify-content:center;gap:8px;padding:14px 16px 18px;font-size:12px;color:var(--muted)}.madeBy a{color:inherit;text-decoration:none}.madeBy a:hover{text-decoration:underline}.madeBy .madeByLogo{width:20px;height:20px;border-radius:5px;vertical-align:middle}</style>
 <footer id="madeBy" class="madeBy"><a href="https://callido.nl" target="_blank" rel="noopener" title="Callido"><img class="madeByLogo" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAAAAXNSR0IArs4c6QAAAERlWElmTU0AKgAAAAgAAYdpAAQAAAABAAAAGgAAAAAAA6ABAAMAAAABAAEAAKACAAQAAAABAAAAQKADAAQAAAABAAAAQAAAAABGUUKwAAAXDUlEQVR4AeVbB2CU5d3/3R4ZZF4WIwFCCCSEsFFGFBSkFUW04ixiKzjaUv1qbUWloq12ONpqrR9o7VBKnSiIgGxRCEOSMMNKgAyy943c3ff7P5cLB4TkYtFavwfu3vfe9xn/vZ4nGnTRYmLSwhweQ6bWq8n0wPuIBkgCvF2M+k+91ghkp7TQLPJovPkmrSu/svJgQ2fQEJ+OW1RURi+XF/PYYRYR7qvRaOH1ejru/DV7egZWzVESZKlBg5eqqwtOdARmhwQIi8q4ky+e0EAT7/UKt7+uHO8IpcBnxEAjUuEtIwYLGqoLlgS+lftzCDDYGB6JZzjqXh/O/62Id4CmYOr1vlBfg/uBvU5/D53/Rq7hkbbnKT5E/puCeCB25LZGO8pk9kY57BUr/W/aCRAWMWiOVqt9wify/tfftKtXVGKU0RRzwmmv2C3YKRWIjs5Kcnnc8iD2v1ffg2WWQrnCoNVlV1Xtocdgc3pc95Ay/w+QF2yVFMQKzvJLI37e6dbn87bPN4H7ytYJZp021avIqGvN1EqQw75BIa/XeaGn1aBn+do1rVYDg15L+IIx4KpPH1+A50WWBA5dNUFaq9XBw1hIo/FCR0Jwzf940+k0MBmJOIHxuIkYcQmGQb5gCVk6syX2PYp+WFeYKAKwk8FoglZnQHNjE6mthY5Ul/ZVe069XgOjQQev24OWJgdMViv0RgPcra1BwkJbAGQTek2iwqCLLyGA0+XEwKws/GHp3zDj9lthCQ2Dw+4CaU7pCEb0ulgkyNcGg1ZJX1OjHUaLFdfeejP+8M+/I3PEMDic7TFOELNpEkmA4AAXafd4vLDF2ZA6OB3zf/EY/rjsDYwcfwmaW1oIEKWhPaoIYu0v2EXEnRqIhoZmZI8dQxhex/wnFmJAxkDExiVQDcjSoOf2knlBNo3WR6vYhHiKGdDSbEdScgoeef455Eybqn7LdKKTX0aTmN5s0oESj8amZoyfPAkL//Aseqb0V2s7XQxiEuN97OwGCMETQCYll2Pi40FBUK26shLW0HA8+PSvceXMGbC3OPhcBz3tgqjMBRsNhpfW1EtKeoVlkmVewIjIY7HwZrMeVG80NbVg0tXTsODZ3yIsMgpVlafJdc7FKWwJCZTEzhY+H6KgCSAhspY+UAgg+DfU1eGReXfjs/XrYQ23Yv6ixzHthpmw2+0kkLgj2gXCIgh6aDs8TgevJJCnVc1j6hGB0J59YbL1hC4knM/07ExiuF3wtvKjiONRbtdEY+d0utFEVbvq2mvw0NNPITQiHLs/3YqHvz8XVRXlCrNomw0G9u2GDoCrBtsYA+iNCI+I5BXYk7sd+bv24Mn7f4L7Hl1ACbgW9y18DK0uF1a/u5wcMxMhJ6wxcbDakmCK5DU2EaaoeOjDo2EIi4JHb8Kxg/vhbmkEHE2AvQHeplq46yvhaayFp6kaGv52tHpgp8pN/vZVuP+Xi2AOsWDNux/g+YWLiHwl9mzPRe9+KYQtAkaTCS4hdJBU6AYBAJfDjvKSEmSNyUJ1ZRVFUwunw4FnFjyKqvJyfGfeXPzg8YWor6/DJx+tRmL2OPSf9WNoyWFRH/l4lf5QXkUFSCzRFa/JAo0llPcJVCANxIxoRfaJSPO25XAU7sKoCRPxwJOLaPUtWPryK1jyzHNwU2B05EZtVbWSlIqyUnolu1KZYNkaNAEEHjfFsnDfPky+9ir0S09X1BYiiP4t+d3zMFstuG7O7fgxiWA3RMB8yfXQWsIp9VTec3RTjJowyet/zklU6UIgl7WEh4w5jCOmITUhFg899QjCosLx9mv/wEtP/QY6g0HFIBqNEWkZGWqug3n5SgKNJmOw+AfvBZQxop8r3LsfLS0eeoA+iIiKJCMJOJmrNxoVEbat/RhOcySSrpkLvbUHbZub78Uo+qoz511pKPzPBGr/vVyFshqTFe7MK1Hm1GLb2nV4+anfKnshhBe33CMqGr36psDu8ODQ3r0M0siQoNEn3MH2FSOopxE8ebwIDTU1iIyOQc/kZFSdroCWyGsIrKPZgb8tW40UZzJqmmjsiMNZnPfKgzYkhf2K+wKw2OK230IoEHGuJ7GaIFrPgOeZf30K5+drKOIOJfZUEkqWC0m9eyEq1obG2joUHzlGAtAItq2jFuviqxtegLpJ5awoOYW8HbmwhOlVQCTiLRbeEpOAwbMfRPSUOahtJvJtOClgCBBRaeeuHyaFv3z5P20vhCBeZTNUlZfrkgg0go60iYiYdDP0PWygrCuV7Js2ACHhBuTv2IGyUyWKYN2RgKAJILB5PT4tXfXm2wyGvNS9QUocE8dPR+Y9v0Rkdg5FXpDtpAmHRTT4Ef1Xot7WPfBeuO/70F7yvU+NmIv0TkfYlO/CMmQCNDSA6VmDVQjx0dvvMB6grRFd7UYLWgVkTjd1zmjUY8+27diXuxvRAzIxZN4TCOufxcXdaKUkKFEOJIJQI5DDcs8mUioEEHD9eq9etP323/uuvn4cQSCIpMEE87BJ0CUwjkjqh0N79mPX1s9ohyRb9c1/9vgL/+oWAWQasQUuRzNeX70TIVmTYU3JoDQyAWlb17+8MEKQ9HNVNJpK0A6JyIn8OvPE90r6Kx62cdI/Xt76pUJLeyPBkt7WG69sKkJYVSGc9uZui7/M2W0CtNIIJY25Ap5+Y1HLhKSVgEp8Ljqr/DeVSvRfQlIRdeEyM1clPW5e/fmSIK7MhPRr+whA0pTB5ctW8YWKHGIWvcrjSBgh70XUdVq3Sn+bzImw9B+OloO54o5kUNCtWwQQqxvepz9sU29HM7GxcnR2ohWje4ei0enBiRoHShtbUdHkRoPTCwcLFC2kzshEI1KjjXhnXzPM3KY5w/Uzdwpi/rQz5J01pheKK5uwpuA0QpkDWCnaPUJMiAu3oFe0Ff3iwhAdasDmfWX45FA56luc0GfmQFddAndlqURHF58AouOwhiF++jzE26IxMdmKK9J6IDWWUZxG+CqCK9LgRT19cnWzC2X1LhyvcSLaqsOlKaHIKy3GsXoPTBQRP+py9UuAi8TqHxeCx67Pxkd7TmFCegIGJUWgJ5G2RVgQYTXCEIDc9ycNxL4TNXh321Es330SB4dOgXPDUhjcTmU0g6GCJjxysFK5zjpLsCMucNZPfobrZ07HqF5mhJtF1ET25b8PHUoymx+182fMLa7Dwx+Vsb+kzTRYNGhH9u+lDaFh4zjZe/zLvLG4PKPX+YMDnigV8K+qFtWgtsmOtQWleGPpu/j4tcVKLSWL7KrpTBbbws46yWIeZnTPPrMAj/7gVvSNNsFEpRY1FKCltubnYAvtQ3HxKUQyU/MbLxnvpvRIQJPUw4wmhxP5ZRRZ+nYhbA2TGbk6qS5zL+uH2TkDOa9PmnzXM0gcOXJceSETEx41P5H3wQFYWA4b1DMSN04di9AwC1at2sjArWtVEDvUaWtpseOu792I7825pR0sMV9+pE8TgZUfrsf/PPgELrvsRowbfz2umXEXPljBkFiqFGyP/uJ3aG5uUfdXpkXAInARchW0tuFnZplr5uhk1ccnRQKaljWAVqxctR7XzZyLS8d/BxO5xo/mL8R7761GaWl5OxxtA9Xl3rtn4+abrm5fM/DdufedqoCdHB3LzG/F8tcQEhqixrZSbA8XHseWLblYt34rduzMR0lpBcNSN3NxJigUbSezPAlchmUPxty7bsKKD9dh2NDBeOD+u3C60YF5bxWjuZUIsjZweP8BVWsMZbVn5U8nIzmWmSNbI4uuy99fg8VLliE3N0/ZFhO5rKSFKiMhb0JcNLKHpiMnZwzGjRuJ9IH9KSE+L1DDcH3KVbchL/8QTJ0kRxckQCsR6t0rDivefxVxcXHYuSsf6z7eio2btmP/gcOoq2ugG2Lhg0BJAiJN6qKM4n2RG+VFCCFi04PEMzCAWvnBEgwePBDfXXYcZQ1Egjp/+MABOKgWNqrHxoXT0FRdjaXLPsBf//oO9u4vpOqwGkTCSjSoJMNnaBTnRTWl/iAVobCwEAxITcH48aNw+eVjMWpkFoqKijF9xvdRUVGrwmk1xTlfFySAVHlnXDsFoczlN2z8FMVFJQpQrUFPTusJADP3NmDa5ySykjBJGC8cNJqkKMIQiIiKF4mzReGGG76Fo7bRaIpKVrWBwv37qSpOxLTWYlLYabz39ioc41p6Im3kOlxEqZLVyrlITZdLBQdqycD1la2hughBZFzPXvGYOGE0ioqLsWlzroK3Hc6AmwsSgOvDxXhfip9GGhM9c3Pl7tptki+ACZhLATp+3HA8/asHsejJ32PFyg0kllkZQSGaEEHsQkhYKGIyRiP+0qkoYQJTn7cFzuNMs5salQjrSEQXxVySICfD62lXTcCjD8/Hzxf8Bus2bKdIEzi2QAKcgYNc4H+3y85ijZNRs4HE1BKGdsDPdOWdT3bPeuT7IdIrVciYgUMQmjoUGvpfzssmE/km87kj9VB96akSFaerqIupmDN7JloayhBi1WDkiEzlBTTUW7OFBCFyZbnrkfciK0nv/RmOQ7soDS5VUBHkpYn96BFu5BwluO2Wa5CRkYrTpyupbmcQOXd9NVBgIxzWPgMRmT6UxPBcEHnpf0E/IUVJM2t5YZfeAA/1sHX5S3A31BJ3fzDrWy7wW8R/P/V28ZI3cPe827B584ew2WJQeLgId8x5CG7xWaI28t9gJGwMcAUffRtHZTL2kUd3z52FkSMzcepkKfV6LP788t9RUECDxpJYp40I600hiJ5wHdx6M5yNdXCWn1AM7Ghch3GAAKbjQpE5N0IbEYemXWvhKD7QNomAd6YFiqFIiJ6SsnXrTmyisYxi2fp40Uk88MAvWS12cPzZAqcOXQnCYjTYZC6JEaVuuHr1FiQlxaOmpgGPLXwWb7y+nB3Y7xy7E7i+fw44WugtWmHqkwFdVAIcRXvb649qoYCvjm0Ay1iRl14NU9pYuMqOoWb13xRQanMkYLD/NhAIIY+UqsQDSKQnO0ai/yK64vklKPJQBfQsX1ui4ymuOtgrS5TOS2lcCChKLERw0V64hRkUadHlc5HvaH15JitJi5x8M3SJA9B8aBvqN7/NF+dL7/kqQNdiHTQSupShcLNU3bhzDVNPprs6iqyIMJsgLNtTIqtyked+IvjvjXSPomHqPd2UkgAC0Lt3AnoPHoqGxGz06JehpKL22H6En9qN0n2f48jREySgL6aQ4qZf3lT9gDN21ALhkveiRBrarwZKbjglQN9nCMzVZbAXfKrsQ+AcZ6sAEdGHWNF/ykxYI2NRtXM96vI/4yBxe77ozz+YSygC+H+fexU1Eg7KNYZxxOjLLsfs++7C87/6MTJyJuOzRu4vMGjRSPAU0xMP3DEVC+65HrEDM1hjtKCpvgH1dbVKknyp9dnqc+56gb+FIG7GMfaq0yCCsA0YDAt3jxuOFZynCuepgAyOp+5NmD4d/VJTUXbiFCtAO3CssBC13AsQ1yKBj9TjJeoLbBKQiB+WuD8m3obMUSMxOmciBgwdyqjNhmGJOliJR25xA36+qoQHGnyxhJPjHr4sFjn9ImDnhLtL3Sgpr8bhvD3Ytn4j8rZvR/mpUwopIdr56zIgIscFdolGI2NikJzaHxncLU5ITsbhQ4VY9+Y/mXdUnZclnkcAQUjpKXP/lLQBuPa7t2Pc1GkqYzvCoOUQa+8H9uThOAlSzYqwEESEQXQ9NiEOmSNHYOSECRg0fChkq8ojZo3paZZNjygpILDzvrJm3L/iJMfoVKQner7oyniM6MnNEbbaFhd2lVN6tCZ18KGuqgqHCvKRu3kLdn/yKUqLT7BYwnI7/4mayDrJA1KRlpmJAUMyuGcxiKG7FVvXrcGb/7sEhQVSLhc7dDbDZK0OCSAvpMlhA6HsAG6Hz7xzDsZd9S36cSONrAt1DFlPHjumiFFG7gwZMZwUH4EoirsofisJKBspcnIjO96A6BCDeDhlK4pq7PjhijJufvgkQJKiX0+JRVqMRHvSvKhkPWF3KQ0p+1gsJj7yoLK8DKdPnURNZQ0+/2w7YuPjkD40Cz37cluMHsdsNVDtvNgmiC9ewkrxLqW6ElVeqHVKAP8gEWsRr8xRw3HDnd/D0EvGKYpKYqI2IgQzfiSv958nFqMlWptF5ONZvZEu0sRYltY04rbnPma43MzfgJH6+cq9E1npiVDr+PvVsUywrqAMh7nh0VhdoebOGHUJ4nr1Ju99+wbiLXye0Yt9O3dg2eLFyN20ReUHBqpLVy0oAvgncTFml2BnxMTxmDH7DqQPG65cnhAosCmPQKiM3CYfm2SAlaGonwBCtJ88+DjeX7EeFub10prtTuTkjMaf/vikyuGlT2HhMazfuBWHSuvpAs2q5picnoG+aQMV0QVryfeFu0f37cVbryzBltWMVxhvGBm2k0JBtbO9QBdDfMZHg6LCI9j84YcoLTqKBO7MRCckitSTGL6cTQ5Tid6Wl5YgIyUePNShmhDmuedexsuL/4XMIZncWotCJEU3mkZr3Yatag9xwvjRDH7q8O57q7jtFYXDx8tg4Y70mMlTeRiiryK4xAtG7j6XFh/H33//PLfLnsaBvAKl46oIEiTyAtT5cYAP1gt+CxKyBe2m5V7zzvu00ptwBQ9HfOvmW2Dr2VvtFnuor+EEfuvHazGubwTS+0mJy6cDuz/fjyrajy2bP/XFEmLKaCdaWppYW8hT60ZHR+Lqb1+Bp379AtyhsZh24y1838LkjJkeN2ArSdiVS1/H6jffoiGuVFmnSbbjv0AL3rmeM7kQQhZtYaXnrcWv4qHbbsU7i1+CvalBcUc4MWJCDl5mXiCqo9SCc0xgvu6015NQTYpjWqqJ09nE/f9ajB07sn2V+LgYWLnfP+U7s7jxaacamHgCpRnvvroYP731Fix98c88pNGgcgO109Q+sns33VKBjqYWxEQPm2nQdm7+BLs2b2TxQ8eN0xTE90rA0aJSfL5lEy4ZM1z54CFZg9QJktwdeTzR1QonvYykvT+aPxc/++k9ysaIG36GqqKzpSBr9GgVRW78YDle4AGMtTx8YWeZTgycn6gdwRXsMxrBDDHhwfbvsp+4Tcn7B2UPwXV33olRl03GhhUrUFO4B/PvvgUD0lLVHIdZ4Ny1i0kKreOwYYOR2j9FPT908DCe/eNriE7LRs7VV2P7hnXk+qsoaHdp3dbaTmCm+rEsfoo9Ejvp9YVeSRjMgJBB0XjMuvc+RtMmrPnnP3DlmHQMSk9FE1VHqkbixkJ45MXKEPwgkf9oyx5MvfUOxiBOvPHiC9ixcbOyN8G4tC8AaIkmNDLjbp1G86Lff3+BSTodIkdopAgy6ZrpmHrTTcjP3YWSo0eoDjzlyZFKjCkFIjWJfXrz7N9YrPrXUqzmbq+cC1JFTqrZxW6S27A+cY+Gfx90CQ8jfHKxFwicT8RcCBHNHaUZd8xWgZRewtIA5ZPTZJ/z1Nfbf3mNVr5cGdKLoeOBcJx7z33LS7/S4/ISJ6iiJeN3iRXaGxksWaMEMXpWh/xV5vb3F/1GJMrrOy4vf1fHoPIfXza1BQfJEiWGoECohEusvfowdZUiirz78pH3qZ3gLLirOMCoNdAGeCuCjh//TY4IsTv6/JvTBjmcWQRxFZxlgJLDlpbyBqM5poqbENcEOct/bTchPA3+D2trCja1E0Bu5K+oTObYWFrHURczLvg6UUosP7n/QkPtvif9cAVYIp5WtdvWyt/VUT5JhIvvevyLfvVX4iKutP0PJyvat5fOIgBQ4ZY/KjRabCfZfxQp5ivRfPUQX6QVxdbQzGkgfzo7v6FmLzl/BnlZ5BwC+NZ1tpzeHWKxLZMTLqRbEp9GqokuYsjsW+nL+T4Dq/rj6T/xVM7cuuqCDR2t1qWcf9P/fP7/AH2KVzEhRG/HAAAAAElFTkSuQmCC" alt="Callido raccoon"></a><span>Made by <a href="https://callido.nl" target="_blank" rel="noopener">Callido</a> · <a href="https://callido.nl" target="_blank" rel="noopener">callido.nl</a> · <a href="https://callido.dev" target="_blank" rel="noopener">callido.dev</a></span></footer>
-<div id="drawer"><button id="closeDrawer" style="float:right">✕</button><div id="drawerBody"></div></div>
+<div id="drawer"><button id="closeDrawer" aria-label="Close">✕</button><div id="drawerBody"></div></div>
 <div id="tip" class="tip"></div>
 <dialog id="dlgSrc" style="min-width:640px">
-  <h3 style="margin-top:0">Add a backup — <span id="wzS" class="muted">step 1 of 3</span></h3>
+  <h3>Add a backup <span id="wzS" class="help">step 1 of 3</span></h3>
   <div id="ws1">
     <p>Where is the Hyper Backup (<code>.hbk</code>) folder?</p>
     <div class="row" style="flex-direction:column;align-items:flex-start;gap:6px">
-      <label><input type="radio" name="wsk" value="existing" checked> an rclone remote I already have: <select id="wsRem"></select></label>
+      <label><input type="radio" name="wsk" value="existing" checked> a connection I already set up: <select id="wsRem"></select></label>
       <label><input type="radio" name="wsk" value="drive"> Google Drive — connect now (opens Google sign-in in your browser)</label>
-      <div id="wsDrive" style="display:none;margin-left:22px"><label class="f">remote name <input id="wsDName" value="gdrive"></label>
+      <div id="wsDrive" style="display:none;margin-left:22px"><p class="help">Only read access to your Drive is requested.</p>
+        <details class="adv"><summary>Advanced</summary><label class="f">connection name <input id="wsDName" value="gdrive"></label>
         <label class="f">your own Google OAuth client id (optional, recommended: avoids the shared rate limit) <input id="wsCid" placeholder="xxxxx.apps.googleusercontent.com"></label>
         <label class="f">client secret <input id="wsCsec" type="password"></label>
-        <p class="help">How to get one: console.cloud.google.com → APIs &amp; Services → enable “Google Drive API” → Credentials → “OAuth client ID”, type <i>Desktop app</i>. Copy id and secret here. Only read access is requested.</p></div>
+        <p class="help">How to get one: console.cloud.google.com → APIs &amp; Services → enable “Google Drive API” → Credentials → “OAuth client ID”, type <i>Desktop app</i>. Copy id and secret here.</p></details></div>
       <label><input type="radio" name="wsk" value="smb"> a NAS share over SMB — connect now</label>
-      <div id="wsSmb" style="display:none;margin-left:22px"><label class="f">remote name <input id="wsSName" value="nas"></label><label class="f">host (IP or name) <input id="wsHost"></label><label class="f">user <input id="wsUser"></label><label class="f">password <input id="wsPass" type="password"></label></div>
+      <div id="wsSmb" style="display:none;margin-left:22px"><label class="f">connection name <input id="wsSName" value="nas"></label><label class="f">host (IP or name) <input id="wsHost"></label><label class="f">user <input id="wsUser"></label><label class="f">password <input id="wsPass" type="password"></label></div>
       <label><input type="radio" name="wsk" value="local"> a folder on this Mac / a mounted disk</label>
     </div>
     <div id="wsConn" class="status" style="margin-top:6px"></div>
@@ -127,10 +199,10 @@ label.f{display:grid;gap:3px;margin-bottom:8px;font-size:12px;color:var(--muted)
   </div>
   <div id="ws3" style="display:none">
     <label class="f">Name for this backup <input id="nName"></label>
-    <label class="f">Local cache folder on this Mac (metadata and temporarily fetched bucket data land here) <input id="nLocal"></label>
+    <details class="adv"><summary>Advanced</summary><label class="f">Local cache folder on this Mac (metadata and temporarily fetched bucket data land here) <input id="nLocal"></label></details>
     <p class="help" id="wsSummary"></p>
   </div>
-  <div class="row" style="justify-content:flex-end;margin-top:10px"><button id="nCancel">Cancel</button><button id="wsBack" style="display:none">Back</button><button id="wsNext" class="primary">Next</button></div>
+  <div class="row" style="justify-content:flex-end;margin-top:10px"><button id="nCancel" class="ghost">Cancel</button><button id="wsBack" style="display:none">Back</button><button id="wsNext" class="primary">Next</button></div>
 </dialog>
 <script>
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
@@ -144,6 +216,20 @@ $('#about').onclick=async()=>{$('#dlgAbout').showModal();try{const a=await api('
 $('#aboutClose').onclick=()=>$('#dlgAbout').close();
 $('#quit').onclick=async()=>{if(!confirm('Stop Callido Restore? Running restore jobs are saved and can be resumed later.'))return;try{await api('/api/quit')}catch(e){}document.body.innerHTML='<p style="padding:30px;font-family:sans-serif">Callido Restore has stopped. You can close this tab.</p>'};
 const dd=t=>t?new Date(t*1000).toISOString().slice(0,10):'';
+// ---------- flow bar (1 backup → 2 run → 3 files → 4 restore)
+function renderFlow(){const cur=!S.info?1:!S.ver?2:S.tab==='restore'?4:3;
+  $$('#flow li').forEach(li=>{const n=+li.dataset.s;li.classList.toggle('done',n<cur||(n===3&&S.basket.length>0&&cur>=3));li.classList.toggle('on',n===cur)})}
+$$('#flow li').forEach(li=>li.onclick=()=>{const n=+li.dataset.s;if(n===1)$('#overview').scrollIntoView({behavior:'smooth'});else if(n===2)$('#versions').scrollIntoView({behavior:'smooth'});else if(S.ver){showTab(n===4?'restore':'browse');$('#snap').scrollIntoView({behavior:'smooth'})}else $('#versions').scrollIntoView({behavior:'smooth'})});
+const LOGO=$('#logo').src;$('#favicon').href=LOGO;
+const emptyState=(title,text,btn)=>`<div class="empty"><img src="${LOGO}" alt=""><b>${title}</b><p>${text}</p>${btn||''}</div>`;
+// ETA from observed progress: samples of (time, fraction); returns "about 4 min left" or ''
+const ETA={};
+function etaText(id,frac,doneBytes,totalBytes){const now=Date.now();const e=ETA[id]||(ETA[id]={t0:now,s:[]});e.s.push([now,frac,doneBytes||0]);if(e.s.length>40)e.s.shift();
+  const [t1,f1,b1]=e.s[0],[t2,f2,b2]=e.s[e.s.length-1];if(t2-t1<4000)return '';let left=null;
+  if(totalBytes&&b2>b1)left=(totalBytes-b2)/((b2-b1)/((t2-t1)/1000));else if(f2>f1)left=(1-f2)/((f2-f1)/((t2-t1)/1000));
+  if(left==null||!isFinite(left)||left<0)return '';if(left<60)return 'less than a minute left';if(left<3600)return `about ${Math.round(left/60)} min left`;return `about ${(left/3600).toFixed(1)} h left`}
+function progressHtml(job,rich){const pct=Math.round((job.progress||0)*100);const eta=job.state==='running'?etaText(job.id,job.progress||0,job.done_bytes,job.total_bytes):'';
+  return `<div class="progress"><div class="meta"><span>${esc(job.message||'')}</span><span class="eta">${pct}%${eta?' · '+eta:''}</span></div><div class="prog"><i style="width:${pct}%"></i></div>${rich&&job.total_files!=null?`<div class="meta muted"><span>${(job.done_files||0).toLocaleString()} / ${(job.total_files||0).toLocaleString()} files · ${human(job.done_bytes||0)} of ${human(job.total_bytes||0)}</span><span>${job.errors&&job.errors.length?`<b style="color:var(--bad)">${job.errors.length} errors</b>`:''}</span></div>`:''}</div>`}
 const octal=m=>m==null?'':(m&0o7777).toString(8).padStart(4,'0');
 const tip=$('#tip');
 function showTip(e,html){tip.innerHTML=html;tip.style.display='block';tip.style.left=Math.min(e.clientX+14,innerWidth-380)+'px';tip.style.top=(e.clientY+14)+'px'}
@@ -152,21 +238,22 @@ function flagsHtml(f,status){let h='';if(status&&status!=='U')h+=`<span class="f
 
 // ---------- sources
 async function loadSources(){const list=await api('/api/sources');const sel=$('#srcSel');sel.innerHTML=list.map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join('')+'<option value="">— none —</option>';
-  if(!list.length){$('#overview').innerHTML='<p>No backups configured yet. Click <b>+ Add backup</b>.</p>';return}
+  if(!list.length){$('#overview').innerHTML=emptyState('No backup added yet','Point the app at a Hyper Backup folder on Google Drive, on a NAS share or on a disk. Only the backup\'s small index files are read until you restore something.','<button class="primary" onclick="$(\'#addSrc\').click()">Add your backup</button>');renderFlow();return}
   const want=localStorage.getItem('src');sel.value=list.some(s=>s.id===want)?want:list[0].id;openSource();}
 $('#srcSel').onchange=openSource;$('#refreshSrc').onclick=()=>openSource(true);
-async function openSource(refresh){const id=$('#srcSel').value;if(!id)return;S.src=id;localStorage.setItem('src',id);$('#srcStatus').textContent='scanning…';$('#snap').style.display='none';S.ver=null;
+async function openSource(refresh){const id=$('#srcSel').value;if(!id)return;S.src=id;localStorage.setItem('src',id);$('#srcStatus').textContent='scanning…';$('#overview').innerHTML=emptyState('Reading the backup…','The backup\'s index files are being read. The first time this can take a minute or two.');$('#snap').style.display='none';S.ver=null;renderFlow();
   try{S.info=await api('/api/open',{src:id,refresh:refresh===true?1:0});}catch(e){$('#overview').innerHTML=`<div class="alert">Could not open: ${esc(e.message)}</div>`;$('#srcStatus').textContent='';return}
-  $('#srcStatus').textContent='';renderOverview();renderVersions();
+  $('#srcStatus').textContent='';renderOverview();renderVersions();renderFlow();
   if(S.info.readable&&S.info.versions.length){const last=S.info.versions[S.info.versions.length-1];selectVersion(last.id)}}
 function renderOverview(){const i=S.info,t=i.task||{},r=i.ransomware;let h='';
   if(r.locked_files>0||i.problems.length){h+=`<div class="alert"><b>${r.locked_files>0?'Ransomware-encrypted backup.':'Problems.'}</b> ${r.locked_files>0?`${r.locked_files} metadata files carry the <code>${esc(r.examples[0]?.split('.').pop())}</code> suffix and are unreadable (e.g. ${r.examples.slice(0,3).map(esc).join(', ')}).`:''} ${i.problems.map(esc).join(' · ')}</div>`}
-  const shares=i.shares.map(s=>`<div><b>${s.snapshots.toLocaleString()}</b><span>${esc(s.name)} · snapshots${s.locked?` · <span style="color:var(--bad)">${s.locked} encrypted</span>`:''}</span></div>`).join('');
+  const locked=i.shares.reduce((a,s)=>a+(s.locked||0),0);
+  const shares=`<div><b>${i.shares.length}</b><span>shares: ${i.shares.map(s=>esc(s.name)).join(', ')}${locked?` · <span style="color:var(--bad)">${locked} encrypted snapshots</span>`:''}</span></div>`;
   const first=i.versions[0],last=i.versions[i.versions.length-1];
-  h+=`<div class="row" style="margin-bottom:8px"><b>${esc(t.host_name||'?')}</b> · task “${esc(t.name||'?')}” · source folders: ${(t.backup_folders||[]).map(x=>`<code>${esc(x)}</code>`).join(' ')}
-     <span class="muted">· client-side encryption ${t.enable_data_encrypt?'<b style="color:var(--warn)">ON</b>':'off'} · compression ${t.data_compress_type??'?'} · rotation ${t.enable_version_rotation?'on':'off'}</span></div>
-  <div class="kpi"><div><b>${i.versions.length.toLocaleString()}</b><span>backup versions${first?` · ${dd(first.ts)} → ${dd(last.ts)}`:''}</span></div>${shares}
-  <div><b>${i.layout.pool_present?'yes':'no'}</b><span>data pool present</span></div><div><b>${esc(i.source.remote||'local only')}</b><span>${esc(i.source.local)}</span></div></div>`;
+  h+=`<h2>Backup of <b>${esc(t.host_name||'?')}</b> <span class="help">· task “${esc(t.name||'?')}”${t.enable_data_encrypt?' · <b style="color:var(--warn)">client-side encryption on (not supported yet)</b>':''}</span></h2>
+  <div class="kpi"><div><b>${i.versions.length.toLocaleString()}</b><span>backup runs${first?` · ${dd(first.ts)} → ${dd(last.ts)}`:''}</span></div>${shares}
+  <div><b>${i.layout.pool_present?'yes':'no'}</b><span>file data present</span></div></div>
+  <details class="adv"><summary>Details</summary><p class="help">Source: <code>${esc(i.source.remote||'local only')}</code> · cache: <code>${esc(i.source.local)}</code><br>Snapshots per share: ${i.shares.map(s=>`${esc(s.name)} ${s.snapshots.toLocaleString()}`).join(' · ')}<br>Backed-up folders: ${(t.backup_folders||[]).map(x=>`<code>${esc(x)}</code>`).join(' ')||'?'} · compression ${t.data_compress_type??'?'} · version rotation ${t.enable_version_rotation?'on':'off'}</p></details>`;
   $('#overview').innerHTML=h;}
 
 // ---------- version chart
@@ -195,7 +282,8 @@ function renderVersions(){const all=S.info.versions;if(!all.length){$('#verChart
     if(st.idx)s+=`<rect x="${x}" y="${H-pb+2}" width="${w}" height="3" fill="var(--ok)"/>`;
     if(sel)s+=`<rect x="${x-1}" y="4" width="${w+2}" height="${H-pb-4}" fill="none" stroke="var(--accent)" stroke-width="1.5"/>`;
     const lab=Math.ceil(n/Math.floor((W-pl)/90));if(i%lab===0)s+=`<text x="${x}" y="${H-8}">${dd(g.vs[0].ts)}</text>`;});
-  s+=`</svg><div class="help">■ <span style="color:var(--new)">new</span> ■ <span style="color:var(--mod)">modified</span> ■ <span style="color:var(--rem)">removed</span> · flat grey = no statistics for that run (load its snapshot to count) · green underline = snapshot loaded · ${vs.length} of ${all.length} versions${per>1?`, ${per} per bar`:''}</div>`;
+  const sw=c=>`<i class="dot" style="background:var(--${c});display:inline-block;width:8px;height:8px;border-radius:50%;margin:0 3px 0 6px"></i>`;
+  s+=`</svg><div class="help">${sw('new')}new ${sw('mod')}modified ${sw('rem')}removed · flat grey = no statistics for that run (load its file list to count) · green underline = file list loaded · ${vs.length} of ${all.length} runs${per>1?`, ${per} per bar`:''}</div>`;
   $('#verChart').innerHTML=s;
   $$('#verChart .bar').forEach(b=>{const g=groups[+b.dataset.i];b.onclick=()=>{if(g.vs.length===1)selectVersion(g.vs[0].id);else{$$('.rng').forEach(x=>x.classList.remove('on'));S.range=Math.max(7,Math.round((now-g.vs[0].ts)/86400)+1);S.rangeEnd=g.vs[g.vs.length-1].ts;renderVersions()}};
     b.onmousemove=e=>{if(g.vs.length===1){const v=g.vs[0];const c=vcount(v);const st=v.stats;
@@ -205,28 +293,28 @@ addEventListener('resize',()=>{if(S.info)renderVersions()});
 // ---------- snapshot
 async function selectVersion(id){S.ver=id;$('#verInput').value=id;$('#verList').value=id;renderVersions();$('#snap').style.display='';
   const v=S.info.versions.find(x=>x.id===id);const st=v.stats;
-  $('#snapHead').innerHTML=`<h2 style="margin:0">Version ${id} — ${dt(v.ts)} UTC — ${esc(v.status)}</h2>${st?`<span class="muted">${st.new.toLocaleString()} new · ${st.mod.toLocaleString()} modified · ${st.rem.toLocaleString()} removed · ${st.total.toLocaleString()} files · ${human(st.src_size)}</span>`:''}`;
+  renderFlow();$('#snapHead').innerHTML=`<h2 style="margin:0">Run ${id} <span class="help">· ${dt(v.ts)} UTC · ${esc(v.status)}</span></h2>${st?`<span class="muted">${st.new.toLocaleString()} new · ${st.mod.toLocaleString()} modified · ${st.rem.toLocaleString()} removed · ${st.total.toLocaleString()} files · ${human(st.src_size)}</span>`:''}`;
   await refreshShares();showTab(S.tab);}
 async function refreshShares(){const id=S.ver;S.snaps={};const infos=await Promise.all(S.info.shares.map(s=>api('/api/snapshot_info',{src:S.src,share:s.name,ver:id}).catch(e=>({share:s.name,error:e.message}))));
   infos.forEach(i=>S.snaps[i.share]=i);
   const allIdx=infos.every(i=>i.indexed);
   $('#snapShares').innerHTML=infos.map(i=>{let dot='',txt='';if(i.error){dot='bad';txt=i.error}else if(i.indexed){dot='ok';txt=`${(i.meta?.files||0).toLocaleString()} files · ${human(i.meta?.bytes||0)}`}else if(i.locked){dot='bad';txt='encrypted'}else if(!i.available){dot='bad';txt='no snapshot'}else if(i.local){dot='warn';txt='downloaded, click to load'}else{dot='dl';txt=`click to download ${human(i.size)} + load`}
     return `<span class="chip ${i.indexed?'on':''}" data-share="${esc(i.share)}" title="${esc(txt)}"><i class="dot ${dot}"></i>${esc(i.share)} <span class="muted">${esc(txt)}</span></span>`}).join('')+
-    (allIdx?'':`<button class="small primary" id="loadAll">Load all shares for this version</button>`)+`<span id="jobStatus" class="status"></span>`;
+    (allIdx?'':`<button class="small primary" id="loadAll">Load all shares for this run</button>`)+`<span id="jobStatus" class="status"></span>`;
   $$('#snapShares .chip').forEach(c=>c.onclick=()=>{const i=S.snaps[c.dataset.share];if(!i.indexed&&i.available&&!i.locked)runIndex(c.dataset.share)});
   const la=$('#loadAll');if(la)la.onclick=()=>runIndex('*');}
 async function runIndex(share){const j=await api('/api/index',{src:S.src,share,ver:S.ver});const el=$('#jobStatus');
-  const poll=async()=>{const job=await api('/api/job',{id:j.id});el.innerHTML=`<span class="prog" style="display:inline-block;vertical-align:middle"><i style="width:${Math.round(job.progress*100)}%"></i></span> ${esc(job.message||'')}`;
+  const poll=async()=>{const job=await api('/api/job',{id:j.id});el.innerHTML=`<span class="prog" style="display:inline-block;vertical-align:middle"><i style="width:${Math.round(job.progress*100)}%"></i></span> ${esc(job.message||'')} <span class="muted">${etaText(job.id,job.progress||0)}</span>`;
     if(job.state==='running')setTimeout(poll,700);else{el.textContent=job.state==='error'?'Error: '+job.error:'';const errs=(job.result||[]).filter(r=>!r.ok);if(errs.length)el.textContent=errs.map(e=>e.share+': '+e.error).join(' · ');
       S.info=await api('/api/open',{src:S.src});renderVersions();await refreshShares();showTab(S.tab)}};poll();}
 $$('.tabs button').forEach(b=>b.onclick=()=>showTab(b.dataset.t));
-function showTab(t){S.tab=t;$$('.tabs button').forEach(b=>b.classList.toggle('on',b.dataset.t===t));$$('[id^=tab-]').forEach(d=>d.style.display=d.id==='tab-'+t?'':'none');
+function showTab(t){S.tab=t;renderFlow();$$('.tabs button').forEach(b=>b.classList.toggle('on',b.dataset.t===t));$$('[id^=tab-]').forEach(d=>d.style.display=d.id==='tab-'+t?'':'none');
   ({changes:tabChanges,timeline:tabTimeline,browse:tabBrowse,search:tabSearch,compare:tabCompare,restore:tabRestore})[t]();}
 const indexedShares=()=>Object.values(S.snaps).filter(i=>i.indexed).map(i=>i.share);
-function needLoad(el){if(!indexedShares().length){el.innerHTML='<p class="muted">Load at least one share for this version (chips above).</p>';return true}return false}
+function needLoad(el){if(!indexedShares().length){const can=Object.values(S.snaps).some(i=>!i.indexed&&i.available&&!i.locked);el.innerHTML=emptyState('Load the file list first','Each share (top-level folder) of this run has its own file list. Click a share above to load it, or load them all.',can?'<button class="primary" onclick="runIndex(\'*\')">Load all shares</button>':'');return true}return false}
 
 // ---------- table
-function table(rows,opts={}){if(!rows.length)return '<p class="muted">Nothing here.</p>';
+function table(rows,opts={}){if(!rows.length)return '<p class="muted" style="padding:14px 4px">Nothing here.</p>';
   const cols=opts.cols||['share','path','size','mtime','ctime','mode','flags'];const head={share:'Share',path:'Path',size:'Size',mtime:'Modified (UTC)',ctime:'Changed (UTC)',mode:'Mode',flags:'Status / flags',old_size:'Old size',old_mtime:'Old modified'};
   let h=`<div class="tablewrap"><table><thead><tr>${cols.map(c=>`<th data-c="${c}">${head[c]||c}</th>`).join('')}${opts.basket?'<th></th>':''}</tr></thead><tbody>`;
   rows.forEach((r,i)=>{h+=`<tr class="f" data-i="${i}">${cols.map(c=>{switch(c){
@@ -235,7 +323,7 @@ function table(rows,opts={}){if(!rows.length)return '<p class="muted">Nothing he
     case 'mtime':case 'ctime':case 'old_mtime':return `<td class="num">${dt(r[c])}</td>`;
     case 'mode':return `<td class="mono">${octal(r.mode)}${r.is_exec?' <span class="flag exec">x</span>':''}</td>`;
     case 'flags':return `<td>${flagsHtml(r.flags,r.status)}</td>`;
-    default:return `<td>${esc(r[c])}</td>`}}).join('')}${opts.basket?`<td><button class="small bk" data-i="${i}" title="Add to restore basket">+</button></td>`:''}</tr>`});
+    default:return `<td>${esc(r[c])}</td>`}}).join('')}${opts.basket?`<td><button class="small bk" data-i="${i}" title="Add to the restore list" aria-label="Add to the restore list">+</button></td>`:''}</tr>`});
   return h+'</tbody></table></div>'}
 function bindTable(root,rows,opts={}){root.querySelectorAll('tr.f').forEach(tr=>tr.onclick=e=>{if(e.target.classList.contains('bk'))return;const r=rows[+tr.dataset.i];if(opts.onRow)opts.onRow(r);else if(r.id)openDetail(r.share,r.ver||S.ver,r.id)});
   root.querySelectorAll('.bk').forEach(b=>b.onclick=()=>addBasket(rows[+b.dataset.i]));}
@@ -244,7 +332,7 @@ function bindTable(root,rows,opts={}){root.querySelectorAll('tr.f').forEach(tr=>
 async function tabChanges(){const el=$('#tab-changes');if(needLoad(el))return;el.innerHTML='<p class="muted">Loading…</p>';
   const res=await api('/api/query',{src:S.src,ver:S.ver,share:'*',q:'-status:U',sort:'path',order:'asc',limit:5000});
   const cnt={};res.rows.forEach(r=>cnt[r.status]=(cnt[r.status]||0)+1);
-  el.innerHTML=`<p class="help">Entries whose status in this snapshot is not “unchanged”: ${Object.entries(cnt).map(([k,v])=>`<b>${v.toLocaleString()}</b> ${k==='N'?'new':k==='M'?'modified':k==='D'?'deleted':k}`).join(' · ')||'none'} (${res.total.toLocaleString()} total${res.total>5000?', first 5000 shown':''}). The hourly histogram below shows when those files were last modified.</p>
+  el.innerHTML=`<p class="help">Files that are new, modified or deleted in this run: ${Object.entries(cnt).map(([k,v])=>`<b>${v.toLocaleString()}</b> ${k==='N'?'new':k==='M'?'modified':k==='D'?'deleted':k}`).join(' · ')||'none'} (${res.total.toLocaleString()} total${res.total>5000?', first 5000 shown':''}). The chart shows when those files were last modified: a burst of changes on one day is what an incident looks like.</p>
   <div id="chgHist"></div><div id="chgTable"></div>`;
   const hist=await api('/api/histogram',{src:S.src,ver:S.ver,share:'*',q:'-status:U',by:'mtime',bucket:'day'});
   $('#chgHist').innerHTML=histSvg(hist,{onPick:null});
@@ -265,7 +353,7 @@ let TL={by:'mtime',bucket:'month',scope:'',pick:null};
 async function tabTimeline(){const el=$('#tab-timeline');if(needLoad(el))return;
   el.innerHTML=`<div class="row" style="margin-bottom:8px"><label>Date field <select id="tlBy"><option value="mtime">modified (mtime)</option><option value="ctime">changed (ctime)</option></select></label>
     <label>Bucket <select id="tlBucket"><option value="year">year</option><option value="month" selected>month</option><option value="day">day</option><option value="hour">hour</option></select></label>
-    <label>Scope (path prefix) <input id="tlScope" placeholder="e.g. nielsvanharen/Documents" style="width:260px"></label><label>Share <select id="tlShare"><option value="*">all loaded</option>${indexedShares().map(s=>`<option>${esc(s)}</option>`).join('')}</select></label>
+    <label>Folder <input id="tlScope" placeholder="e.g. Documents/2024" style="width:260px"></label><label>Share <select id="tlShare"><option value="*">all loaded</option>${indexedShares().map(s=>`<option>${esc(s)}</option>`).join('')}</select></label>
     <span class="help">Click a bar to list the files in that period.</span></div><div id="tlChart"></div><div id="tlPick" class="muted" style="margin:6px 0"></div><div id="tlTable"></div>`;
   $('#tlBy').value=TL.by;$('#tlBucket').value=TL.bucket;$('#tlScope').value=TL.scope;
   const redraw=async()=>{TL.by=$('#tlBy').value;TL.bucket=$('#tlBucket').value;TL.scope=$('#tlScope').value.trim();const share=$('#tlShare').value;
@@ -277,7 +365,7 @@ async function tabTimeline(){const el=$('#tab-timeline');if(needLoad(el))return;
 
 let BR={share:null,dir:''};
 async function tabBrowse(){const el=$('#tab-browse');if(needLoad(el))return;const shares=indexedShares();if(!shares.includes(BR.share)){BR.share=shares[0];BR.dir=''}
-  el.innerHTML=`<div class="row" style="margin-bottom:8px"><label>Share <select id="brShare">${shares.map(s=>`<option ${s===BR.share?'selected':''}>${esc(s)}</option>`).join('')}</select></label><span class="crumbs" id="crumbs"></span><span style="flex:1"></span><button class="small" id="brBasket">+ add this folder to restore basket</button></div><div id="brTable"></div>`;
+  el.innerHTML=`<div class="row" style="margin-bottom:8px"><label>Share <select id="brShare">${shares.map(s=>`<option ${s===BR.share?'selected':''}>${esc(s)}</option>`).join('')}</select></label><span class="crumbs" id="crumbs"></span><span style="flex:1"></span><button class="small" id="brBasket">+ Restore this folder</button></div><div id="brTable"></div>`;
   $('#brShare').onchange=e=>{BR.share=e.target.value;BR.dir='';tabBrowse()};$('#brBasket').onclick=()=>addBasket({share:BR.share,path:BR.dir,is_dir:1,name:BR.dir.split('/').pop()||'(share root)'});
   const parts=BR.dir?BR.dir.split('/'):[];let c=`<a data-p="">${esc(BR.share)}</a>`;parts.forEach((p,i)=>c+=`<span>/</span><a data-p="${esc(parts.slice(0,i+1).join('/'))}">${esc(p)}</a>`);$('#crumbs').innerHTML=c;
   $$('#crumbs a').forEach(a=>a.onclick=()=>{BR.dir=a.dataset.p;tabBrowse()});
@@ -289,8 +377,8 @@ async function tabBrowse(){const el=$('#tab-browse');if(needLoad(el))return;cons
 const FLAGS=[['exec','executable without any extension'],['script','script / binary extension'],['hidden','dotfile'],['ransom','ransomware name'],['ssh','ssh keys'],['sensitive','shell history / system files'],['timestomp','mtime newer than ctime'],['double-ext','document.ext.exe'],['symlink','symlink'],['future','mtime in the future'],['changed','changed in this version']];
 let SQ={q:'',flags:[],sort:'mtime',order:'desc'};
 async function tabSearch(){const el=$('#tab-search');if(needLoad(el))return;
-  el.innerHTML=`<div class="row" style="margin-bottom:6px"><input id="sq" style="flex:1;min-width:300px" placeholder="search… e.g.  .sh  ext:php  path:Downloads  size>100000000  -status:U" value="${esc(SQ.q)}"><label>sort <select id="sSort"><option value="mtime">modified</option><option value="ctime">changed</option><option value="size">size</option><option value="path">path</option></select></label><select id="sOrder"><option value="desc">desc</option><option value="asc">asc</option></select><button class="primary" id="sGo">Search</button></div>
-  <div class="row" style="margin-bottom:8px">${FLAGS.map(([f,d])=>`<span class="chip fl ${SQ.flags.includes(f)?'on':''}" data-f="${f}" title="${d}">${f}</span>`).join('')}<span class="help">terms: <code>ext:</code> <code>flag:</code> <code>status:</code> <code>path:</code> <code>size&gt;</code> <code>size&lt;</code>, prefix with <code>-</code> to negate</span></div><div id="sCount" class="muted"></div><div id="sTable"></div>`;
+  el.innerHTML=`<div class="row" style="margin-bottom:6px"><input id="sq" type="search" style="flex:1;min-width:300px" placeholder="Search file names, e.g. invoice.pdf or holiday" value="${esc(SQ.q)}"><label>sort <select id="sSort"><option value="mtime">modified</option><option value="ctime">changed</option><option value="size">size</option><option value="path">path</option></select></label><select id="sOrder"><option value="desc">desc</option><option value="asc">asc</option></select><button class="primary" id="sGo">Search</button></div>
+  <div class="row" style="margin-bottom:8px">${FLAGS.map(([f,d])=>`<span class="chip fl ${SQ.flags.includes(f)?'on':''}" data-f="${f}" title="${d}">${f}</span>`).join('')}</div><details class="adv"><summary>Advanced search terms</summary><p class="help">Terms: <code>ext:</code> <code>flag:</code> <code>status:</code> <code>path:</code> <code>size&gt;</code> <code>size&lt;</code>; prefix with <code>-</code> to negate. The chips filter on suspicious-file flags.</p></details><div id="sCount" class="muted"></div><div id="sTable"></div>`;
   $('#sSort').value=SQ.sort;$('#sOrder').value=SQ.order;
   const go=async()=>{SQ.q=$('#sq').value;SQ.sort=$('#sSort').value;SQ.order=$('#sOrder').value;$('#sCount').textContent='Searching…';
     const res=await api('/api/query',{src:S.src,ver:S.ver,share:'*',q:SQ.q,flags:SQ.flags.join(','),sort:SQ.sort,order:SQ.order,limit:2000});
@@ -308,29 +396,30 @@ async function tabCompare(){const el=$('#tab-compare');const vs=S.info.versions.
     const sec=(t,rows,cols)=>`<h3 style="font-size:13px;margin:12px 0 4px">${t} (${rows.length.toLocaleString()})</h3>${table(rows.map(r=>({...r,share:d.share})),{cols})}`;
     $('#cpOut').innerHTML=sec('Added in v'+d.b,d.added,['path','size','mtime','ctime','mode','flags'])+sec('Modified',d.modified,['path','old_size','size','old_mtime','mtime','flags'])+sec('Removed (present in v'+d.a+' only)',d.removed,['path','size','mtime','mode','flags']);};}
 
-function addBasket(r){const it={share:r.share,ver:S.ver,path:r.path,is_dir:r.is_dir?1:0,name:r.name||r.path.split('/').pop()};if(S.basket.some(b=>b.share===it.share&&b.ver===it.ver&&b.path===it.path))return;S.basket.push(it);localStorage.setItem('basket',JSON.stringify(S.basket));if(S.tab==='restore')tabRestore();}
+function addBasket(r){const it={share:r.share,ver:S.ver,path:r.path,is_dir:r.is_dir?1:0,name:r.name||r.path.split('/').pop()};if(S.basket.some(b=>b.share===it.share&&b.ver===it.ver&&b.path===it.path))return;S.basket.push(it);localStorage.setItem('basket',JSON.stringify(S.basket));renderFlow();if(S.tab==='restore')tabRestore();}
 async function tabRestore(){const el=$('#tab-restore');
   let pool={};try{pool=await api('/api/pool',{src:S.src})}catch(e){pool={error:e.message}}
   const mapped=pool.mapped_buckets||0,total=pool.total_buckets||0;const pct=total?Math.round(100*mapped/total):0;const mapOk=total&&mapped>=total;
   const v=S.info.versions.find(x=>x.id===S.ver);const latest=S.info.versions[S.info.versions.length-1];
   const basketV=S.basket.length?S.basket[0].ver:S.ver;
-  const step=(n,title,body,done)=>`<div class="panel" style="margin-bottom:10px;border-left:4px solid ${done?'var(--ok)':'var(--accent)'}"><h2>Step ${n} — ${title} ${done?'✓':''}</h2>${body}</div>`;
+  const doneSteps=[true,S.basket.length>0,!!mapOk];let firstOpen=doneSteps.indexOf(false)+1||4;
+  const step=(n,title,body,done)=>`<div class="step ${done?'done':''} ${n===firstOpen?'on':''}"><span class="n">${n}</span><h2>${title}</h2><div class="body">${body}</div></div>`;
   el.innerHTML=
-  step(1,'Which backup run?',`<p>Selected: <b>version ${S.ver}</b> · ${dt(v.ts)} UTC · ${esc(v.status)}${S.ver===latest.id?' · <b>this is the latest run</b>':` · latest is version ${latest.id} (${dd(latest.ts)})`}.</p>
-     <p class="help">The last run before the ransomware is the one you want. Change it by clicking a bar in the chart above or with “Go to version”.</p>${S.ver!==latest.id?`<button class="small" id="wzLatest">Use latest (${latest.id})</button>`:''}`,true)+
-  step(2,'What to restore?',`<div class="row"><button class="small primary" id="rsAddAll">Everything from version ${S.ver} (all shares except @AppConfig)</button><span class="muted">or pick folders/files in <b>Browse folders</b> / <b>Search</b> with the + buttons</span></div>
-     <ul class="basket" style="margin:8px 0">${S.basket.map((b,i)=>`<li><span class="flag">v${b.ver}</span><b>${esc(b.share)}</b>/${esc(b.path||'')}${b.is_dir?' <span class="muted">(folder)</span>':''}<button class="small rm" data-i="${i}">remove</button></li>`).join('')||'<li class="muted">nothing selected yet</li>'}</ul>
-     <div class="row"><label><input type="checkbox" id="rsMeta" checked> skip Synology metadata (@eaDir thumbnails, @SynoResource, .DS_Store)</label><label><input type="checkbox" id="rsOver"> overwrite files already at the target</label></div>`,S.basket.length>0)+
-  step(3,'Pool map (one-time)',`<p class="help">To read file contents without Hyper Backup the tool needs to know which pool bucket holds which chunk. Building that downloads every bucket <i>index</i> file (~200 KB each, ${total.toLocaleString()} of them, ~7 GB) and then matches file sizes against them. No bucket data is downloaded here. Runs once; later restores reuse it.</p>
-     <div class="row"><div class="prog"><i style="width:${pct}%"></i></div><span>${mapped.toLocaleString()} / ${total.toLocaleString()} buckets mapped</span><button class="small ${mapOk?'':'primary'}" id="poolBuild">${mapOk?'Rebuild':'Build pool map now'}</button><span id="poolJob" class="status"></span></div>`,mapOk)+
-  step(4,'Where to put the files? (target)',`<p class="help">Files are written as <code>&lt;target&gt;/&lt;share&gt;/&lt;path&gt;</code>, e.g. <code>&lt;target&gt;/homes/nielsvanharen/Drive/…</code>, keeping the original modification times. Use a <b>new, empty folder on the NAS</b>, not the folder that holds the backup. Two ways to point at the NAS:</p>
+  step(1,'Which backup run?',`<p style="margin:0">Selected: <b>run ${S.ver}</b> · ${dt(v.ts)} UTC · ${esc(v.status)}${S.ver===latest.id?' · <b>this is the latest run</b>':` · the latest is run ${latest.id} (${dd(latest.ts)})`}.</p>
+     <p class="help">After an incident, pick the last run before it. Change the run by clicking a bar in the chart above.</p>${S.ver!==latest.id?`<div><button class="small" id="wzLatest">Use the latest run (${latest.id})</button></div>`:''}`,true)+
+  step(2,'What to restore?',`<div class="row"><button class="small ${!S.basket.length&&firstOpen===2?'primary':''}" id="rsAddAll">Everything from run ${S.ver}</button><span class="help">or pick folders and files under <b>Folders</b> or <b>Search</b> with the + buttons</span></div>
+     <ul class="basket" style="margin:4px 0">${S.basket.map((b,i)=>`<li><span class="flag">run ${b.ver}</span><b>${esc(b.share)}</b>/${esc(b.path||'')}${b.is_dir?' <span class="muted">(folder)</span>':''}<button class="small ghost rm" data-i="${i}">remove</button></li>`).join('')||'<li class="muted">Nothing selected yet.</li>'}</ul>
+     <details class="adv"><summary>Advanced</summary><div class="row"><label><input type="checkbox" id="rsMeta" checked> skip Synology metadata (@eaDir thumbnails, @SynoResource, .DS_Store)</label><label><input type="checkbox" id="rsOver"> overwrite files already at the target</label></div></details>`,S.basket.length>0)+
+  step(3,'Prepare the backup for reading (one time)',`<p class="help" style="margin:0">Before files can be read without Hyper Backup, the app has to learn where every piece of every file is stored. This is done once and takes a while (it downloads about 7 GB of small index files, no file data). Later restores reuse it.</p>
+     <div class="row"><div class="prog"><i style="width:${pct}%"></i></div><span>${pct}% · ${mapped.toLocaleString()} of ${total.toLocaleString()} blocks</span><button class="small ${!mapOk&&firstOpen===3?'primary':''}" id="poolBuild">${mapOk?'Redo':'Prepare now'}</button></div><div id="poolJob"></div>`,mapOk)+
+  step(4,'Where should the files go?',`<p class="help" style="margin:0">Use a <b>new, empty folder on the NAS</b>, never the folder that holds the backup. Files keep their original modification times and land in <code>&lt;target&gt;/&lt;share&gt;/&lt;path&gt;</code>.</p>
      <div class="row" style="margin-bottom:6px"><label><input type="radio" name="wzT" value="orig" ${localStorage.getItem('rsMode')==='orig'?'checked':''}> back into the <b>original shares</b> on the NAS (homes → homes, NIKON D3400 → NIKON D3400, …)</label><label><input type="radio" name="wzT" value="remote" ${(localStorage.getItem('rsMode')||'remote')==='remote'?'checked':''}> into one folder on a NAS share</label><label><input type="radio" name="wzT" value="local" ${localStorage.getItem('rsMode')==='local'?'checked':''}> a mounted share / local path</label></div>
-     <div id="wzOrig" class="row" style="margin-bottom:6px"><label>remote <select id="wzRem2"></select></label><span class="help">the shares must already exist on the NAS with the same names (they do: see the list under “share”). For <code>homes</code> the user folders must exist, i.e. recreate the users first.</span></div>
-     <div id="wzRemote" class="row" style="margin-bottom:6px"><label>remote <select id="wzRem"></select></label><label>share <select id="wzShare"><option value="">(loading…)</option></select></label><label>folder <input id="wzFolder" placeholder="restore-2333" value="${esc(localStorage.getItem('wzFolder')||'restore-'+S.ver)}" style="width:160px"></label></div>
+     <div id="wzOrig" class="row" style="margin-bottom:6px"><label>NAS connection <select id="wzRem2"></select></label><span class="help">the shares must already exist on the NAS with the same names. For <code>homes</code> the user folders must exist, so recreate the users first.</span></div>
+     <div id="wzRemote" class="row" style="margin-bottom:6px"><label>NAS connection <select id="wzRem"></select></label><label>share <select id="wzShare"><option value="">(loading…)</option></select></label><label>new folder <input id="wzFolder" placeholder="restore-2333" value="${esc(localStorage.getItem('wzFolder')||'restore-'+S.ver)}" style="width:160px"></label></div>
      <div id="wzLocal" class="row" style="margin-bottom:6px"><label>local path <input id="wzPath" placeholder="/Volumes/GDriveRestore/restore-2333" style="width:380px" value="${esc(localStorage.getItem('wzPath')||'')}"></label></div>
-     <p>Target: <b class="mono" id="wzTarget"></b></p>
-     <p class="help">Speed: data flows Google Drive → this Mac (decompress + verify) → NAS. Drive download is the limit; bucket files are fetched 4 in parallel ahead of the writer and deleted from the Mac after use (cache ≤ 20 GB). Nothing to set up on the NAS beyond the SMB share and the <code>nas:</code> rclone remote you already have.</p>`,false)+
-  step(5,'Preview and start',`<div class="row"><button class="small" id="rsPlan">Preview (count files and size)</button><button class="primary" id="rsGo" ${S.basket.length&&mapOk?'':'disabled'}>Start restore</button><span class="help">${mapOk?'':'enabled once steps 2 and 3 are done · '}interrupted? just start again: files already at the target with the same size are skipped</span></div>
+     <p style="margin:0">Files go to: <b class="mono" id="wzTarget"></b></p>
+     <details class="adv"><summary>How the data flows</summary><p class="help">Google Drive → this Mac (decompress and verify) → NAS. The Drive download speed is the limit; data blocks are fetched 4 in parallel ahead of the writer and deleted from the Mac after use (cache ≤ 20 GB).</p></details>`,false)+
+  step(5,'Check and start',`<div class="row"><button class="small" id="rsPlan">Count files and size</button><button class="${S.basket.length&&mapOk?'primary':''}" id="rsGo" ${S.basket.length&&mapOk?'':'disabled'}>Start restore</button><span class="help">${mapOk?'':'available once steps 2 and 3 are done · '}interrupted? just start again, files already at the target with the same size are skipped</span></div>
      <div id="rsPlanOut" class="muted" style="margin:6px 0"></div><div id="rsProg"></div><div id="rsErrors"></div><div id="rsSaved" style="margin-top:8px"></div>`,false);
   // wiring
   const wl=$('#wzLatest');if(wl)wl.onclick=()=>selectVersion(latest.id);
@@ -346,7 +435,7 @@ async function tabRestore(){const el=$('#tab-restore');
     $('#wzRem').onchange=loadShares;$('#wzShare').onchange=()=>{localStorage.setItem('wzShare',$('#wzShare').value);upd()};if(r.remotes.length)loadShares()}catch(e){$('#wzShare').innerHTML='<option value="">(rclone not available)</option>'}
   upd();
   const showSaved=async()=>{try{const js=await api('/api/jobs/saved');const un=js.filter(j=>j.state!=='done');if(!un.length){$('#rsSaved').innerHTML='';return}
-    $('#rsSaved').innerHTML=`<h4 style="font-size:12px;color:var(--muted);margin:6px 0">Earlier restores you can resume</h4><table>${un.map(j=>`<tr><td>${esc(j.state)}</td><td class="mono">${esc(j.dest)}</td><td class="num">${(j.done_files||0).toLocaleString()} / ${(j.total_files||0).toLocaleString()} files · ${human(j.done_bytes||0)} of ${human(j.total_bytes||0)}${j.errors?` · ${j.errors} errors`:''}</td><td>${new Date((j.updated||j.started)*1000).toLocaleString()}</td><td>${j.state==='running'?`<button class="small jc" data-i="${esc(j.id)}">Pause</button>`:`<button class="small primary jr" data-i="${esc(j.id)}">Resume</button>`}</td></tr>`).join('')}</table>`;
+    $('#rsSaved').innerHTML=`<h4 style="font-size:12.5px;color:var(--muted);margin:6px 0">Earlier restores you can continue</h4><table>${un.map(j=>`<tr><td>${esc(j.state)}</td><td class="mono">${esc(j.dest)}</td><td class="num">${(j.done_files||0).toLocaleString()} / ${(j.total_files||0).toLocaleString()} files · ${human(j.done_bytes||0)} of ${human(j.total_bytes||0)}${j.errors?` · ${j.errors} errors`:''}</td><td>${new Date((j.updated||j.started)*1000).toLocaleString()}</td><td>${j.state==='running'?`<button class="small jc" data-i="${esc(j.id)}">Pause</button>`:`<button class="small primary jr" data-i="${esc(j.id)}">Continue</button>`}</td></tr>`).join('')}</table>`;
     $$('.jr').forEach(b=>b.onclick=async()=>{const j=await post('/api/restore/resume',{id:b.dataset.i});pollJob(j.id,$('#rsProg'),()=>showSaved(),true);showSaved()});
     $$('.jc').forEach(b=>b.onclick=async()=>{await api('/api/job/cancel',{id:b.dataset.i});setTimeout(showSaved,1500)})}catch(e){}};
   showSaved();
@@ -358,7 +447,7 @@ async function tabRestore(){const el=$('#tab-restore');
         if(job.errors&&job.errors.length)$('#rsErrors').innerHTML=`<h4 style="font-size:12px;color:var(--muted)">Errors (${job.errors.length})</h4><div class="tablewrap"><table>${job.errors.slice(0,500).map(e=>`<tr><td class="mono">${esc(e.path)}</td><td>${esc(e.error)}</td></tr>`).join('')}</table></div>`},true)}
     catch(e){alert(e.message)}};}
 function pollJob(id,el,done,rich){const t=async()=>{const job=await api('/api/job',{id});
-  el.innerHTML=`<div class="row"><span class="prog" style="display:inline-block;vertical-align:middle"><i style="width:${Math.round((job.progress||0)*100)}%"></i></span> <span>${esc(job.message||'')}</span>${rich&&job.total_files!=null?`<span class="muted">· ${job.done_files||0}/${job.total_files} files · ${human(job.done_bytes||0)} of ${human(job.total_bytes||0)}${job.errors&&job.errors.length?` · <b style="color:var(--bad)">${job.errors.length} errors</b>`:''}</span>`:''}</div>`;
+  el.innerHTML=progressHtml(job,rich);
   if(job.state==='running')setTimeout(t,800);else{if(job.state==='error')el.innerHTML+=`<p style="color:var(--bad)">${esc(job.error)}</p>`;done&&done(job)}};t();}
 // ---------- drawer
 $('#closeDrawer').onclick=()=>$('#drawer').classList.remove('open');
@@ -369,8 +458,9 @@ async function openDetail(share,ver,id){const d=await api('/api/file',{src:S.src
   <dl><dt>Type</dt><dd>${d.is_dir?'directory':'file'} · mode ${d.mode_oct}${d.is_exec?' (executable)':''}</dd><dt>Size</dt><dd>${d.size.toLocaleString()} B (${human(d.size)})</dd>
   <dt>Modified</dt><dd>${dt(d.mtime)} UTC</dd><dt>Changed</dt><dd>${dt(d.ctime)} UTC</dd><dt>Inode</dt><dd>${d.inode??''} · links ${d.nlink??''}</dd>
   <dt>Status</dt><dd>${esc(d.status)} in v${ver}</dd><dt>Storage</dt><dd class="mono">${d.off<0?`file_pool/${-d.off}.file`:`virtual_file offset ${d.off}`} · dedup ${d.dedup}</dd></dl>
-  <div class="row"><button class="small" id="dAdd">+ restore basket</button>${!d.is_dir?`<button class="small" id="dExtract">Inspect stored content</button><a class="small" href="/api/download?src=${encodeURIComponent(S.src)}&share=${encodeURIComponent(share)}&ver=${ver}&id=${d.id}" download><button class="small">Download file</button></a>`:''}</div>
-  <h4 style="margin:12px 0 4px;font-size:12px;color:var(--muted)">Presence in loaded versions</h4>
+  <div class="row"><button class="small" id="dAdd">+ Restore this</button>${!d.is_dir?`<a class="small" href="/api/download?src=${encodeURIComponent(S.src)}&share=${encodeURIComponent(share)}&ver=${ver}&id=${d.id}" download><button class="small">Download file</button></a>`:''}</div>
+  ${!d.is_dir?`<details class="adv"><summary>Advanced</summary><button class="small" id="dExtract">Inspect stored bytes</button></details>`:''}
+  <h4 style="margin:14px 0 4px;font-size:12.5px;color:var(--muted)">This file in the loaded runs</h4>
   <table>${h.map(x=>`<tr><td>v${x.ver} ${dd(x.ts)}</td><td>${x.present?`${esc(x.status)} · ${human(x.size)} · ${dt(x.mtime)}`:'<span class="muted">absent</span>'}</td></tr>`).join('')}</table><div id="dExtractOut"></div>`;
   $('#dAdd').onclick=()=>addBasket({...d,share});const ex=$('#dExtract');if(ex)ex.onclick=async()=>{ex.disabled=true;try{const r=await api('/api/extract',{src:S.src,share,ver,id});$('#dExtractOut').innerHTML=`<h4 style="font-size:12px;color:var(--muted)">Stored object ${esc(r.pool_file)} · ${r.stored_bytes} B (declared ${r.declared_size} B) · sha256 of stored bytes <span class="mono">${r.sha256_stored}</span></h4><pre class="mono" style="white-space:pre-wrap;max-height:300px;overflow:auto;background:var(--chip);padding:8px;border-radius:6px">${esc(r.head_text)}</pre>`}catch(e){$('#dExtractOut').innerHTML=`<p class="muted">${esc(e.message)}</p>`}};
   $('#drawer').classList.add('open');}
