@@ -4,7 +4,7 @@ rclone ``--stats`` samples follow fs/accounting/stats.go String() (one-line
 form ``size / size, pct, speed, ETA`` with optional ``xfr#`` / ``chk#``, and
 the multi-line Checks / Transferred lines). pct is ``-`` when the total is 0.
 """
-import tempfile, time, unittest
+import subprocess, tempfile, time, unittest
 from pathlib import Path
 from unittest import mock
 
@@ -368,16 +368,28 @@ class ListdirCacheTests(unittest.TestCase):
         self.src = hbk_explorer.Source("t4l", "t4l", str(local))
         cached = self.src.cache_dir / "Config/@Share/s"; cached.mkdir(parents=True)
         (cached / "2.db.3").write_bytes(b"in-cache!")
-        (cached / "1.db.2").write_bytes(b"cache-copy-ignored")           # source copy wins when both exist
+        (cached / "1.db.2").write_bytes(b"cache-copy-wins")              # the app cache is checked first when both exist
     def tearDown(self):
         hbk_explorer.INDEX_DIR = self.old; hbk_explorer.CACHE_DIR = self.old_cache; self.tmp.cleanup()
+    def test_ensure_refreshes_the_listing(self):
+        """A download invalidates the cached listing of its directory, so the new file shows up as local."""
+        self.src.remotes = ["fake:remote"]
+        self.assertNotIn("3.db.4", self.src.listdir("Config/@Share/s"))
+        def fake_run(cmd, capture_output=True, text=True):
+            Path(cmd[3]).write_bytes(b"downloaded")                       # rclone copyto <remote/rel> <tmp>
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+        with mock.patch.object(hbk_explorer.subprocess, "run", side_effect=fake_run):
+            self.assertEqual(self.src.ensure("Config/@Share/s/3.db.4").read_bytes(), b"downloaded")
+        self.src.remotes = []
+        self.assertTrue(self.src.listdir("Config/@Share/s")["3.db.4"]["local"])
+
     def test_cache_files_are_local(self):
         ents = self.src.listdir("Config/@Share/s")
         self.assertEqual(sorted(ents), ["1.db.2", "2.db.3"])
         self.assertTrue(ents["2.db.3"]["local"]); self.assertEqual(ents["2.db.3"]["size"], 9)
         self.assertTrue(ents["1.db.2"]["local"])
         self.assertEqual(self.src.ensure("Config/@Share/s/2.db.3").read_bytes(), b"in-cache!")
-        self.assertEqual(self.src.ensure("Config/@Share/s/1.db.2").read_bytes(), b"cache-copy-ignored")
+        self.assertEqual(self.src.ensure("Config/@Share/s/1.db.2").read_bytes(), b"cache-copy-wins")
 
 
 class BuildPoolWiringTests(unittest.TestCase):
