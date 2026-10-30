@@ -33,22 +33,25 @@ chmod 755 rclone
 xattr -c rclone 2>/dev/null || true
 
 APP_NAME="Hyper Backup Desktop"
+ROOT=$(pwd)
 APP="dist/${APP_NAME}.app"
 rm -rf "$APP" build/work "build/${APP_NAME}.spec"
-pyinstaller --noconfirm --clean --windowed \
+# Paths are absolute: --specpath makes PyInstaller resolve relative --add-data
+# and --add-binary sources from the spec directory, not the repo root.
+pyinstaller --noconfirm --windowed \
   --name "$APP_NAME" \
   --osx-bundle-identifier nl.vanharen.hyperbackupdesktop \
-  --specpath build \
-  --distpath dist \
-  --workpath build/work \
-  --add-data "static:static" \
-  --add-binary "rclone:." \
+  --specpath "$ROOT/build" \
+  --distpath "$ROOT/dist" \
+  --workpath "$ROOT/build/work" \
+  --add-data "$ROOT/static:static" \
+  --add-binary "$ROOT/rclone:." \
   --hidden-import hbk_pool \
   --hidden-import hbk_poolmap \
   --hidden-import lz4 \
   --hidden-import lz4.block \
   --collect-submodules lz4 \
-  hbk_explorer.py
+  "$ROOT/hbk_explorer.py"
 
 # PyInstaller chmod's BINARY entries, then cross-links them. Set the bit on
 # every real copy in case a later copy dropped it.
