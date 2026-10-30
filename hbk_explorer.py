@@ -149,6 +149,29 @@ def file_target(f, items, dest):
     if not d: return dest, f"{f['share']}/{f['path']}"
     return d.rstrip("/"), f["path"]
 
+def restore_target_error(src, items, dest, create):
+    """Why a restore into these items/dest must not start, or None. The source stays read-only: every mapped root and the
+    common dest are checked against it. Remote roots are created (rclone mkdir); a local root is created when the folder
+    above it exists, or, on a resume (create=False), must already exist (the share may not be mounted any more)."""
+    if not items: return "nothing selected"
+    unmapped = sorted({it["share"] for it in items if not it.get("dest")})
+    if unmapped and not dest: return "no destination for " + ", ".join(unmapped)
+    bad = src.contains_dest(dest, unmapped) if unmapped else ""
+    for it in items:
+        if bad: break
+        if it.get("dest") and src.contains_root(it["dest"]): bad = it["dest"]
+    if bad: return f"refusing to write {bad}: it is the backup itself, lies inside it, or the backup lies inside it (the source is read-only)"
+    for root in restore_roots(items, dest):
+        if is_remote_path(root):
+            if not create: continue                                   # listed (and refused on failure) when the restore starts
+            r = subprocess.run([RCLONE, "mkdir", root], capture_output=True, text=True)
+            if r.returncode != 0: return f"cannot use remote destination {root}: {r.stderr.strip()[-200:]}"
+        elif not os.path.isdir(root):
+            if create and os.path.isdir(os.path.dirname(root)): os.makedirs(root, exist_ok=True)      # a new folder next to existing ones
+            elif create: return f"the folder above {root} does not exist (is the share mounted?)"
+            else: return f"destination folder {root} is not there any more (is the share mounted?)"
+    return None
+
 def restore_roots(items, dest):
     """The distinct roots a restore writes into, in item order; the common dest only when an item has no 'dest'."""
     roots = []
@@ -734,8 +757,9 @@ class Backup:
         for idx, it in enumerate(items):
             c = self.conn(it["share"], int(it["ver"]))
             if it.get("is_dir"):
-                q = "select * from files where is_dir=0 and (mode & 61440)=32768 and (path like ? or ? = '') order by path"
-                rows = c.execute(q, (it["path"].rstrip("/") + "/%", it["path"])).fetchall()
+                prefix = it["path"].rstrip("/") + "/"          # substr is exact and case-sensitive; LIKE would match Foto_2024 -> FotoX2024, Photos -> photos
+                q = "select * from files where is_dir=0 and (mode & 61440)=32768 and (? = '' or substr(path, 1, ?) = ?) order by path"
+                rows = c.execute(q, (it["path"], len(prefix), prefix)).fetchall()
             else:
                 rows = c.execute("select * from files where path = ? and is_dir=0", (it["path"],)).fetchall()
             for r in rows:
@@ -1119,24 +1143,13 @@ class H(BaseHTTPRequestHandler):
                     if d: it["dest"] = d
                     else: it.pop("dest", None)
                     items.append(it)
-                if not items: return self._json({"error": "nothing selected"}, 400)
-                unmapped = sorted({it["share"] for it in items if not it.get("dest")})
-                if unmapped and not dest: return self._json({"error": "no destination for " + ", ".join(unmapped)}, 400)
-                bad = b.src.contains_dest(dest, unmapped) if unmapped else ""
-                for it in items:
-                    if bad: break
-                    if it.get("dest") and b.src.contains_root(it["dest"]): bad = it["dest"]
-                if bad: return self._json({"error": f"refusing to write {bad}: it is the backup itself, lies inside it, or the backup lies inside it (the source is read-only)"}, 400)
-                for root in restore_roots(items, dest):
-                    if is_remote_path(root):
-                        r = subprocess.run([RCLONE, "mkdir", root], capture_output=True, text=True)
-                        if r.returncode != 0: return self._json({"error": f"cannot use remote destination {root}: {r.stderr.strip()[-200:]}"}, 400)
-                    elif not os.path.isdir(root):
-                        if os.path.isdir(os.path.dirname(root)): os.makedirs(root, exist_ok=True)      # a new folder next to existing ones
-                        else: return self._json({"error": f"the folder above {root} does not exist (is the share mounted?)"}, 400)
+                err = restore_target_error(b.src, items, dest, create=True)
+                if err: return self._json({"error": err}, 400)
                 return self._json(start_job(lambda job: b.restore(items, dest, job, body.get("skip_meta", True)), "restore"))
             if u.path == "/api/restore/resume":
                 d = json.loads((JOBS_DIR / f"{body['id']}.json").read_text()); b = backup_for(d["src"])
+                err = restore_target_error(b.src, d["items"], d.get("dest") or "", create=False)     # source check again, roots still there
+                if err: return self._json({"error": err}, 400)                                       # the job file stays, so it can be resumed later
                 (JOBS_DIR / f"{body['id']}.json").unlink()
                 job = start_job(lambda job: b.restore(d["items"], d["dest"], job, d.get("skip_meta", True), start_at=d.get("next_index", 0)), "restore (resumed)")
                 return self._json(job)

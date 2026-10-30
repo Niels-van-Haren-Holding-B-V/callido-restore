@@ -4,7 +4,7 @@ Each basket item may carry its own ``dest``; its contents are written there dire
 between). Items without ``dest`` go under the common ``dest`` as ``<share>/<path>``. The mapping is persisted in the job
 file, so pause/resume keeps it. ``/api/restore`` refuses a mapped target inside the backup and creates new local roots.
 """
-import json, os, tempfile, threading, time, unittest
+import json, os, shutil, tempfile, threading, time, unittest
 from http.server import ThreadingHTTPServer
 from urllib.request import Request, urlopen
 
@@ -57,6 +57,15 @@ class FakeBackup(hbk_explorer.Backup):
     pool = None                      # shadows the property; the real one needs a pool map
     def __init__(self, src, files):
         self.src = src; self.pool = FakePool(); self._files = files
+    def conn(self, share, ver):
+        """An in-memory 'files' table with the columns restore_plan() reads, filled from self._files for that share."""
+        import sqlite3
+        c = sqlite3.connect(":memory:"); c.row_factory = sqlite3.Row
+        c.execute("create table files(path text, name text, dir text, size integer, mode integer, is_dir integer)")
+        for f in self._files:
+            if f["share"] != share: continue
+            c.execute("insert into files values(?,?,?,?,?,?)", (f["path"], f["path"].rsplit("/", 1)[-1], f["path"].rsplit("/", 1)[0] if "/" in f["path"] else "", f["size"], 0o100644, 0))
+        return c
     def restore_plan(self, items, skip_meta=True):
         out = []
         for idx, it in enumerate(items):
@@ -174,6 +183,34 @@ class RestoreApiTests(_Fixture):
         self.assertTrue(os.path.isfile(os.path.join(self.dB, "docs", "z.txt")))
         saved = self.get("/api/jobs/saved")[0]
         self.assertEqual(saved["roots"], [new, self.dB])
+
+    def test_restore_plan_prefix_is_exact_and_case_sensitive(self):        # H17: LIKE matched Foto_2024 -> FotoX2024, Photos -> photos, 100% -> 100x
+        files = [{"share": "A", "path": p, "size": 1, "mtime": 0, "off": -1} for p in ("Foto_2024/a.jpg", "FotoX2024/b.jpg", "Photos/c.jpg", "photos/d.jpg", "100%/e.txt", "100x/f.txt", "Photos.old/g.jpg")]
+        b = FakeBackup(self.src, files); plan = lambda folder: hbk_explorer.Backup.restore_plan(b, [{"share": "A", "ver": 1, "path": folder, "is_dir": 1}])
+        self.assertEqual([f["path"] for f in plan("Foto_2024")], ["Foto_2024/a.jpg"])
+        self.assertEqual([f["path"] for f in plan("Photos")], ["Photos/c.jpg"])
+        self.assertEqual([f["path"] for f in plan("photos")], ["photos/d.jpg"])
+        self.assertEqual([f["path"] for f in plan("100%")], ["100%/e.txt"])
+        self.assertEqual(len(plan("")), 7)
+
+    def test_resume_keeps_the_job_file_when_a_root_is_missing_or_unsafe(self):
+        job = self.job("keep"); job["cancel"] = True
+        self.b.restore(self.items, "", job)                                    # pauses at once and writes the job file
+        jf = hbk_explorer.JOBS_DIR / "jkee.json"; self.assertTrue(jf.is_file())
+        shutil.rmtree(self.dB)                                                 # the share is "unmounted"
+        code, out = self.post("/api/restore/resume", {"id": "jkee"})
+        self.assertEqual(code, 400); self.assertIn("not there any more", out["error"]); self.assertTrue(jf.is_file())
+        d = json.loads(jf.read_text()); d["items"][1]["dest"] = os.path.join(self.src.local, "Pool"); jf.write_text(json.dumps(d))
+        code, out = self.post("/api/restore/resume", {"id": "jkee"})
+        self.assertEqual(code, 400); self.assertIn("Pool", out["error"]); self.assertTrue(jf.is_file())
+        os.makedirs(self.dB); d["items"][1]["dest"] = self.dB; jf.write_text(json.dumps(d))
+        code, j = self.post("/api/restore/resume", {"id": "jkee"})
+        self.assertEqual(code, 200); self.assertFalse(jf.is_file())            # consumed only once the resume really starts
+        for _ in range(100):
+            x = self.get(f"/api/job?id={j['id']}")
+            if x["state"] != "running": break
+            time.sleep(0.05)
+        self.assertEqual(x["state"], "done", x)
 
     def test_plan_mappings_preview(self):
         out = self.get("/api/restore_plan?src=t8&dest=&items=" + json.dumps(self.items).replace(" ", "%20").replace('"', "%22"))
