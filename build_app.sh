@@ -181,6 +181,8 @@ build_bundle() {
     --workpath "$ROOT/build/work" \
     --add-data "$ROOT/static:static" \
     --add-binary "$ROOT/rclone:." \
+    --icon "$ROOT/assets/AppIcon.icns" \
+    --add-data "$ROOT/assets/logo.png:assets" \
     --add-data "$ROOT/build/licenses/rclone-COPYING:Licenses" \
     --add-data "$ROOT/build/licenses/THIRD-PARTY-NOTICES.txt:Licenses" \
     --hidden-import hbk_pool \
@@ -193,6 +195,7 @@ build_bundle() {
     --collect-submodules webview \
     "$ROOT/hbk_explorer.py"
   bundle_file "static/index.html" || die "static/index.html missing from the app bundle"
+  [ -f "$APP/Contents/Resources/AppIcon.icns" ] || die "AppIcon.icns missing from the app bundle"
   bundle_file "Licenses/rclone-COPYING" || die "rclone license missing from the app bundle"
   bundle_file "Licenses/THIRD-PARTY-NOTICES.txt" || die "third-party notice missing from the app bundle"
 }
@@ -228,21 +231,29 @@ sign_bundle() {
 }
 
 make_dmg() {
-  local stage="$ROOT/dist/dmg" image="$ROOT/dist/HyperBackupDesktop-${ARCH}.dmg" try
+  local stage="$ROOT/dist/dmg" image="$ROOT/dist/HyperBackupDesktop-${ARCH}.dmg" rw="$ROOT/dist/HyperBackupDesktop-${ARCH}-rw.dmg" mnt try
   rm -rf "$stage"
   mkdir -p "$stage"
   ditto "$APP" "$stage/${APP_NAME}.app"
   cp "$ROOT/build/licenses/rclone-COPYING" "$stage/rclone-COPYING"
   cp "$ROOT/build/licenses/THIRD-PARTY-NOTICES.txt" "$stage/THIRD-PARTY-NOTICES.txt"
-  rm -f "$image"
+  cp "$ROOT/assets/AppIcon.icns" "$stage/.VolumeIcon.icns"
+  rm -f "$image" "$rw"
   for try in 1 2 3; do
-    if hdiutil create -volname "Hyper Backup Desktop" -srcfolder "$stage" -ov -format UDZO "$image"; then
-      echo "built dist/HyperBackupDesktop-${ARCH}.dmg"
-      return
-    fi
+    if hdiutil create -volname "Hyper Backup Desktop" -srcfolder "$stage" -ov -format UDRW "$rw" >/dev/null; then break; fi
+    [ "$try" = 3 ] && die "hdiutil create failed"
     sleep 2
   done
-  die "hdiutil create failed"
+  # The custom-icon flag does not survive -srcfolder: set it on the mounted volume, then compress.
+  mnt=$(mktemp -d "${TMPDIR:-/tmp}/hbk-dmg-rw.XXXXXX")
+  if hdiutil attach -nobrowse -readwrite -noverify -mountpoint "$mnt" "$rw" >/dev/null; then
+    if command -v SetFile >/dev/null 2>&1; then SetFile -a C "$mnt"; SetFile -a V "$mnt/.VolumeIcon.icns"; fi
+    hdiutil detach "$mnt" >/dev/null || hdiutil detach -force "$mnt" >/dev/null || true
+  fi
+  rmdir "$mnt" 2>/dev/null || true
+  hdiutil convert -quiet "$rw" -format UDZO -o "$image" || die "hdiutil convert failed"
+  rm -f "$rw"
+  echo "built dist/HyperBackupDesktop-${ARCH}.dmg"
 }
 
 choose_arch
