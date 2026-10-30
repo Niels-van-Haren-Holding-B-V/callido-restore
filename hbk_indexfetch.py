@@ -1,11 +1,19 @@
 """Resumable download of Hyper Backup bucket index files (Pool/0/<d>/*.index.*).
 
-Already-downloaded index files are never deleted or overwritten. A file that
-exists and whose size matches the pool listing is skipped. rclone is invoked
-with ``--ignore-existing`` so a file that is present (even at a different
-size) is left untouched. Closing the app and running the pool-map build again
-continues from the files that are still missing; the files on disk are the
-checkpoint (nothing new is written under ``index/<src>/pool/``).
+Reads may come from the app cache or from a configured source folder (the backup
+itself, or a mirror that already holds an earlier download). Writes go only to
+the app cache. rclone is ``copy`` from the remote to that cache, with
+``--ignore-existing``. Nothing here deletes, renames, or uploads a source file.
+
+A cache file whose size does not match the listing is renamed inside the cache
+to ``<name>.mismatch`` (never overwritten, never deleted) and the name is
+fetched again. A wrong-size file that lives in a source folder is left as it is;
+it does not count as complete. Mapping must not start while a required index
+is still missing or the wrong size.
+
+Closing the app and running the pool-map build again continues from whatever
+correct files are already readable. Nothing new is written under
+``index/<src>/pool/``.
 """
 import re, stat, subprocess, threading, time
 from pathlib import Path
@@ -89,10 +97,12 @@ def describe_dir(i, n, d, stats, have, total, note=""):
 
 
 def index_copy_cmd(rclone, remote, directory, dest):
-    """One rclone copy for Pool/0/<directory>/*.index.*.
+    """Copy Pool/0/<directory>/*.index.* from a remote into the local app cache.
 
-    ``copy`` (not ``sync``) plus ``--ignore-existing`` so files already on disk
-    are not replaced. No delete flag is set.
+    ``dest`` is a directory under the app cache, never a source folder and never
+    the remote. ``copy`` (not ``sync`` or ``move``) plus ``--ignore-existing``
+    so a file already in the cache is not replaced. No delete flag is set.
+    The remote is only read.
     """
     return [
         rclone, "copy", f"{remote}/Pool/0/{directory}", str(dest),
@@ -121,8 +131,45 @@ def indexes_by_dir(listing):
     return out
 
 
+def _bucket_dir(root, directory):
+    return Path(root) / "Pool" / "0" / str(int(directory))
+
+
+def _inside(path, root):
+    try:
+        Path(path).resolve().relative_to(Path(root).resolve())
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+def park_cache_mismatch(directory, name):
+    """Rename a wrong-size index inside one cache directory. Never overwrites or deletes.
+
+    Returns the new path, or None if the file could not be moved aside. The bytes stay
+    in the cache either way. This must not be pointed at a source folder.
+    """
+    src = Path(directory) / name
+    try:
+        if not src.is_file():
+            return None
+    except OSError:
+        return None
+    for n in range(0, 1000):
+        suffix = ".mismatch" if n == 0 else f".mismatch.{n}"
+        dest = src.with_name(name + suffix)
+        if dest.exists():
+            continue
+        try:
+            src.rename(dest)
+            return dest
+        except OSError:
+            return None
+    return None
+
+
 def index_file_state(dest, name, size):
-    """'complete', 'mismatch', or 'missing'. Existing files are never classified in a way that deletes them."""
+    """'complete', 'mismatch', or 'missing'. Does not create, rename, or delete the file."""
     p = Path(dest) / name
     try:
         st = p.stat()
@@ -177,16 +224,40 @@ def run_rclone(cmd, on_line, should_stop):
     return proc.returncode if proc.returncode is not None else 1
 
 
-def fetch_bucket_indexes(local_root, remotes, listing, job, run=None, attempts=2, pause=time.sleep,
-                         progress_base=0.4, progress_span=0.3, rclone=None):
-    """Download missing bucket index files. Never deletes or overwrites a file that is already present.
+def _name_states(cache_root, readonly_roots, directory, name, size):
+    """Cache state, and whether any read-only root already has this name at the listing size."""
+    cache_state = index_file_state(_bucket_dir(cache_root, directory), name, size)
+    source_ok = False
+    for root in readonly_roots or ():
+        if index_file_state(_bucket_dir(root, directory), name, size) == "complete":
+            source_ok = True
+            break
+    return cache_state, source_ok
 
-    ``run(cmd, on_line, should_stop) -> int`` defaults to rclone. Return -1 to report a cancel.
-    A non-zero exit is retried ``attempts`` times per remote; other remotes are tried when files
-    are still missing. Directories whose index files are all present (any size) are not fetched.
-    Size mismatches are counted and left on disk.
+
+def _refuse_source_write(dest, readonly_roots):
+    for root in readonly_roots or ():
+        if _inside(dest, root):
+            raise RuntimeError(f"refusing to write bucket indexes into source folder {root}")
+
+
+def fetch_bucket_indexes(cache_root, remotes, listing, job, run=None, attempts=2, pause=time.sleep,
+                         progress_base=0.4, progress_span=0.3, rclone=None, readonly_roots=()):
+    """Download missing bucket index files into ``cache_root`` only.
+
+    A file counts as present when the cache or any read-only root has it at the
+    listing size. Those roots (the backup, an extra folder, or a user-made mirror
+    that already holds a download) are never written. A wrong-size file in the
+    cache is renamed to ``*.mismatch`` inside the cache and fetched again. A
+    wrong-size file in a read-only root is left in place and does not count.
+
+    ``run(cmd, on_line, should_stop) -> int`` defaults to rclone. Return -1 to
+    report a cancel. A non-zero exit is retried ``attempts`` times per remote.
+    The returned dict has ``error`` set when anything required is still missing
+    or the wrong size, so the caller can stop before mapping.
     """
-    local_root = Path(local_root)
+    cache_root = Path(cache_root)
+    readonly_roots = [Path(r) for r in (readonly_roots or ())]
     if run is None:
         run = run_rclone
     if rclone is None:
@@ -199,54 +270,66 @@ def fetch_bucket_indexes(local_root, remotes, listing, job, run=None, attempts=2
     mismatch_count = 0
     failed = []
 
-    def counts(dest, expected):
+    def tally(directory, expected, park=False):
+        """Return (complete_count, cache_mismatch_count, missing_count).
+
+        ``park`` renames a wrong-size cache file aside. Read-only roots are never changed.
+        A correct file in a read-only root counts as complete even when the cache has no copy.
+        """
         comp = mis = miss = 0
         for name, size in expected.items():
-            state = index_file_state(dest, name, size)
-            if state == "complete":
+            cache_state, source_ok = _name_states(cache_root, readonly_roots, directory, name, size)
+            if park and cache_state == "mismatch":
+                park_cache_mismatch(_bucket_dir(cache_root, directory), name)
+                cache_state = index_file_state(_bucket_dir(cache_root, directory), name, size)
+            if cache_state == "complete" or source_ok:
                 comp += 1
-            elif state == "mismatch":
+            elif cache_state == "mismatch":
                 mis += 1
             else:
                 miss += 1
         return comp, mis, miss
 
     def satisfied():
-        n_ok = 0
+        ok = 0
         for d, expected in by_dir.items():
-            dest = local_root / "Pool" / "0" / str(d)
-            _, _, miss = counts(dest, expected)
-            if miss == 0:
-                n_ok += 1
-        return n_ok
+            comp, mis, miss = tally(d, expected, park=False)
+            if mis == 0 and miss == 0 and comp == len(expected):
+                ok += 1
+        return ok
 
     def stopped():
         done = satisfied()
-        job["message"] = f"stopped - {done}/{n} index directories have no missing files; downloaded index files were kept. Run Build again to continue."
+        job["message"] = (f"stopped - {done}/{n} index directories are complete; "
+                          "downloaded index files were kept. Run Build again to continue.")
         return {"stopped": True, "directories": n, "directories_complete": done, "skipped": skipped,
                 "failed": list(failed), "mismatch_count": mismatch_count}
 
     if job.get("cancel"):
         return stopped()
-    if not remotes or not dirs:
-        return {"stopped": False, "directories": n, "directories_complete": n, "skipped": n,
+    if not dirs:
+        return {"stopped": False, "directories": 0, "directories_complete": 0, "skipped": 0,
                 "failed": [], "mismatch_count": 0}
 
     for i, d in enumerate(dirs):
         if job.get("cancel"):
             return stopped()
         expected = by_dir[d]
-        dest = local_root / "Pool" / "0" / str(d)
-        dest.mkdir(parents=True, exist_ok=True)
-        comp, mis, miss = counts(dest, expected)
+        comp, mis, miss = tally(d, expected, park=True)
         total = len(expected)
-        if miss == 0:
+        if mis == 0 and miss == 0:
             skipped += 1
-            mismatch_count += mis
-            note = "already complete" if mis == 0 else f"{mis} size mismatch(es) left untouched"
-            job["message"] = describe_dir(i, n, d, None, comp, total, note)
+            job["message"] = describe_dir(i, n, d, None, comp, total, "already complete")
             job["progress"] = _progress(progress_base, progress_span, i, n, 1.0)
             continue
+        if not remotes:
+            failed.append(d)
+            mismatch_count += mis
+            job["message"] = describe_dir(i, n, d, None, comp, total, f"{miss + mis} not usable")
+            continue
+        dest = _bucket_dir(cache_root, d)
+        _refuse_source_write(dest, readonly_roots)
+        dest.mkdir(parents=True, exist_ok=True)
         got = False
         for remote in remotes:
             if job.get("cancel"):
@@ -255,7 +338,7 @@ def fetch_bucket_indexes(local_root, remotes, listing, job, run=None, attempts=2
                 if job.get("cancel"):
                     return stopped()
                 latest = {}
-                def on_line(line, _i=i, _d=d, _total=total, _dest=dest, _expected=expected):
+                def on_line(line, _i=i, _d=d, _total=total, _expected=expected):
                     st = parse_rclone_stats(line)
                     if not st:
                         return
@@ -263,35 +346,37 @@ def fetch_bucket_indexes(local_root, remotes, listing, job, run=None, attempts=2
                     if full:
                         latest.clear()
                     latest.update(st)
-                    have, _, _ = counts(_dest, _expected)
+                    have, _, _ = tally(_d, _expected, park=False)
                     job["message"] = describe_dir(_i, n, _d, latest, have, _total)
                     job["progress"] = _progress(progress_base, progress_span, _i, n, stats_fraction(latest, have, _total))
                 rc = run(index_copy_cmd(rclone, remote, d, dest), on_line, lambda: bool(job.get("cancel")))
                 if rc == -1 or job.get("cancel"):
                     return stopped()
-                comp, mis, miss = counts(dest, expected)
-                if rc == 0 and miss == 0:
+                comp, mis, miss = tally(d, expected, park=False)
+                if rc == 0 and miss == 0 and mis == 0:
                     got = True
                     break
-                if rc == 0 and miss:
-                    break  # this remote finished but files are still missing; try the next one
+                if rc == 0 and (miss or mis):
+                    break  # this remote finished but files are still unusable; try the next one
                 if attempt + 1 < attempts:
                     job["message"] = describe_dir(i, n, d, None, comp, total, f"failed, retry {attempt + 1}")
                     pause(3)
-            if got or counts(dest, expected)[2] == 0:
+            if got or tally(d, expected, park=False)[1:] == (0, 0):
                 got = True
                 break
-        comp, mis, miss = counts(dest, expected)
+        comp, mis, miss = tally(d, expected, park=False)
         mismatch_count += mis
-        if miss == 0:
-            job["message"] = describe_dir(i, n, d, None, comp, total, "done" if mis == 0 else f"{mis} size mismatch(es) left untouched")
+        if mis == 0 and miss == 0:
+            job["message"] = describe_dir(i, n, d, None, comp, total, "done")
             job["progress"] = _progress(progress_base, progress_span, i, n, 1.0)
         else:
             failed.append(d)
-            job["message"] = describe_dir(i, n, d, None, comp, total, f"{miss} still missing")
+            job["message"] = describe_dir(i, n, d, None, comp, total, f"{miss + mis} still missing or wrong size")
     if failed:
-        names = ", ".join(f"Pool/0/{d}" for d in failed)
-        err = f"bucket index fetch failed for {names}; already-downloaded index files were left in place. Run Build again to continue."
+        names = ", ".join(f"Pool/0/{d}" for d in failed[:8])
+        extra = f" (+{len(failed) - 8} more)" if len(failed) > 8 else ""
+        err = (f"bucket index files are missing or the wrong size ({names}{extra}); mapping was not started. "
+               "Source folders were not modified. A wrong-size file in the app cache was renamed to *.mismatch there.")
         job["message"] = err
         return {"stopped": False, "directories": n, "directories_complete": satisfied(), "skipped": skipped,
                 "failed": failed, "mismatch_count": mismatch_count, "error": err}

@@ -253,16 +253,18 @@ class PoolStatusTests(unittest.TestCase):
             (root / "Pool" / "0" / "0").mkdir(parents=True)
             pool.mkdir()
             (root / "Pool" / "0" / "0" / "0.index.1").write_bytes(b"x" * 10)
+            (root / "Pool" / "0" / "0" / "2.index.1").write_bytes(b"bad")  # wrong size: not counted
             listing = [
                 {"b": 0, "t": "index", "rev": 1, "name": "0.index.1", "size": 10},
                 {"b": 1, "t": "index", "rev": 1, "name": "1.index.1", "size": 10},
+                {"b": 2, "t": "index", "rev": 1, "name": "2.index.1", "size": 10},
                 {"b": 0, "t": "bucket", "rev": 1, "name": "0.bucket.1", "size": 1},
             ]
             (pool / "listing.json").write_text(__import__("json").dumps(listing))
             st = hbk_pool.PoolReader(_LocalSource(root), str(pool)).status()
-        self.assertEqual(st["index_files"], 2)
+        self.assertEqual(st["index_files"], 3)
         self.assertEqual(st["indexes_local"], 1)
-        self.assertEqual(st["total_buckets"], 2)
+        self.assertEqual(st["total_buckets"], 3)
         self.assertFalse(st["map"])
 
 

@@ -19,12 +19,7 @@ Run `./build_app.sh` on an Apple-silicon Mac; fix PyInstaller issues (hidden imp
 Acceptance: the .app starts, opens the browser, "About" shows the bundled rclone version, Quit works. Tag `v0.1.0` to publish via CI.
 
 ## T4 — Robustness of the pool map step inside the app
-**Done in code.** `Backup.build_pool` still fetches indexes per directory with one rclone call each. The call uses `--ignore-existing`
-and `--stats=1s --stats-one-line`. Directories whose index files are already present are skipped, including after an app restart
-(the files under the source's `Pool/0/<d>/` are the checkpoint; `index/<src>/pool/` is unchanged). A size mismatch is left
-untouched and counted. The restore wizard shows "Continue pool map" once any index file is local, reports per-directory progress,
-and has Stop, which terminates the rclone copy and does not start mapping. A failed directory is retried, then the job errors
-before mapping so a later Build continues.
+**Done in code.** `Backup.build_pool` fetches indexes per directory with one rclone `copy` (remote → `~/.hbk-explorer/cache/<source>/` only; `--ignore-existing`, `--stats=1s --stats-one-line`). Files already at the listing size in that cache or in a configured source/mirror folder are reused and not refetched; those folders are not written. `index/<src>/pool/` is unchanged. A wrong-size cache file is renamed to `*.mismatch` inside the cache; a wrong-size source file is left in place and does not count. Either way the job errors before mapping until a correct copy exists. The restore wizard shows "Continue pool map" once any correct index file is readable, reports per-directory progress, and has Stop, which terminates the rclone copy and does not start mapping.
 Acceptance still to confirm on the real download: quit mid-fetch, reopen, Continue, and check that finished index files are
 unchanged and not downloaded again. Also confirm the installed rclone's `--stats` lines match the samples in
 `tests/test_indexfetch.py` (parsed from rclone's current `stats.go` one-line form).
@@ -39,7 +34,7 @@ until T1–T3 are done.
 (including a slice boundary). `tests/test_indexfetch.py` covers resume, stop, and "do not overwrite". CI is
 `.github/workflows/test.yml` (ubuntu-latest, `python -m unittest`, on push and pull_request). Assumptions where the format
 note is ambiguous are in the test module docstring and in `docs/HANDOVER.md`.
-Flag heuristics still produce noise on Synology Drive files (mode 711). Not done: whitelist by share, per-extension lists in
+Flag heuristics still produce noise on Synology Drive files (mode 711). Not in this PR and still open: whitelist by share, per-extension lists in
 the settings UI.
 
 ## Do not

@@ -51,6 +51,8 @@ class CommandTests(unittest.TestCase):
         cmd = F.index_copy_cmd("rclone", "remote:hbk", 3, Path("/tmp/pool/0/3"))
         self.assertEqual(cmd[1], "copy")
         self.assertNotIn("sync", cmd)
+        self.assertNotIn("move", cmd)
+        self.assertNotIn("moveto", cmd)
         self.assertIn("--ignore-existing", cmd)
         self.assertIn("--include", cmd)
         self.assertIn("*.index.*", cmd)
@@ -66,6 +68,20 @@ class CommandTests(unittest.TestCase):
 def _listing(*rows):
     """rows: (bucket, name, size)."""
     return [{"b": b, "t": "index", "rev": 1, "name": name, "size": size} for b, name, size in rows]
+
+
+def _manifest(root):
+    """Path, size, mtime, and bytes of every file under root. Used to prove a source folder is untouched."""
+    root = Path(root)
+    out = []
+    if not root.exists():
+        return out
+    for p in sorted(root.rglob("*")):
+        if not p.is_file():
+            continue
+        st = p.stat()
+        out.append((str(p.relative_to(root)), st.st_size, st.st_mtime_ns, p.read_bytes()))
+    return out
 
 
 class FetchTests(unittest.TestCase):
@@ -128,18 +144,39 @@ class FetchTests(unittest.TestCase):
         self.assertIn("already complete", job2["message"])
 
     def test_size_mismatch_is_not_overwritten(self):
-        d0 = self.root / "Pool" / "0" / "0"
-        d0.mkdir(parents=True)
-        (d0 / "0.index.1").write_bytes(b"short")
-        before = (d0 / "0.index.1").read_bytes()
+        # The short file lives in the app cache. A failed refetch must not overwrite it,
+        # and must fail the fetch so mapping does not run. The source folder is not touched.
+        cache = self.root / "cache"
+        source = self.root / "source"
+        (cache / "Pool" / "0" / "0").mkdir(parents=True)
+        (source / "Pool" / "0" / "0").mkdir(parents=True)
+        (cache / "Pool" / "0" / "0" / "0.index.1").write_bytes(b"short")
+        (source / "Pool" / "0" / "0" / "0.index.1").write_bytes(b"short")
+        (source / "sentinel.txt").write_bytes(b"do-not-touch")
+        before = _manifest(source)
         listing = _listing((0, "0.index.1", 100))
-        run = self._run({"0": {"0.index.1": b"X" * 100}})
-        job, result = self._fetch(listing, run)
-        self.assertEqual(self.calls, [])
-        self.assertEqual((d0 / "0.index.1").read_bytes(), before)
-        self.assertEqual(result["mismatch_count"], 1)
-        self.assertIn("left untouched", job["message"])
-        self.assertEqual(result["failed"], [])
+        def run(cmd, on_line, should_stop):
+            self.calls.append(list(cmd))
+            self.assertEqual(cmd[1], "copy")
+            self.assertTrue(str(cmd[2]).startswith("remote:"))
+            dest = Path(cmd[3]).resolve()
+            self.assertTrue(str(dest).startswith(str(cache.resolve())))
+            self.assertFalse(str(dest).startswith(str(source.resolve())))
+            for bad in ("sync", "move", "moveto", "delete", "purge"):
+                self.assertNotIn(bad, cmd)
+            return 1
+        job = {"cancel": False, "message": "", "progress": 0.0}
+        with mock.patch("os.remove", side_effect=AssertionError("remove")), \
+             mock.patch("os.unlink", side_effect=AssertionError("unlink")):
+            result = F.fetch_bucket_indexes(cache, ["remote:hbk"], listing, job, run=run, attempts=2,
+                                            pause=lambda _s: None, rclone="rclone", readonly_roots=[source])
+        self.assertTrue(self.calls)
+        self.assertEqual(result["failed"], [0])
+        self.assertIn("mapping was not started", result["error"])
+        parked = list((cache / "Pool" / "0" / "0").glob("0.index.1.mismatch*"))
+        self.assertEqual([p.read_bytes() for p in parked], [b"short"])
+        self.assertFalse((cache / "Pool" / "0" / "0" / "0.index.1").exists())
+        self.assertEqual(_manifest(source), before)
 
     def test_complete_neighbour_survives_partial_directory(self):
         d0 = self.root / "Pool" / "0" / "0"
@@ -167,9 +204,12 @@ class FetchTests(unittest.TestCase):
         result = F.fetch_bucket_indexes(self.root, ["remote:hbk"], listing, job, run=run, attempts=1,
                                         pause=lambda _s: None, rclone="rclone")
         self.assertEqual((d0 / "0.index.1").read_bytes(), b"KEEPME!!")
-        self.assertEqual((d0 / "1.index.1").read_bytes(), b"NO")
+        # The short cache file is renamed aside (not overwritten) and replaced by a correct download.
+        parked = list(d0.glob("1.index.1.mismatch*"))
+        self.assertEqual([p.read_bytes() for p in parked], [b"NO"])
+        self.assertEqual((d0 / "1.index.1").read_bytes(), b"YYYY")
         self.assertEqual((d0 / "2.index.1").read_bytes(), b"ZZZ")
-        self.assertEqual(result["mismatch_count"], 1)
+        self.assertEqual(result["mismatch_count"], 0)
         self.assertEqual(result["failed"], [])
         self.assertTrue(any("checks 12/2048" in m and "directory 1/1" in m for m in messages))
 
@@ -242,7 +282,7 @@ class FetchTests(unittest.TestCase):
             return 1
         job, result = self._fetch(listing, fail)
         self.assertEqual(result["failed"], [1])
-        self.assertIn("left in place", result["error"])
+        self.assertIn("mapping was not started", result["error"])
         self.assertEqual((self.root / "Pool" / "0" / "0" / "0.index.1").read_bytes(), b"abc")
         self.calls.clear()
         def ok(cmd, on_line, should_stop):
@@ -271,12 +311,58 @@ class FetchTests(unittest.TestCase):
         self.assertEqual(self.calls, ["a:hbk/Pool/0/0", "b:hbk/Pool/0/0"])
         self.assertEqual((self.root / "Pool" / "0" / "0" / "0.index.1").read_bytes(), b"xyz")
 
+    def test_existing_source_index_is_reused_and_source_is_untouched(self):
+        cache = self.root / "cache"
+        source = self.root / "hbk"
+        (source / "Pool" / "0" / "0").mkdir(parents=True)
+        (source / "Pool" / "0" / "0" / "0.index.1").write_bytes(b"A" * 8)
+        (source / "sentinel.txt").write_bytes(b"mirror-or-backup")
+        before = _manifest(source)
+        listing = _listing((0, "0.index.1", 8), (0, "1.index.1", 3))
+        def run(cmd, on_line, should_stop):
+            self.calls.append(list(cmd))
+            dest = Path(cmd[3])
+            self.assertTrue(str(dest.resolve()).startswith(str(cache.resolve())))
+            self.assertFalse(str(dest.resolve()).startswith(str((source / "Pool").resolve())))
+            (dest / "1.index.1").write_bytes(b"ZZZ")
+            return 0
+        job, result = {"cancel": False, "message": "", "progress": 0.0}, None
+        result = F.fetch_bucket_indexes(cache, ["remote:hbk"], listing, job, run=run, attempts=1,
+                                        pause=lambda _s: None, rclone="rclone", readonly_roots=[source])
+        self.assertEqual(result["failed"], [])
+        self.assertEqual(self.calls[0][2], "remote:hbk/Pool/0/0")
+        self.assertEqual(len(self.calls), 1)
+        self.assertEqual((cache / "Pool" / "0" / "0" / "1.index.1").read_bytes(), b"ZZZ")
+        self.assertFalse((source / "Pool" / "0" / "0" / "1.index.1").exists())
+        self.assertEqual(_manifest(source), before)
+
+    def test_wrong_size_in_source_is_not_moved(self):
+        cache = self.root / "cache"
+        source = self.root / "hbk"
+        (source / "Pool" / "0" / "0").mkdir(parents=True)
+        (source / "Pool" / "0" / "0" / "0.index.1").write_bytes(b"short")
+        before = _manifest(source)
+        listing = _listing((0, "0.index.1", 4))
+        def run(cmd, on_line, should_stop):
+            self.calls.append(cmd[3])
+            Path(cmd[3]).mkdir(parents=True, exist_ok=True)
+            (Path(cmd[3]) / "0.index.1").write_bytes(b"GOOD")
+            return 0
+        job = {"cancel": False, "message": "", "progress": 0.0}
+        result = F.fetch_bucket_indexes(cache, ["remote:hbk"], listing, job, run=run, attempts=1,
+                                        pause=lambda _s: None, rclone="rclone", readonly_roots=[source])
+        self.assertEqual(result["failed"], [])
+        self.assertEqual((cache / "Pool" / "0" / "0" / "0.index.1").read_bytes(), b"GOOD")
+        self.assertEqual(_manifest(source), before)
+
 
 class BuildPoolWiringTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.old = hbk_explorer.INDEX_DIR
+        self.old_cache = hbk_explorer.CACHE_DIR
         hbk_explorer.INDEX_DIR = Path(self.tmp.name) / "index"
+        hbk_explorer.CACHE_DIR = Path(self.tmp.name) / "cache"
         local = Path(self.tmp.name) / "hbk"
         local.mkdir()
         self.src = hbk_explorer.Source("t4", "t4", str(local))
@@ -287,6 +373,7 @@ class BuildPoolWiringTests(unittest.TestCase):
 
     def tearDown(self):
         hbk_explorer.INDEX_DIR = self.old
+        hbk_explorer.CACHE_DIR = self.old_cache
         self.tmp.cleanup()
 
     def test_stop_does_not_start_the_mapper(self):
@@ -306,6 +393,58 @@ class BuildPoolWiringTests(unittest.TestCase):
         self.assertTrue(result["stopped"])
         self.assertNotIn("yes", mapped)
         self.assertFalse((self.src.index_dir / "pool" / "poolmap.json").exists())
+
+    def test_wrong_size_index_does_not_start_the_mapper(self):
+        self.src.remotes = ["remote:hbk"]
+        pool = self.src.index_dir / "pool"
+        listing = [{"b": 0, "t": "index", "rev": 1, "size": 100, "mtime": "", "name": "0.index.1"}]
+        (pool / "listing.json").write_text(__import__("json").dumps(listing))
+        dest = self.src.local / "Pool" / "0" / "0"
+        dest.mkdir(parents=True)
+        (dest / "0.index.1").write_bytes(b"short")
+        (self.src.local / "sentinel.txt").write_bytes(b"source")
+        before = _manifest(self.src.local)
+        def run(cmd, on_line, should_stop):
+            self.assertEqual(cmd[1], "copy")
+            self.assertTrue(str(cmd[2]).startswith("remote:hbk/"))
+            self.assertTrue(hbk_explorer.Source.in_cache(self.src, cmd[3]) or str(cmd[3]).startswith(str(self.src.cache_dir)))
+            return 1
+        def boom(*_a, **_k):
+            raise AssertionError("mapper ran")
+        with mock.patch("hbk_pool.build_runs", lambda *_a, **_k: None), \
+             mock.patch("hbk_pool.build_recsizes", lambda *_a, **_k: None), \
+             mock.patch("hbk_indexfetch.run_rclone", run), \
+             mock.patch("hbk_indexfetch.time.sleep", lambda *_a, **_k: None), \
+             mock.patch("hbk_poolmap.build_poolmap", boom):
+            with self.assertRaises(RuntimeError) as cm:
+                self.backup.build_pool({"cancel": False, "message": "", "progress": 0})
+        self.assertIn("mapping was not started", str(cm.exception))
+        self.assertFalse((pool / "poolmap.json").exists())
+        self.assertEqual(_manifest(self.src.local), before)
+        self.assertFalse((self.src.cache_dir / "Pool" / "0" / "0" / "0.index.1").exists())
+
+    def test_ensure_downloads_into_the_app_cache(self):
+        self.src.remotes = ["remote:hbk"]
+        (self.src.local / "Pool" / "0" / "0").mkdir(parents=True)
+        (self.src.local / "Pool" / "0" / "0" / "0.index.1").write_bytes(b"READY")
+        (self.src.local / "sentinel.txt").write_bytes(b"keep")
+        before = _manifest(self.src.local)
+        reused = self.src.ensure("Pool/0/0/0.index.1")
+        self.assertEqual(reused, self.src.local / "Pool" / "0" / "0" / "0.index.1")
+        def fake_run(cmd, **_k):
+            self.assertEqual(cmd[1], "copyto")
+            self.assertTrue(str(cmd[2]).startswith("remote:hbk/"))
+            dest = Path(cmd[3])
+            self.assertTrue(str(dest.resolve()).startswith(str(self.src.cache_dir.resolve())))
+            self.assertFalse(str(dest.resolve()).startswith(str(self.src.local.resolve())))
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(b"from-remote")
+            return mock.Mock(returncode=0, stdout="", stderr="")
+        with mock.patch("hbk_explorer.subprocess.run", fake_run):
+            fetched = self.src.ensure("Pool/0/0/9.index.1")
+        self.assertEqual(fetched.read_bytes(), b"from-remote")
+        self.assertTrue(self.src.in_cache(fetched))
+        self.assertEqual(_manifest(self.src.local), before)
 
     def test_fetch_error_does_not_start_the_mapper(self):
         self.src.remotes = ["remote:hbk"]

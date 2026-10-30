@@ -23,6 +23,7 @@ RCLONE = _find_rclone()
 CONF_DIR = Path.home() / ".hbk-explorer"
 CONF_FILE = CONF_DIR / "sources.json"
 INDEX_DIR = CONF_DIR / "index"
+CACHE_DIR = CONF_DIR / "cache"   # downloaded bytes only; never a configured source folder
 JOBS_DIR = CONF_DIR / "jobs"
 VERSION = "0.1.0"
 ROOT_PARENT = "5058F1AF5058F1AF8388633F609CADB75A75DC9D"   # pname_id_v2 of share-root entries
@@ -77,6 +78,46 @@ class Source:
         self._lock = threading.Lock()
         self.index_dir = INDEX_DIR / sid
         self.index_dir.mkdir(parents=True, exist_ok=True)
+        # Fetched metadata and pool objects land here, not in self.local / extra.
+        self.cache_dir = CACHE_DIR / sid
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+
+    def read_roots(self):
+        """Configured folders. Read-only: the backup, extra roots, or a user-made mirror."""
+        return [self.local, *self.extra]
+
+    def in_cache(self, path):
+        try:
+            Path(path).resolve().relative_to(self.cache_dir.resolve())
+            return True
+        except (OSError, ValueError):
+            return False
+
+    def locate(self, rel):
+        """Existing readable file, or None. Does not download or modify anything."""
+        cached = self.cache_dir / rel
+        if cached.is_file():
+            return cached
+        for root in self.read_roots():
+            q = root / rel
+            if q.is_file():
+                return q
+        return None
+
+    def has_sized_file(self, rel, size):
+        """True when the cache or a read-only root has ``rel`` at exactly ``size`` bytes."""
+        try:
+            expected = int(size)
+        except (TypeError, ValueError):
+            return False
+        for root in (self.cache_dir, *self.read_roots()):
+            p = root / rel
+            try:
+                if p.is_file() and p.stat().st_size == expected:
+                    return True
+            except OSError:
+                continue
+        return False
 
     def to_json(self):
         return {"id": self.id, "name": self.name, "local": str(self.local), "remote": self.remote, "remotes": self.remotes, "extra": [str(x) for x in self.extra],
@@ -122,28 +163,33 @@ class Source:
         return best
 
     def ensure(self, rel, job=None):
-        """Return local path for rel, downloading from the remote if needed."""
-        p = self.local / rel
-        if p.is_file(): return p
-        for root in self.extra:
-            q = root / rel
-            if q.is_file(): return q
-        if not self.remotes: raise FileNotFoundError(f"not in local copy: {rel}")
-        p.parent.mkdir(parents=True, exist_ok=True)
-        tmp = p.with_name(p.name + ".part"); errs = []
+        """Return a readable path for rel.
+
+        An existing file in the app cache or in a source folder is reused (so an
+        earlier download into a mirror is not fetched again). A missing file is
+        downloaded from the remote into the app cache only. Source folders are
+        not created, replaced, or deleted.
+        """
+        found = self.locate(rel)
+        if found is not None:
+            return found
+        if not self.remotes:
+            raise FileNotFoundError(f"not in local copy: {rel}")
+        dest = self.cache_dir / rel
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        tmp = dest.with_name(dest.name + ".part"); errs = []
         for attempt in range(4):                       # outer retry: 4 rounds over all remotes, growing pauses
             for remote in self.remotes:
                 if job: job["message"] = f"fetching {rel} from {remote.split(':')[0]}" + (f" (retry {attempt})" if attempt else "")
+                # copyto reads the remote and writes the local temp file. Never the other way.
                 r = subprocess.run([RCLONE, "copyto", f"{remote}/{rel}", str(tmp), "--retries", "5", "--low-level-retries", "20",
                                     "--retries-sleep", "5s", "--tpslimit", "8", "--drive-pacer-min-sleep", "100ms"], capture_output=True, text=True)
                 if r.returncode == 0 and tmp.is_file():
-                    tmp.rename(p); return p
+                    tmp.rename(dest); return dest
                 errs.append(f"{remote}: {r.stderr.strip()[-160:]}")
                 if tmp.exists(): tmp.unlink()
             time.sleep([3, 15, 60, 0][attempt])
         raise RuntimeError(f"fetch failed for {rel} after retries: {errs[-1] if errs else '?'}")
-        self._list.pop(str(Path(rel).parent).strip("/").replace(".", "", 1) if False else str(Path(rel).parent).strip("/"), None)
-        return p
 
 # ----------------------------------------------------------------------------- backup
 class Backup:
@@ -500,15 +546,16 @@ class Backup:
                 if e["local"] and re.match(r"^\d+\.db\.\d+$", n): dbs.append((str(self.src.ensure(f"Config/@Share/{sh}/{n}")), "raw"))
         hbk_pool.build_recsizes(self.src, dbs, str(pool_dir), log)
         if job.get("cancel"): return stopped("record-sizes")
-        if self.src.remotes:
-            entries = json.loads(listing.read_text())
-            fetch = hbk_indexfetch.fetch_bucket_indexes(self.src.local, self.src.remotes, entries, job)
-            self.src._list.clear()
-            if fetch.get("stopped") or job.get("cancel"):
-                fetch["stopped"] = True
-                return fetch
-            if fetch.get("failed"):
-                raise RuntimeError(fetch.get("error") or "bucket index fetch failed")
+        entries = json.loads(listing.read_text())
+        # New index bytes go to the app cache. Files already in the source or a mirror are only read.
+        fetch = hbk_indexfetch.fetch_bucket_indexes(
+            self.src.cache_dir, self.src.remotes, entries, job, readonly_roots=self.src.read_roots())
+        self.src._list.clear()
+        if fetch.get("stopped") or job.get("cancel"):
+            fetch["stopped"] = True
+            return fetch
+        if fetch.get("failed") or fetch.get("error") or fetch.get("mismatch_count"):
+            raise RuntimeError(fetch.get("error") or "bucket index files are missing or the wrong size; mapping was not started")
         if job.get("cancel"): return stopped("before-mapping")
         job["message"] = "mapping buckets to writers"; job["progress"] = 0.7
         def mlog(m):
@@ -561,19 +608,23 @@ class Backup:
         cache_limit = int(os.environ.get("HBK_CACHE_GB", "20")) * (1 << 30)
         downloaded = collections.OrderedDict(); dl_lock = threading.Lock(); dl_size = [0]
         def fetch(bk):
-            rel = pool.bucket_name(bk, "bucket"); p = self.src.local / rel
-            was_local = p.is_file() or any((x / rel).is_file() for x in self.src.extra)
-            self.src.ensure(rel)
-            if not was_local and p.is_file():
+            rel = pool.bucket_name(bk, "bucket")
+            already = self.src.locate(rel)
+            path = self.src.ensure(rel)
+            # Only files this job created in the app cache are eligible for eviction.
+            if already is None and self.src.in_cache(path) and path.is_file():
                 with dl_lock:
-                    downloaded[bk] = p.stat().st_size; dl_size[0] += downloaded[bk]
+                    sz = path.stat().st_size
+                    downloaded[bk] = (path, sz); dl_size[0] += sz
         def evict():
             with dl_lock:
                 while dl_size[0] > cache_limit and len(downloaded) > 8:
-                    bk, sz = downloaded.popitem(last=False)
+                    bk, (path, sz) = downloaded.popitem(last=False)
                     fh = fh_cache.pop(bk, None)
                     if fh: fh.close()
-                    try: (self.src.local / pool.bucket_name(bk, "bucket")).unlink(); dl_size[0] -= sz
+                    try:
+                        if self.src.in_cache(path):
+                            path.unlink(); dl_size[0] -= sz
                     except OSError: pass
         ex = concurrent.futures.ThreadPoolExecutor(max_workers=4); pending = {}
         def prefetch_from(i):

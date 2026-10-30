@@ -284,7 +284,16 @@ class PoolReader:
             st["index_files"] = len(idx)
             n = 0
             for e in idx:
-                if (self.src.local / f"Pool/0/{e['b'] // 2048}/{e['name']}").is_file(): n += 1
+                rel = f"Pool/0/{e['b'] // 2048}/{e['name']}"
+                size = e.get("size")
+                if hasattr(self.src, "has_sized_file"):
+                    if self.src.has_sized_file(rel, size): n += 1
+                    continue
+                p = self.src.local / rel
+                try:
+                    if size is not None and p.is_file() and p.stat().st_size == int(size): n += 1
+                except (OSError, TypeError, ValueError):
+                    pass
             st["indexes_local"] = n
         return st
     def bucket_name(self, b, kind):
