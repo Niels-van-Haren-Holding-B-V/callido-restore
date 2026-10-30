@@ -7,7 +7,8 @@ Works on a local .hbk folder (complete or partial) or on an rclone remote
 demand into a local cache directory. Only the small metadata databases are
 needed to browse; the data pool is only touched when extracting a file.
 
-Usage:  python3 hbk_explorer.py [--port 8765] [--no-browser]
+Usage:  python3 hbk_explorer.py [--port 8765] [--browser | --no-window] [--smoke]
+        (app window by default; --browser uses the system browser, --no-window runs only the server, --smoke is a build check)
 """
 import argparse, collections, fnmatch, json, os, re, sqlite3, subprocess, sys, threading, time, traceback, uuid, zlib
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
@@ -919,12 +920,20 @@ def run_window(port, smoke=False):
     url = f"http://127.0.0.1:{port}"
     win = webview.create_window(APP_NAME, url, width=1360, height=880, min_size=(900, 600), text_select=True)
     result = {}
+    def closing():                                               # warn before closing while a job (e.g. a restore) runs
+        running = [j["label"] for j in JOBS.values() if j["state"] == "running"]
+        if not running or smoke: return True
+        return bool(win.create_confirmation_dialog(APP_NAME, f"{len(running)} job(s) still running: {running[0]}. "
+                                                   "Quit anyway? Restore jobs are saved and can be resumed later."))
+    win.events.closing += closing
     if smoke:
+        guard = threading.Timer(30, lambda: (_log("smoke: window never loaded"), _exit_app(2)))
         def loaded():
+            guard.cancel()
             try: result["title"] = win.evaluate_js("document.title")
             finally: _log(f"smoke: page loaded, title={result.get('title')!r}"); win.destroy()
         win.events.loaded += loaded
-        threading.Timer(30, lambda: (_log("smoke: window never loaded"), _exit_app(2))).start()
+        guard.start()
     webview.start()
     return result.get("title")
 def main():
