@@ -7,3 +7,4 @@ dist/
 *.spec.bak
 .DS_Store
 *.dmg
+.private-denylist

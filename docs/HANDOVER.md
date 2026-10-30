@@ -1,9 +1,18 @@
-## T13 App name + footer (Niels, 2026-10-30 22:31 CET) — claim in docs/TASKS.md first
+## RULE (owner, 2026-10-31 00:35 CET): no personal data in the repo (H18)
+
+The repo is public. Never put real share, folder or file names, family names, the NAS hostname, IP addresses, local paths
+(`/Users/...`), session ids or version numbers of the real backup in code, tests, UI text, examples, PR descriptions or committed
+docs. Use neutral examples: shares "Documents", "Photos", "Projects", "homes"; users "alice"/"bob"; host "nas"; backup folder
+"backup_1.hbk"; IPs from 192.0.2.0/24; version 1234. `scripts/check_private.sh` runs in CI with a denylist from the
+`PRIVATE_DENYLIST` repository secret (locally: a gitignored `.private-denylist`); keep triage notes with real names uncommitted.
+History is not rewritten.
+
+## T13 App name + footer (owner, 2026-10-30 22:31 CET) — claim in docs/TASKS.md first
 
 - App name: **Callido Restore** (window title, .app/.dmg name, About, README; keep it in one constant). Subtitle/tagline: "Restore Synology Hyper Backup (.hbk) files". About screen + README: "Not affiliated with or endorsed by Synology. Hyper Backup is a trademark of Synology Inc." Never use "Hyper Backup"/"HyperBackup" as (part of) our product name or logo, and no Synology logos/look.
-- Footer (subtle, part of the T12 clean design): small Callido raccoon logo (the one used on https://callido.nl; get the file from Niels or the site, store as assets/callido-raccoon.svg/png) + "Made by Callido · callido.nl · callido.dev", both clickable links (https://callido.nl, https://callido.dev) opening in the default browser.
+- Footer (subtle, part of the T12 clean design): small Callido raccoon logo (the one used on https://callido.nl; get the file from the owner or the site, store as assets/callido-raccoon.svg/png) + "Made by Callido · callido.nl · callido.dev", both clickable links (https://callido.nl, https://callido.dev) opening in the default browser.
 
-## T12 UI design (Niels, 2026-10-30 22:28 CET) — claim in docs/TASKS.md first
+## T12 UI design (owner, 2026-10-30 22:28 CET) — claim in docs/TASKS.md first
 
 The app must look like a clean 2026 macOS app, not an 80s app, and stay simple for beginners:
 - Native macOS feel: system font (-apple-system / SF Pro), generous spacing, rounded corners, subtle shadows, light + dark mode (prefers-color-scheme).
@@ -12,11 +21,11 @@ The app must look like a clean 2026 macOS app, not an 80s app, and stay simple f
 - Hide advanced options behind "Advanced"; no jargon on the main path.
 - No heavy framework needed; plain CSS variables are fine. Keep it accessible (contrast, keyboard focus).
 
-## New tasks from Niels (2026-10-30 22:20 CET) — pick one, claim it in docs/TASKS.md first ("IN PROGRESS (hbk-N): ...")
+## New tasks from the owner (2026-10-30 22:20 CET) — pick one, claim it in docs/TASKS.md first ("IN PROGRESS (hbk-N): ...")
 
 - **T10 Logo**: use `assets/logo-source.jpg` (original design, no Synology look) everywhere needed: crop white margin to a transparent PNG, generate `assets/AppIcon.icns` (all macOS sizes via iconutil), use it in build_app.sh / the PyInstaller .app and the .dmg, add favicon + header logo in static/index.html, put it at the top of README.md.
 - **T11 Desktop window**: the app must run as a real desktop app, not open a browser. Use pywebview to show static/index.html (local server on 127.0.0.1 only) in a native macOS window with the app name and logo. Remove webbrowser.open, stop the server when the window closes, bundle pywebview in the .app via build_app.sh, add a smoke test.
-- Note: "Hyper Backup" is Synology's product name; consider an own app name before v0.1.0 (Niels to decide).
+- Note: "Hyper Backup" is Synology's product name; consider an own app name before v0.1.0 (owner to decide).
 
 # Handover (state as of 2026-10-30 evening)
 
@@ -33,9 +42,10 @@ How to test: `python -m unittest discover -s tests -t . -v`. On the real backup,
 
 
 ## Situation
-NAS "droopy" was hit by L0CK3D ransomware on 2026-10-28 and has since been wiped and reinstalled. The Hyper Backup target on Google
-Drive (`gdrive:Synology/droopy_1.hbk`, ~1.5 TB, daily since 2020, 2333 versions) is intact; version 2333 = 2026-10-27 is the last
-clean run. Goal: restore all user files of version 2333 to the new NAS with this tool (Synology's own restore is slow and opaque).
+A NAS was hit by L0CK3D ransomware and has since been wiped and reinstalled. The Hyper Backup target on Google Drive
+(`gdrive:Synology/backup_1.hbk`, over a TB, thousands of daily runs over several years) is intact; the last run before the incident
+(version 1234 in the examples below) is the last clean one. Goal: restore all user files of that run to the new NAS with this tool
+(Synology's own restore is slow and opaque).
 
 ## What works (tested)
 * Explorer: versions chart, changes, timeline, browse, search/flags, compare, file details, download of single files.
@@ -45,13 +55,13 @@ clean run. Goal: restore all user files of version 2333 to the new NAS with this
 * Pool-map index fetch resumes. A file already at the listing size (in `~/.hbk-explorer/cache/<source>/` or in a configured source/mirror folder) is skipped. rclone only copies from the remote into the app cache (`--ignore-existing`, no delete). Stop cancels that copy. Source folders are not modified. `index/<src>/pool/` is unchanged.
 
 ## In progress / to verify
-1. **Full pool map.** Needs every bucket index (36,132 files, ~7 GB). A background download into `~/nas/gdrive_droopy_1.hbk/Pool/0/<d>/`
+1. **Full pool map.** Needs every bucket index (tens of thousands of files, several GB). A background download into `<mirror>/backup_1.hbk/Pool/0/<d>/`
    was at directory 10/18 at 21:15; a chained job then runs `hbk_poolmap.build_poolmap`. The mapper was fixed to prefer the writer
    with an exact size match (`strong` candidates) — re-verify it completes without exhausting the backtrack budget. If it gets stuck,
    run `Mapper.run(verbose=True)` to see the first bucket with no candidate and inspect that writer's piece (see `docs/FORMAT.md`).
    The in-app "Build pool map" / "Continue pool map" button does the same (bulk index fetch + mapping). The fetch skips finished
    directories and can be stopped; this has unit tests but has not been run against the live download (see below).
-2. A 3-file restore test to `nas:GDriveRestore/hbk-restore-test` was interrupted by a server restart; rerun it from the wizard.
+2. A 3-file restore test to `nas:Restore/restore-test` was interrupted by a server restart; rerun it from the wizard.
 3. Packaging (`.app` + `.dmg` via PyInstaller, GitHub Actions `build.yml`) is written but not yet run end to end.
 4. rclone's shared Google client id is being retired in 2026: users should enter their own client id/secret in the Drive step.
 
