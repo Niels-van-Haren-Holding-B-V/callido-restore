@@ -70,16 +70,16 @@ The restore target step lists an existing rclone remote, a share and a folder, o
 Requirement, not current behaviour. A local file is skipped only when size and mtime both match, and is otherwise written over; a remote file whose size differs is replaced; the restore wizard has an overwrite checkbox. Remove that checkbox. Skip every file that already exists, and never overwrite or delete anything already at the destination, including a restore back into the original shares. Acceptance: an existing file with a different size or mtime is left unchanged and counted as skipped, there is no overwrite control, and the destination loses no files. Abort if the destination listing fails (never treat it as an empty target).
 
 ## T10 — Logo (see docs/HANDOVER.md, 2026-10-30 22:20)
-DONE (hbk-2): PR #13 (branch `hbk2/logo-rebased`, stacked on #12 → main; replaces #8). Regenerate assets with `scripts/make_logo.py --embed`. Crop `assets/logo-source.jpg` to a transparent PNG, generate `assets/AppIcon.icns`, use it in the .app/.dmg, favicon + header logo in `static/index.html`, top of README.md.
+DONE (hbk-2): merged in #18 (`hbk2/logo-main`); review nits in #23. Regenerate assets with `scripts/make_logo.py --embed`.
 
 ## T11 — Desktop window (pywebview)
 DONE in PR #7 (hbk-3, branch hbk3/desktop-window, stacked on #5): show static/index.html in a native macOS window (pywebview), local server on 127.0.0.1 only, no webbrowser.open, server stops when the window closes, pywebview bundled via build_app.sh, smoke test.
 
 ## T12 — UI design (see docs/HANDOVER.md, 2026-10-30 22:28)
-DONE (hbk-2): PR #10 (branch `hbk2/ui-design`, stacked on #13 → #12 → main), only `static/index.html`. Clean 2026 macOS look: system font, spacing, rounded corners, light + dark mode, logo colours as accent only, wizard-style one step at a time, "Advanced" for the rest, accessible.
+DONE (hbk-2): branch `hbk2/ui-design-main2` on top of T13 (#25), only `static/index.html`; replaces #21/#10 after review.
 
 ## T13 — App name + footer (see docs/HANDOVER.md, 2026-10-30 22:31)
-DONE in PR #9 (hbk-3, branch hbk3/app-name, stacked on #7 + #8): name "Callido Restore" in one constant (window title, .app/.dmg, About, README), tagline, Synology trademark notice, footer with Callido raccoon logo + "Made by Callido · callido.nl · callido.dev" links opening in the default browser.
+DONE in PR #25 (hbk-3, branch hbk3/app-name-main2, on main): name "Callido Restore" in one constant (window title, .app/.dmg, About, README), tagline, Synology trademark notice, footer with Callido raccoon logo + "Made by Callido · callido.nl · callido.dev" links opening in the default browser.
 
 ## Do not
 * Do not change the on-disk layout of `~/.hbk-explorer/index/<src>/pool/*` without a migration; the full map build takes hours of downloads.
