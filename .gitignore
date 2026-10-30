@@ -1,7 +1,9 @@
 .venv/
+.buildenv/
 __pycache__/
 build/
 dist/
+/rclone
 *.spec.bak
 .DS_Store
 *.dmg
