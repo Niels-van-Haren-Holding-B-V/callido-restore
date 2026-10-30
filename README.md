@@ -1,4 +1,8 @@
+<img src="assets/logo.png" width="96" align="left" alt="Hyper Backup Desktop logo">
+
 # Hyper Backup Desktop (macOS, Apple silicon)
+
+<br clear="left">
 
 Browse a Synology **Hyper Backup** (`.hbk`) on a timeline and restore files from it **without** Hyper Backup or a working NAS.
 Works on a `.hbk` that sits on Google Drive (or any rclone remote), on a NAS share over SMB, or on a local disk, complete or partial.
