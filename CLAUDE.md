@@ -1,4 +1,7 @@
-# Hyper Backup Desktop — notes for Claude Code
+# Callido Restore — notes for Claude Code
+
+Product name: `APP_NAME` in `hbk_explorer.py` is the single source (build and smoke scripts read it). Never use "Hyper Backup" as
+part of the product name or logo; descriptive use ("restore a Synology Hyper Backup") is fine. About/README carry the Synology trademark notice.
 
 Purpose: explore a Synology Hyper Backup (`.hbk`) on a timeline and restore files from it without Hyper Backup, on macOS.
 Read `docs/HANDOVER.md` first (current state and open items), then `docs/FORMAT.md` (reverse-engineered format) and `docs/ARCHITECTURE.md`.
