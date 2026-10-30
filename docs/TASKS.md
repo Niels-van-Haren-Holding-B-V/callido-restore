@@ -83,6 +83,13 @@ DONE (hbk-2): branch `hbk2/ui-design-main4` on main (replaces #29/#27/#21/#10 af
 ## T13 — App name + footer (see docs/HANDOVER.md, 2026-10-30 22:31)
 DONE (hbk-3): PR #25. name "Callido Restore" in one constant (window title, .app/.dmg, About, README), tagline, Synology trademark notice, footer with Callido raccoon logo + "Made by Callido · callido.nl · callido.dev" links opening in the default browser.
 
+## H8 — Per-folder destination mapping (Niels, 2026-10-30 23:29; see docs/handovers/2026-10-30-2318-nas-triage.md)
+IN PROGRESS (hbk-3): branch `hbk3/dest-mapping` on #36. Target step is a table "Folder from backup → Restore to", one row per
+selected folder, defaulting to the NAS share with the same name (+ the folder's own path); the folder's *contents* land there, no
+version or source folder in between. "Check targets and preview" shows one sample path per row. Each item carries its `dest`
+(`/api/restore`, persisted in the job, kept across pause/resume); `file_target()` / `restore_roots()` in `hbk_explorer.py`.
+Advanced keeps "everything under one folder" (`<folder>/<share>/<path>`). Tests: `tests/test_restore_mapping.py`.
+
 ## Do not
 * Do not change the on-disk layout of `~/.hbk-explorer/index/<src>/pool/*` without a migration; the full map build takes hours of downloads.
 * Do not commit anything from `~/.hbk-explorer` or user paths/remotes into the repo.
