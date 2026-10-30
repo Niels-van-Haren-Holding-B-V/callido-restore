@@ -743,6 +743,20 @@ class Backup:
             c.close()
         return files
 
+    def restore_count(self, items, skip_meta=True):
+        """Files and bytes the selection would restore, counted in SQL (no row materialisation; H13 shows it live)."""
+        files = bytes_ = 0
+        meta = " and path not like '%/@eaDir/%' and path not like '@eaDir/%' and name not like '%@SynoResource' and name not like '%@SynoEAStream' and name != '.DS_Store'" if skip_meta else ""
+        for it in items:
+            c = self.conn(it["share"], int(it["ver"]))
+            if it.get("is_dir"):
+                q = f"select count(*), coalesce(sum(size), 0) from files where is_dir=0 and (mode & 61440)=32768 and (path like ? or ? = ''){meta}"
+                n, b = c.execute(q, (it["path"].rstrip("/") + "/%", it["path"])).fetchone()
+            else:
+                n, b = c.execute(f"select count(*), coalesce(sum(size), 0) from files where path = ? and is_dir=0{meta}", (it["path"],)).fetchone()
+            files += n; bytes_ += b; c.close()
+        return {"files": files, "bytes": bytes_}
+
     def plan_mappings(self, items, dest, skip_meta=True):
         """Per shared folder: where its selected files go, with one sample file (the first) so the user can check the
         final path (H8). Rows follow the order in which the shares first appear in items."""
@@ -1059,6 +1073,8 @@ class H(BaseHTTPRequestHandler):
             if u.path == "/api/pool/build":
                 mb = int(q["max_bucket"]) if q.get("max_bucket") else None
                 return self._json(start_job(lambda job: b.build_pool(job, mb), "build pool map"))
+            if u.path == "/api/restore_count":
+                return self._json(b.restore_count(json.loads(q["items"]), q.get("skip_meta", "1") == "1"))
             if u.path == "/api/restore_plan":
                 items = json.loads(q["items"])
                 return self._json(b.plan_mappings(items, (q.get("dest") or "").strip(), q.get("skip_meta", "1") == "1"))
