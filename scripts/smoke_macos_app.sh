@@ -5,7 +5,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 APP_NAME="Hyper Backup Desktop"
-PORT=8765
+PORT=${HBK_SMOKE_PORT:-8765}
 MNT=
 LOG=
 PID=
