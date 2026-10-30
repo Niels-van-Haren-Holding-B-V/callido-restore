@@ -1,9 +1,14 @@
 """Anchor-first pool mapping: locate every tagged record's first chunk in the bucket indexes (tag = md5 of the first K
 chunk md5s + their total length), derive bucket owners from anchors, then place the untagged remainder by chunk counts."""
 import os, json, hashlib, collections, time, bisect
-from array import array
-from hbk_pool import SET_OF_WRITER, WRITER_OF_SET, bucket_index_entries
-from hbk_poolmap2 import build_writers
+from hbk_pool import SET_OF_WRITER, bucket_index_entries
+from hbk_poolmap2 import TAGK
+
+def dump_json(path, obj):
+    """Write JSON atomically (tmp file + os.replace): a crash never leaves a half-written map behind."""
+    tmp = f"{path}.tmp"
+    with open(tmp, "w") as f: json.dump(obj, f)
+    os.replace(tmp, path)
 
 MAX_WORKERS = int(os.environ.get("HBK_SCAN_WORKERS", "4"))        # H9: never more than 4 scan processes
 WORKER_RSS_MB = int(os.environ.get("HBK_SCAN_WORKER_RSS_MB", "1024"))  # a worker that grows past this aborts the scan
@@ -22,7 +27,7 @@ def build_tag_index(writers):
     for w, recs in writers.items():
         for r in recs:
             if r.tag and r.n > 0:
-                K = min(r.n + len(r.dedup), 9)
+                K = min(r.n + len(r.dedup), TAGK)
                 if r.head_new < K: continue            # leading chunks include dedup refs: tag would match elsewhere
                 idx.setdefault((K, r.tail), {}).setdefault(r.tag, []).append((w, r.idx)); ntag += 1
     return idx, ntag
@@ -34,7 +39,7 @@ def _scan_entries(b, ents, keys, hits):
     n = len(ents); checks = 0
     for i in range(n):
         base = ps[i]
-        for K in range(1, 10):
+        for K in range(1, TAGK + 1):
             if i + K > n: break
             tags = keys.get((K, ps[i + K] - base))
             if not tags: continue
@@ -84,7 +89,7 @@ def expand_hits(idx, hits):
 def save_anchors(outdir, idx, hits):
     """anchors.json: {"positions": {tag: [[b, i, K], ...]}, "records": {"w:ri": tag}} (linear size; see load_anchors)."""
     recs = {f"{w}:{ri}": tag for tagmap in idx.values() for tag, rl in tagmap.items() if tag in hits for (w, ri) in rl}
-    with open(os.path.join(outdir, "anchors.json"), "w") as f: json.dump({"positions": hits, "records": recs}, f)
+    dump_json(os.path.join(outdir, "anchors.json"), {"positions": hits, "records": recs})
 
 def load_anchors(outdir):
     with open(os.path.join(outdir, "anchors.json")) as f: d = json.load(f)
@@ -156,7 +161,7 @@ def rhythm(b): return ((b - 20) // 4) % 4
 
 def place_from_anchors(writers, anchors, counts, log=print, max_bucket=None):
     """anchors: {(w, idx): [(bucket, entry, K), ...]}. Returns (owner dict bucket->w, placements {w: {idx: [(b, e, n)]}}, report)."""
-    buckets = sorted(b for b in counts if max_bucket is None or b <= max_bucket); bset = set(buckets)
+    buckets = sorted(b for b in counts if max_bucket is None or b <= max_bucket); bset = set(buckets); bpos = {b: i for i, b in enumerate(buckets)}
     # 1. owners from unique anchors
     votes = collections.defaultdict(collections.Counter); fh = _filter_hits(anchors, bset)
     for (w, ri), hits in fh.items():
@@ -179,7 +184,7 @@ def place_from_anchors(writers, anchors, counts, log=print, max_bucket=None):
             else: bB, eB = None, None
             # walk: A's bucket tail, then mid buckets, then B's head
             segs = []; cur_b = bA; cur_e = eA; remaining = need; gap = 0
-            mids = [b for b in buckets if bA < b < (bB if bB is not None else 10 ** 9)]
+            mids = buckets[bpos[bA] + 1: bpos[bB]] if bB is not None else buckets[bpos[bA] + 1:]
             owned_mid = [b for b in mids if owner.get(b) == w]; free_mid = [b for b in mids if b not in owner]
             avail_fixed = (counts[bA] - eA) + sum(counts[b] for b in owned_mid) + (eB if bB is not None and bB != bA else 0)
             if bB == bA: avail_fixed = eB - eA
@@ -202,7 +207,7 @@ def place_from_anchors(writers, anchors, counts, log=print, max_bucket=None):
             path = [bA] + sorted(owned_mid + chosen_free) + ([bB] if bB is not None and bB != bA else [])
             e = eA
             for b in path:
-                take = min(remaining, counts[b] - e)
+                take = min(remaining, (eB if b == bB else counts[b]) - e)     # never past the next anchor's start
                 if take > 0: segs.append((b, e, take)); remaining -= take
                 e = 0
                 if remaining == 0: break
@@ -304,7 +309,7 @@ def resolve_and_place(writers, anchors, counts, log=print, max_bucket=None):
             def take(n):
                 segs = []
                 while n > 0 and cursor[0] < len(path):
-                    b = path[cursor[0]]; room = counts[b] - cursor[1]
+                    b = path[cursor[0]]; room = (eB if b == bB else counts[b]) - cursor[1]    # bB: only up to the next anchor
                     if room <= 0: cursor[0] += 1; cursor[1] = 0; continue
                     t = min(n, room); segs.append((b, cursor[1], t)); cursor[1] += t; n -= t
                 return segs, n
@@ -323,7 +328,7 @@ def export_map(writers, owner, placements, counts, outdir, mapped_upto):
         s = SET_OF_WRITER[w]; recs = writers[w]
         out["placements"][str(s)] = {str(recs[i].off): segs for i, segs in placements[w].items()}
         out["ranges"][str(s)] = [[a, L, r.off] for r in recs for a, L in r.ranges]
-    with open(os.path.join(outdir, "poolmap2.json"), "w") as f: json.dump(out, f)
+    dump_json(os.path.join(outdir, "poolmap2.json"), out)
     return out
 
 if __name__ == "__main__":

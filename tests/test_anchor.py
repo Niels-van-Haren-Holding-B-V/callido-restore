@@ -71,3 +71,25 @@ class Scan(unittest.TestCase):
 
 
 if __name__ == "__main__": unittest.main()
+
+
+class Placement(unittest.TestCase):
+    """A record must not run past the next anchor of its writer (reviewer repro on issue #15: rec0 took rec1's chunks)."""
+    def setUp(self):
+        self.writers = {0: [_rec(0, 4, "a" * 32, 1), _rec(1, 3, "b" * 32, 1)], 1: [], 2: [], 3: []}
+        self.anchors = {(0, 0): [(101, 0, 1)], (0, 1): [(101, 2, 1)]}; self.counts = {101: 10}
+
+    def test_place_from_anchors_stops_at_next_anchor(self):
+        owner, placements, report = hbk_anchor.place_from_anchors(self.writers, self.anchors, self.counts, log=lambda *a: None)
+        self.assertEqual(report["unplaced"], 1); self.assertNotIn(0, placements[0])
+        self.assertEqual(placements[0][1], [(101, 2, 3)])
+
+    def test_resolve_and_place_stops_at_next_anchor(self):
+        owner, placements, report = hbk_anchor.resolve_and_place(self.writers, self.anchors, self.counts, log=lambda *a: None)
+        self.assertEqual(report["unplaced"], 1); self.assertNotIn(0, placements[0])
+        self.assertEqual(placements[0][1], [(101, 2, 3)])
+
+    def test_dump_json_is_atomic(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "x.json"); hbk_anchor.dump_json(p, {"a": 1})
+            self.assertEqual(json.load(open(p)), {"a": 1}); self.assertEqual(os.listdir(d), ["x.json"])
