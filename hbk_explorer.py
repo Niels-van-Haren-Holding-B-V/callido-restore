@@ -9,7 +9,7 @@ needed to browse; the data pool is only touched when extracting a file.
 
 Usage:  python3 hbk_explorer.py [--port 8765] [--no-browser]
 """
-import argparse, collections, fnmatch, json, os, re, sqlite3, subprocess, sys, threading, time, traceback, uuid, webbrowser, zlib
+import argparse, collections, fnmatch, json, os, re, sqlite3, subprocess, sys, threading, time, traceback, uuid, zlib
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs, unquote
@@ -69,7 +69,7 @@ RCLONE = _find_rclone()
 def _verify_frozen():
     """Fail fast when a packaged build is missing modules or bundled files."""
     if not getattr(sys, "frozen", False): return
-    import hbk_pool, hbk_poolmap, lz4.block  # noqa: F401
+    import hbk_pool, hbk_poolmap, lz4.block, webview  # noqa: F401
     if _bundled("static/index.html") is None:
         roots = ", ".join(str(r) for r in _resource_roots())
         raise SystemExit("bundled static/index.html not found in: " + roots)
@@ -752,10 +752,7 @@ class H(BaseHTTPRequestHandler):
                     line = "rclone not found"
                 return self._json({"version": VERSION, "rclone": line, "rclone_path": RCLONE, "config": str(CONF_DIR)})
             if u.path == "/api/quit":
-                def quit_():
-                    if os.name != "nt": subprocess.run(["pkill", "-P", str(os.getpid())], capture_output=True)   # stop rclone children too
-                    os._exit(0)
-                threading.Timer(0.3, quit_).start(); return self._json({"ok": True})
+                threading.Timer(0.3, _exit_app).start(); return self._json({"ok": True})
             if u.path == "/api/ls":   # directory picker helper
                 p = Path(os.path.expanduser(q.get("path") or "~"))
                 if not p.is_dir(): p = p.parent
@@ -896,8 +893,15 @@ def _log(msg):
     if stream is None: return
     try: print(msg, file=stream, flush=True)
     except Exception: pass
+APP_NAME = "Hyper Backup Desktop"
+def _exit_app(code=0):
+    """Stop the whole app: rclone children first (an `rclone lsjson` used to survive Quit), then the process. Restore jobs are
+    persisted and can be resumed; the desktop window (if any) closes with the process."""
+    if os.name != "nt": subprocess.run(["pkill", "-P", str(os.getpid())], capture_output=True)
+    os._exit(code)
 def _open_browser(port):
-    try: webbrowser.open(f"http://127.0.0.1:{port}")
+    try:
+        import webbrowser; webbrowser.open(f"http://127.0.0.1:{port}")
     except Exception: _log(f"could not open a browser; open http://127.0.0.1:{port}")
 def _already_running(port):
     """True when a Hyper Backup Desktop instance already answers on this port (e.g. the app was opened twice)."""
@@ -905,26 +909,67 @@ def _already_running(port):
         from urllib.request import urlopen
         with urlopen(f"http://127.0.0.1:{port}/api/about", timeout=2) as r: return b'"version"' in r.read()
     except Exception: return False
+def run_window(port, smoke=False):
+    """Show the UI in a native window (pywebview: WebKit on macOS, Edge WebView2 on Windows, GTK/Qt on Linux). Blocks until the
+    window is closed. Must run on the main thread. With smoke=True the window closes itself once the page has loaded and the
+    function returns the page title (None when it never loaded), so a build can be checked without a person."""
+    import webview
+    webview.settings["ALLOW_DOWNLOADS"] = True                   # the explorer's single-file download links
+    webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] = True
+    url = f"http://127.0.0.1:{port}"
+    win = webview.create_window(APP_NAME, url, width=1360, height=880, min_size=(900, 600), text_select=True)
+    result = {}
+    if smoke:
+        def loaded():
+            try: result["title"] = win.evaluate_js("document.title")
+            finally: _log(f"smoke: page loaded, title={result.get('title')!r}"); win.destroy()
+        win.events.loaded += loaded
+        threading.Timer(30, lambda: (_log("smoke: window never loaded"), _exit_app(2))).start()
+    webview.start()
+    return result.get("title")
 def main():
-    ap = argparse.ArgumentParser(); ap.add_argument("--port", type=int, default=8765); ap.add_argument("--no-browser", action="store_true")
+    ap = argparse.ArgumentParser(description=f"{APP_NAME}: explore a Synology Hyper Backup and restore files from it")
+    ap.add_argument("--port", type=int, default=8765)
+    ap.add_argument("--no-browser", "--no-window", dest="no_window", action="store_true", help="server only (no window, no browser)")
+    ap.add_argument("--browser", action="store_true", help="use the system browser instead of the app window")
+    ap.add_argument("--smoke", action="store_true", help="open the window, wait for the page, close it and exit (build check)")
     a = ap.parse_args()
-    if getattr(sys, "frozen", False):      # .app bundle: no terminal, so keep a log file next to the settings
+    if getattr(sys, "frozen", False) and not a.smoke:      # .app bundle: no terminal, so keep a log file next to the settings (smoke: stdout)
         try:
             CONF_DIR.mkdir(parents=True, exist_ok=True)
             sys.stdout = sys.stderr = open(CONF_DIR / "app.log", "a", buffering=1)
         except OSError: pass
     _verify_frozen()
     load_sources()
+    windowed = not a.no_window and not a.browser
     try: srv = ThreadingHTTPServer(("127.0.0.1", a.port), H)
     except OSError as e:
         if _already_running(a.port):
-            _log(f"already running on port {a.port}; opening the browser")
-            if not a.no_browser: _open_browser(a.port)
+            _log(f"already running on port {a.port}; showing the running instance")
+            if windowed: run_window(a.port, smoke=a.smoke)
+            elif not a.no_window: _open_browser(a.port)
             return
         raise SystemExit(f"cannot listen on 127.0.0.1:{a.port}: {e} (another program uses this port; try --port)")
-    _log(f"Hyper Backup Desktop {VERSION} on http://127.0.0.1:{a.port}  (config: {CONF_DIR})")
-    if not a.no_browser: threading.Timer(0.6, lambda: _open_browser(a.port)).start()
-    try: srv.serve_forever()
-    except KeyboardInterrupt: pass
+    _log(f"{APP_NAME} {VERSION} on http://127.0.0.1:{a.port}  (config: {CONF_DIR})")
+    if not windowed:
+        if not a.no_window: threading.Timer(0.6, lambda: _open_browser(a.port)).start()
+        try: srv.serve_forever()
+        except KeyboardInterrupt: pass
+        return
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try: title = run_window(a.port, smoke=a.smoke)
+    except Exception as e:
+        if a.smoke: _log(f"smoke: window failed: {e}"); _exit_app(2)
+        _log(f"no app window available ({e}); falling back to the browser")
+        _open_browser(a.port)
+        try: threading.Event().wait()                        # the server thread keeps serving until Ctrl-C / Quit
+        except KeyboardInterrupt: pass
+        return
+    if a.smoke:
+        ok = bool(title) and APP_NAME in title
+        _log(f"smoke: {'ok' if ok else 'FAILED'} (title {title!r})")
+        _exit_app(0 if ok else 2)
+    _log("window closed; stopping")
+    _exit_app(0)
 
 if __name__ == "__main__": main()

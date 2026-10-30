@@ -3,7 +3,8 @@
 * `hbk_explorer.py` — HTTP server (stdlib `http.server`), JSON API, static UI, sources, snapshot indexing, jobs, restore.
 * `hbk_pool.py` — pool format: sliced streams, virtual file index, chunk records, buckets, LZ4, `PoolReader` (reconstructs files).
 * `hbk_poolmap.py` — offline mapping of chunk ids to buckets (see `docs/FORMAT.md`).
-* `static/index.html` — single-page UI, no build step, no external dependencies.
+* `static/index.html` — single-page UI, no build step, no external dependencies. Shown in a native window (pywebview, WebKit on macOS)
+  by `run_window`; the HTTP server listens on 127.0.0.1 only and the process exits when the window closes (`_exit_app`).
 * `~/.hbk-explorer/` — `sources.json`, `index/<source>/<share>__<ver>.sqlite` (derived, queryable snapshot), `index/<source>/pool/`
   (`listing.json`, `runs_set*.bin`, `recsize_set*.json`, `poolmap.json`), `jobs/` (persisted restore jobs).
 
