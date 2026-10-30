@@ -67,7 +67,7 @@ Serves the goal: quieter flags and parser tests so someone restoring their own f
 The restore target step lists an existing rclone remote, a share and a folder, or a local path. Add a wizard on that step that explains how to prepare the NAS, then connect the destination: an SMB share, a user and its permissions, or another protocol. The source wizard can already create an SMB remote; this wizard is for the restore destination. Acceptance: from Restore, a user with no destination remote yet can follow the steps to a target the restore job can write, and the text covers an SMB share, a user and its permissions, and another protocol. The destination is a new or empty folder, or the restore skips existing files. The wizard and the restore never overwrite or delete existing NAS data, and they refuse a destination inside the backup source.
 
 ## T8 — Never overwrite on restore
-DONE (hbk-2): PR #31 (`hbk2/no-overwrite`, stacked on #29): overwrite control removed, every existing file skipped, listing failure aborts, destination inside the source refused.
+DONE (hbk-2): PR #35 (`hbk2/no-overwrite-main`, on main; replaces #31): overwrite control removed, every existing file skipped, listing failure aborts, destination inside the source refused.
 Skip every file that already exists, and never overwrite or delete anything already at the destination, including a restore back into the original shares. Acceptance: an existing file with a different size or mtime is left unchanged and counted as skipped, there is no overwrite control, and the destination loses no files. Abort if the destination listing fails (never treat it as an empty target).
 
 ## T10 — Logo (see docs/HANDOVER.md, 2026-10-30 22:20)
