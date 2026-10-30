@@ -145,8 +145,8 @@ class MappedRestoreTests(_Fixture):
 class RestoreCountTests(_Fixture):
     def test_counts_match_the_plan(self):                                  # H13: live "Selected: N files · size" without materialising rows
         self.assertEqual(self.b.restore_count(self.items), {"files": 4, "bytes": 36})
-        self.assertEqual(self.b.restore_count([{"share": "B", "ver": 2333, "path": "", "is_dir": 1}]), {"files": 3, "bytes": 27})
-        self.assertEqual(self.b.restore_count([{"share": "B", "ver": 2333, "path": "docs/z.txt", "is_dir": 0}]), {"files": 1, "bytes": 9})
+        self.assertEqual(self.b.restore_count([{"share": "B", "ver": 1234, "path": "", "is_dir": 1}]), {"files": 3, "bytes": 27})
+        self.assertEqual(self.b.restore_count([{"share": "B", "ver": 1234, "path": "docs/z.txt", "is_dir": 0}]), {"files": 1, "bytes": 9})
         self.assertEqual(self.b.restore_count([]), {"files": 0, "bytes": 0})
 
     def test_prefix_is_exact_and_case_sensitive(self):                         # H17: LIKE would match Foto_2024 -> FotoX2024, Photos -> photos
@@ -158,7 +158,7 @@ class RestoreCountTests(_Fixture):
     def test_skip_meta_in_sql(self):
         files = FILES + [{"share": "A", "path": "@eaDir/x.txt", "size": 5, "mtime": 0, "off": -9}, {"share": "A", "path": "a/@eaDir/SYNOPHOTO_THUMB.jpg", "size": 5, "mtime": 0, "off": -9},
                          {"share": "A", "path": "doc.docx@SynoResource", "size": 5, "mtime": 0, "off": -9}, {"share": "A", "path": "sub/.DS_Store", "size": 5, "mtime": 0, "off": -9}]
-        b = FakeBackup(self.src, files); sel = [{"share": "A", "ver": 2333, "path": "", "is_dir": 1}]
+        b = FakeBackup(self.src, files); sel = [{"share": "A", "ver": 1234, "path": "", "is_dir": 1}]
         self.assertEqual(b.restore_count(sel, skip_meta=True), {"files": 2, "bytes": 18})
         self.assertEqual(b.restore_count(sel, skip_meta=False), {"files": 6, "bytes": 38})
 
