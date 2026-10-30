@@ -242,7 +242,8 @@ class Source:
                                     "--retries-sleep", "5s", "--tpslimit", "8", "--drive-pacer-min-sleep", "100ms"], capture_output=True, text=True)
                 if r.returncode == 0 and tmp.is_file():
                     tmp.rename(dest)
-                    with self._lock: self._list.pop(str(Path(rel).parent).strip("/").replace(".", ""), None)   # listing of that dir is stale ("." = root = "")
+                    parent = str(Path(rel).parent).strip("/")
+                    with self._lock: self._list.pop("" if parent == "." else parent, None)   # that listing is stale now (root key is "")
                     return dest
                 errs.append(f"{remote}: {r.stderr.strip()[-160:]}")
                 if tmp.exists(): tmp.unlink()

@@ -385,6 +385,10 @@ class ListdirCacheTests(unittest.TestCase):
             self.assertNotIn("top.bin", self.src.listdir(""))
             self.assertEqual(self.src.ensure("top.bin").read_bytes(), b"downloaded")
             self.assertTrue(self.src.listdir("")["top.bin"]["local"])      # root listing ("." parent) is refreshed too
+            (self.src.cache_dir / "Pool/0.x").mkdir(parents=True)              # a dotted directory name keeps its own key
+            self.assertNotIn("1.bucket.2", self.src.listdir("Pool/0.x"))
+            self.assertEqual(self.src.ensure("Pool/0.x/1.bucket.2").read_bytes(), b"downloaded")
+            self.assertTrue(self.src.listdir("Pool/0.x")["1.bucket.2"]["local"])
 
     def test_cache_files_are_local(self):
         ents = self.src.listdir("Config/@Share/s")
