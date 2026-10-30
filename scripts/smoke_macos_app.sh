@@ -90,6 +90,19 @@ wait_for_exit() {
   die "app did not exit after /api/quit"
 }
 
+wait_for_smoke_exit() {
+  local _
+  for _ in {1..90}; do
+    if ! kill -0 "$PID" 2>/dev/null; then
+      wait "$PID" && { PID=; return 0; }
+      PID=
+      die "window smoke exited with an error"
+    fi
+    sleep 1
+  done
+  die "window smoke did not finish within 90 s"
+}
+
 check_about() {
   python3 - "$PORT" <<'PY'
 import json, sys, urllib.request
@@ -145,6 +158,14 @@ smoke_one() {
     *) die "unexpected quit response: $quit" ;;
   esac
   wait_for_exit
+
+  # Desktop window: the app opens its own window, waits for the page, closes it and exits 0.
+  : >"$LOG"
+  "$bin" --smoke --port "$PORT" >"$LOG" 2>&1 &
+  PID=$!
+  wait_for_smoke_exit
+  grep -q "smoke: ok" "$LOG" || die "window smoke did not report ok"
+  echo "window smoke passed"
   release_mount
   echo "smoke test passed: $dmg"
 }
