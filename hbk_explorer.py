@@ -108,22 +108,52 @@ def human(n):
     return f"{n:.1f} PB"
 
 def dest_inside_source(dest, remote, local):
-    """True when a restore destination is the backup itself or lies inside it (its remote folder or its local copy/cache).
-    dest and remote are rclone paths like "nas:share/folder" or local paths; local is the source's local folder."""
-    def norm(p): return re.sub(r"/+$", "", p.replace("\\", "/")) if p else p
+    """True when a restore destination is the backup itself or lies inside it: its remote folder, any mirror remote, or any
+    local copy/cache/extra root. dest is an rclone path like "nas:share/folder" or a local path; remote and local are a single
+    path or a list of paths (a Source has ``remotes`` and ``read_roots()``). Two rclone remotes that point at the same folder
+    under different names are not recognised; that needs the remote config, not the paths."""
+    def norm(p): return re.sub(r"/+$", "", str(p).replace("\\", "/")) if p else p
     def inside(child, parent):
         child, parent = norm(child), norm(parent)
         return bool(parent) and (child == parent or child.startswith(parent + "/"))
+    def many(x): return [str(v) for v in (x if isinstance(x, (list, tuple)) else [x]) if v]
+    remotes, locals_ = many(remote), many(local)
     if ":" in dest and not dest.startswith("/"):
-        return inside(dest, remote or "")
+        return any(inside(dest, r) for r in remotes)
     try: d = os.path.realpath(os.path.expanduser(dest))
     except OSError: d = dest
-    for p in (local, remote if remote and remote.startswith("/") else None):
-        if not p: continue
+    for p in locals_ + [r for r in remotes if r.startswith("/")]:
         try: p = os.path.realpath(os.path.expanduser(p))
         except OSError: pass
         if inside(d, p): return True
     return False
+
+def place_file(tmp, out):
+    """Move the staged file ``tmp`` to ``out`` without ever replacing what is at ``out``. True when placed; False when something
+    (a file, directory or symlink) already existed there, in which case it is left untouched. ``tmp`` is removed either way.
+    A hard link is atomic and keeps the mtime; where the destination has no hard links (some SMB/exFAT mounts) the name is
+    claimed with O_EXCL first and only that empty placeholder is replaced."""
+    try:
+        os.makedirs(os.path.dirname(out), exist_ok=True)
+        try:
+            os.link(tmp, out); return True
+        except FileExistsError:
+            return False
+        except OSError:
+            pass
+        try: fd = os.open(out, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError: return False
+        os.close(fd)
+        try: os.replace(tmp, out)
+        except OSError:
+            try: os.unlink(out)
+            except OSError: pass
+            raise
+        return True
+    finally:
+        try:
+            if os.path.lexists(tmp): os.unlink(tmp)
+        except OSError: pass
 
 def list_destination(dest):
     """Paths of every file already at a remote destination (recursive). Raises when the listing fails: an unknown
@@ -678,9 +708,8 @@ class Backup:
                                       "errors": job.get("errors", [])[-200:], "total_files": job.get("total_files"), "total_bytes": job.get("total_bytes"),
                                       "done_bytes": job.get("done_bytes", 0), "state": state, "label": job["label"], "started": job["started"], "updated": time.time()}))
         remote_dest = ":" in dest and not dest.startswith("/")    # rclone remote, e.g. nas:GDriveRestore/restore
+        import shutil, tempfile
         if remote_dest:
-            import tempfile
-            stage = tempfile.mkdtemp(prefix="hbk-stage-")
             job["message"] = "listing destination"
             try: existing = list_destination(dest)
             except Exception:
@@ -723,6 +752,10 @@ class Backup:
                     if bk in seen or bk in pending: continue
                     seen.add(bk)
                     if len(pending) < 12: pending[bk] = ex.submit(fetch, bk)
+        # Every file is extracted into a staging folder and then moved into place. For a local destination the folder is inside
+        # dest (same filesystem, so place_file can hard-link atomically); it is new (mkdtemp) and removed in the finally below,
+        # nothing else under dest is touched.
+        stage = tempfile.mkdtemp(prefix="hbk-stage-") if remote_dest else tempfile.mkdtemp(prefix=".hbk-restore-", dir=dest)
         job["next_index"] = start_at; persist()
         try:
             for i, f in enumerate(files):
@@ -759,8 +792,10 @@ class Backup:
                         job["done_files"] += 1; break
                     if os.path.lexists(out):         # anything already there is kept as is, whatever its size or date
                         job["skipped"] += 1; job["done_files"] += 1; break
-                    os.makedirs(os.path.dirname(out), exist_ok=True)
-                    pool.extract(f["off"], out, size=f["size"], mtime=f["mtime"], job=None, fh_cache=fh_cache)
+                    tmp = os.path.join(stage, rel); os.makedirs(os.path.dirname(tmp), exist_ok=True)
+                    pool.extract(f["off"], tmp, size=f["size"], mtime=f["mtime"], job=None, fh_cache=fh_cache)
+                    if not place_file(tmp, out):     # appeared since the check above: kept, counted as skipped
+                        job["skipped"] += 1; job["done_files"] += 1; break
                     job["done_files"] += 1; break
                   except Exception as e:
                     if attempt < 2 and not isinstance(e, KeyError):      # KeyError = chunk not in pool map: retrying will not help
@@ -775,6 +810,7 @@ class Backup:
         finally:
             ex.shutdown(wait=False, cancel_futures=True)
             for fh in fh_cache.values(): fh.close()
+            shutil.rmtree(stage, ignore_errors=True)   # only this job's staging folder; never anything else at the destination
         job["progress"] = 1.0; job["next_index"] = len(files); persist("done")
         return {"files": len(files), "restored": job["done_files"], "skipped": job["skipped"], "errors": len(job["errors"]), "bytes": done_bytes}
 
@@ -966,7 +1002,7 @@ class H(BaseHTTPRequestHandler):
                 s = add_source(body["name"], body["local"], body.get("remote"), body.get("extra")); return self._json(s.to_json())
             if u.path == "/api/restore":
                 b = backup_for(body["src"]); dest = os.path.expanduser(body["dest"].strip())
-                if dest_inside_source(dest, b.src.remote, b.src.local):
+                if dest_inside_source(dest, b.src.remotes, b.src.read_roots()):
                     return self._json({"error": f"the destination {dest} is inside the backup itself; restore into a new, empty folder elsewhere"}, 400)
                 if ":" in dest and not dest.startswith("/"):
                     r = subprocess.run([RCLONE, "mkdir", dest], capture_output=True, text=True)
