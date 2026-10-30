@@ -455,7 +455,7 @@ async function tabRestore(){const el=$('#tab-restore');
   $('#wdConnect').onclick=async()=>{const q={kind:'smb',name:$('#wdName').value.trim()||'nas',host:$('#wdHost').value.trim(),user:$('#wdUser').value.trim(),password:$('#wdPass').value};
     if(!q.host||!q.user){$('#wdConn').textContent='Fill in the NAS address and the user.';return}
     $('#wdConnect').disabled=true;$('#wdConn').textContent='Connecting…';
-    try{const j=await api('/api/rclone/connect',q);const job=await new Promise(res=>{const t=async()=>{const x=await api('/api/job',{id:j.id});if(x.state==='running'){$('#wdConn').textContent=x.message||'';setTimeout(t,1000)}else res(x)};t()});
+    try{const j=await post('/api/rclone/connect',q);const job=await new Promise(res=>{const t=async()=>{const x=await api('/api/job',{id:j.id});if(x.state==='running'){$('#wdConn').textContent=x.message||'';setTimeout(t,1000)}else res(x)};t()});
       if(job.state==='error'){$('#wdConn').textContent='Failed: '+job.error;$('#wdConnect').disabled=false;return}
       localStorage.setItem('wzRem',job.result.remote);localStorage.setItem('rsMode','remote');if(job.result.shares&&job.result.shares.length&&!job.result.shares.includes(localStorage.getItem('wzShare')))localStorage.setItem('wzShare',job.result.shares[0]);
       $('#wdConn').textContent='Connected: '+job.result.remote+(job.result.shares?' · shares: '+job.result.shares.join(', '):'');setTimeout(tabRestore,800)}
@@ -513,7 +513,7 @@ $('#wsNext').onclick=async()=>{
     else if(k==='local'){WS.remote='';WS.path='~'}
     else{const q=k==='drive'?{kind:'drive',name:$('#wsDName').value,client_id:$('#wsCid').value.trim(),client_secret:$('#wsCsec').value.trim()}:{kind:'smb',name:$('#wsSName').value,host:$('#wsHost').value.trim(),user:$('#wsUser').value.trim(),password:$('#wsPass').value};
       $('#wsConn').textContent=k==='drive'?'A Google sign-in page opens in your browser. Approve it, then come back here…':'Connecting…';$('#wsNext').disabled=true;
-      try{const j=await api('/api/rclone/connect',q);const job=await new Promise(res=>{const t=async()=>{const x=await api('/api/job',{id:j.id});if(x.state==='running'){$('#wsConn').textContent=x.message||'';setTimeout(t,1000)}else res(x)};t()});
+      try{const j=await post('/api/rclone/connect',q);const job=await new Promise(res=>{const t=async()=>{const x=await api('/api/job',{id:j.id});if(x.state==='running'){$('#wsConn').textContent=x.message||'';setTimeout(t,1000)}else res(x)};t()});
         if(job.state==='error'){$('#wsConn').textContent='Failed: '+job.error;$('#wsNext').disabled=false;return}
         WS.remote=job.result.remote;WS.path='';$('#wsConn').textContent='Connected: '+WS.remote}catch(e){$('#wsConn').textContent=e.message;$('#wsNext').disabled=false;return}
       $('#wsNext').disabled=false}
