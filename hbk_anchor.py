@@ -5,42 +5,152 @@ from array import array
 from hbk_pool import SET_OF_WRITER, WRITER_OF_SET, bucket_index_entries
 from hbk_poolmap2 import build_writers
 
-def scan_anchors(source, outdir, listing, writers, log=print, max_bucket=None, batch_log=500):
-    # index: (K, tail) -> [(w, rec idx, tag)]
-    idx = collections.defaultdict(list); ntag = 0
+MAX_WORKERS = int(os.environ.get("HBK_SCAN_WORKERS", "4"))        # H9: never more than 4 scan processes
+WORKER_RSS_MB = int(os.environ.get("HBK_SCAN_WORKER_RSS_MB", "1024"))  # a worker that grows past this aborts the scan
+PARENT_RSS_MB = int(os.environ.get("HBK_SCAN_RSS_MB", "6144"))         # the parent (holds `writers`) likewise
+
+def _rss_mb():
+    import resource, sys
+    r = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    return r / (1 << 20) if sys.platform == "darwin" else r / 1024
+
+def build_tag_index(writers):
+    """(K, tail) -> {tag: [(w, rec idx), ...]}. Identical files share one tag, so a tag may name thousands of records:
+    hits are collected per *tag* and the records of a tag share one position list (memory stays linear; the old
+    per-record cross product reached 26M entries for 97k records and blew the RAM on the full scan)."""
+    idx = {}; ntag = 0
     for w, recs in writers.items():
         for r in recs:
             if r.tag and r.n > 0:
                 K = min(r.n + len(r.dedup), 9)
                 if r.head_new < K: continue            # leading chunks include dedup refs: tag would match elsewhere
-                idx[(K, r.tail)].append((w, r.idx, r.tag)); ntag += 1
-    log(f"anchor scan: {ntag:,} tagged records, {len(idx):,} (K,tail) keys")
+                idx.setdefault((K, r.tail), {}).setdefault(r.tag, []).append((w, r.idx)); ntag += 1
+    return idx, ntag
+
+def _scan_entries(b, ents, keys, hits):
+    """Scan one bucket's index entries; keys: (K, tail) -> set(tags); hits: tag -> [(b, i, K)]. Returns md5 checks."""
+    ps = [0]
+    for e in ents: ps.append(ps[-1] + e[2])
+    n = len(ents); checks = 0
+    for i in range(n):
+        base = ps[i]
+        for K in range(1, 10):
+            if i + K > n: break
+            tags = keys.get((K, ps[i + K] - base))
+            if not tags: continue
+            h = hashlib.md5(b"".join(e[3][:16] for e in ents[i:i + K])).hexdigest(); checks += 1
+            if h in tags: hits.setdefault(h, []).append((b, i, K))
+    return checks
+
+def _worker_main(argv):
+    """Child entry (`python hbk_anchor.py --worker <job.pkl> <out.pkl>`): job = (root, names, keys, buckets). A plain
+    subprocess, not multiprocessing: a spawned Pool worker re-runs the caller's main module, which re-loaded the whole
+    `writers` table (GBs) in every worker last time."""
+    import pickle
+    with open(argv[0], "rb") as f: root, names, keys, bl = pickle.load(f)
+    hits = {}; checks = 0
+    for b in bl:
+        checks += _scan_entries(b, bucket_index_entries(os.path.join(root, f"Pool/0/{b // 2048}/{names[b]}")), keys, hits)
+        if _rss_mb() > WORKER_RSS_MB: raise MemoryError(f"scan worker RSS {_rss_mb():.0f} MB > {WORKER_RSS_MB} MB at bucket {b}")
+    with open(argv[1], "wb") as f: pickle.dump((hits, checks), f)
+
+def _run_worker(job, tmpdir, n):
+    import pickle, subprocess, sys
+    jp = os.path.join(tmpdir, f"job{n}.pkl"); op = os.path.join(tmpdir, f"out{n}.pkl")
+    with open(jp, "wb") as f: pickle.dump(job, f)
+    p = subprocess.run([sys.executable, os.path.abspath(__file__), "--worker", jp, op], capture_output=True, text=True)
+    if p.returncode: raise MemoryError(f"scan worker {n} failed: {p.stderr.strip().splitlines()[-1] if p.stderr.strip() else p.returncode}")
+    with open(op, "rb") as f: return pickle.load(f)
+
+def _bucket_names(listing, max_bucket):
     names = {}; counts = {}
     for e in listing:
         if e["t"] == "index" and (e["b"] not in names or e["rev"] > names[e["b"]][1]): names[e["b"]] = (e["name"], e["rev"]); counts[e["b"]] = (e["size"] - 64) // 32
-    buckets = sorted(b for b in counts if max_bucket is None or b <= max_bucket)
-    anchors = collections.defaultdict(list)     # (w, idx) -> [(bucket, entry, K)]
-    t0 = time.time(); checks = 0
-    for n_done, b in enumerate(buckets):
-        ents = bucket_index_entries(source.ensure(f"Pool/0/{b // 2048}/{names[b][0]}"))
-        ul = [e[2] for e in ents]; ps = [0]
-        for x in ul: ps.append(ps[-1] + x)
-        n = len(ents)
-        for i in range(n):
-            base = ps[i]
-            for K in range(1, 10):
-                if i + K > n: break
-                key = (K, ps[i + K] - base)
-                cands = idx.get(key)
-                if not cands: continue
-                h = hashlib.md5(b"".join(e[3][:16] for e in ents[i:i + K])).hexdigest(); checks += 1
-                for w, ri, tag in cands:
-                    if tag == h: anchors[(w, ri)].append((b, i, K))
-        if (n_done + 1) % batch_log == 0: log(f"  scanned {n_done + 1}/{len(buckets)} buckets, anchors={len(anchors):,}, md5 checks={checks:,}, {time.time() - t0:.0f}s")
-    log(f"anchor scan done: {len(anchors):,} records anchored of {ntag:,} tagged; {sum(1 for v in anchors.values() if len(v) > 1):,} with multiple hits; {time.time() - t0:.0f}s")
-    out = {f"{w}:{ri}": v for (w, ri), v in anchors.items()}
-    json.dump(out, open(os.path.join(outdir, "anchors.json"), "w"))
+    names1 = {b: v[0] for b, v in names.items()}
+    return names1, counts, sorted(b for b in counts if max_bucket is None or b <= max_bucket)
+
+def expand_hits(idx, hits):
+    """tag positions -> anchors {(w, idx): positions}; all records of a tag reference the *same* sorted list."""
+    anchors = {}; multi = 0
+    for tagmap in idx.values():
+        for tag, recs in tagmap.items():
+            pos = hits.get(tag)
+            if not pos: continue
+            pos.sort()
+            if len(pos) > 1: multi += len(recs)
+            for k in recs: anchors[k] = pos
+    return anchors, multi
+
+def save_anchors(outdir, idx, hits):
+    """anchors.json: {"positions": {tag: [[b, i, K], ...]}, "records": {"w:ri": tag}} (linear size; see load_anchors)."""
+    recs = {f"{w}:{ri}": tag for tagmap in idx.values() for tag, rl in tagmap.items() if tag in hits for (w, ri) in rl}
+    with open(os.path.join(outdir, "anchors.json"), "w") as f: json.dump({"positions": hits, "records": recs}, f)
+
+def load_anchors(outdir):
+    with open(os.path.join(outdir, "anchors.json")) as f: d = json.load(f)
+    pos = {t: sorted(tuple(h) for h in v) for t, v in d["positions"].items()}
+    out = {}
+    for k, t in d["records"].items():
+        w, ri = k.split(":"); out[(int(w), int(ri))] = pos[t]
+    return out
+
+def scan_anchors(source, outdir, listing, writers, log=print, max_bucket=None, workers=None):
+    """Locate every tagged record's first chunk in the bucket indexes. workers=1 scans in-process; otherwise at most
+    MAX_WORKERS subprocesses (`python -m hbk_anchor --worker`), each holding only the (K, tail) -> tags map and reading
+    one bucket index at a time (< 1 MB). The parent keeps hits per tag; see build_tag_index.
+    Returns (anchors {(w, idx): [(bucket, entry, K), ...]} with shared lists per tag, counts {bucket: entries})."""
+    idx, ntag = build_tag_index(writers)
+    keys = {k: set(tm) for k, tm in idx.items()}
+    names1, counts, buckets = _bucket_names(listing, max_bucket)
+    root = str(source.local)
+    for b in buckets:
+        if not os.path.isfile(os.path.join(root, f"Pool/0/{b // 2048}/{names1[b]}")): source.ensure(f"Pool/0/{b // 2048}/{names1[b]}")
+    import sys
+    workers = 1 if getattr(sys, "frozen", False) else max(1, min(workers or MAX_WORKERS, MAX_WORKERS, os.cpu_count() or 1))
+    log(f"anchor scan (x{workers}): {ntag:,} tagged records, {sum(len(v) for v in idx.values()):,} tags, {len(idx):,} keys, {len(buckets):,} buckets, rss {_rss_mb():.0f} MB")
+    t0 = time.time(); hits = {}; checks = 0
+    def merge(part):
+        for t, v in part.items(): hits.setdefault(t, []).extend(v)
+    if workers == 1:
+        for n_done, b in enumerate(buckets):
+            checks += _scan_entries(b, bucket_index_entries(os.path.join(root, f"Pool/0/{b // 2048}/{names1[b]}")), keys, hits)
+            if (n_done + 1) % 500 == 0: log(f"  scanned {n_done + 1}/{len(buckets)} buckets, tags hit={len(hits):,}, md5 checks={checks:,}, {time.time() - t0:.0f}s")
+            if _rss_mb() > PARENT_RSS_MB: raise MemoryError(f"anchor scan RSS {_rss_mb():.0f} MB > {PARENT_RSS_MB} MB; aborted")
+    else:
+        import concurrent.futures, tempfile
+        chunks = [c for c in (buckets[i::workers * 4] for i in range(workers * 4)) if c]      # interleaved so progress is even
+        with tempfile.TemporaryDirectory(prefix="hbk-scan-") as td, concurrent.futures.ThreadPoolExecutor(workers) as ex:
+            futs = [ex.submit(_run_worker, (root, names1, keys, c), td, n) for n, c in enumerate(chunks)]
+            try:
+                for done, fu in enumerate(concurrent.futures.as_completed(futs), 1):
+                    part, c = fu.result(); merge(part); checks += c
+                    log(f"  {done}/{len(chunks)} parts, tags hit={len(hits):,}, md5 checks={checks:,}, rss {_rss_mb():.0f} MB, {time.time() - t0:.0f}s")
+                    if _rss_mb() > PARENT_RSS_MB: raise MemoryError(f"anchor scan RSS {_rss_mb():.0f} MB > {PARENT_RSS_MB} MB; aborted")
+            except BaseException:
+                for fu in futs: fu.cancel()
+                raise
+    anchors, multi = expand_hits(idx, hits)
+    npos = sum(len(v) for v in hits.values())
+    log(f"anchor scan done: {len(anchors):,} records anchored of {ntag:,} tagged ({len(hits):,} tags, {npos:,} positions); {multi:,} with multiple hits; rss {_rss_mb():.0f} MB; {time.time() - t0:.0f}s")
+    save_anchors(outdir, idx, hits)
     return anchors, counts
+
+def scan_anchors_parallel(source, outdir, listing, writers, log=print, max_bucket=None, workers=None):
+    """Kept for callers of the old name; same as scan_anchors (capped at MAX_WORKERS)."""
+    return scan_anchors(source, outdir, listing, writers, log=log, max_bucket=max_bucket, workers=workers or MAX_WORKERS)
+
+def _filter_hits(anchors, bset):
+    """{(w, ri): [hits in bset]} keeping one filtered list per shared input list (records of a tag share it)."""
+    memo = {}; out = {}
+    for k, v in anchors.items():
+        f = memo.get(id(v))
+        if f is None: f = memo[id(v)] = sorted(h for h in v if h[0] in bset)
+        out[k] = f
+    return out
+
+def _hits_between(hl, lo, hi):
+    """hits (sorted by bucket) with lo <= bucket <= hi."""
+    return hl[bisect.bisect_left(hl, (lo,)):bisect.bisect_right(hl, (hi, 1 << 62, 1 << 62))]
 
 def rhythm(b): return ((b - 20) // 4) % 4
 
@@ -48,9 +158,8 @@ def place_from_anchors(writers, anchors, counts, log=print, max_bucket=None):
     """anchors: {(w, idx): [(bucket, entry, K), ...]}. Returns (owner dict bucket->w, placements {w: {idx: [(b, e, n)]}}, report)."""
     buckets = sorted(b for b in counts if max_bucket is None or b <= max_bucket); bset = set(buckets)
     # 1. owners from unique anchors
-    votes = collections.defaultdict(collections.Counter)
-    for (w, ri), hits in anchors.items():
-        hits = [h for h in hits if h[0] in bset]
+    votes = collections.defaultdict(collections.Counter); fh = _filter_hits(anchors, bset)
+    for (w, ri), hits in fh.items():
         if len(hits) == 1: votes[hits[0][0]][w] += 1
     owner = {}; conflicts = []
     for b, c in votes.items():
@@ -62,7 +171,7 @@ def place_from_anchors(writers, anchors, counts, log=print, max_bucket=None):
     report = collections.Counter(); placements = {w: {} for w in range(4)}
     for w in range(4):
         recs = writers[w]
-        seq = sorted(((h[0][0], h[0][1], ri) for (ww, ri), h in anchors.items() if ww == w and len([x for x in h if x[0] in bset]) == 1 for h in [[x for x in h if x[0] in bset]]))
+        seq = sorted((h[0][0], h[0][1], ri) for (ww, ri), h in fh.items() if ww == w and len(h) == 1)
         log(f"writer{w}: {len(seq):,} unique anchors")
         for k in range(len(seq)):
             bA, eA, ri = seq[k]; r = recs[ri]; need = r.n
@@ -107,7 +216,7 @@ def resolve_and_place(writers, anchors, counts, log=print, max_bucket=None):
     anchors of a writer filled with its untagged records (by chunk count); free buckets assigned by count. Returns
     (owner, placements {w: {idx: [(b,e,n)]}}, report)."""
     buckets = sorted(b for b in counts if max_bucket is None or b <= max_bucket); bset = set(buckets); bpos = {b: i for i, b in enumerate(buckets)}
-    hits = {k: [h for h in v if h[0] in bset] for k, v in anchors.items()}
+    hits = _filter_hits(anchors, bset)
     fixed = {k: v[0] for k, v in hits.items() if len(v) == 1}
     report = collections.Counter(); report["unique"] = len(fixed); report["multi"] = sum(1 for v in hits.values() if len(v) > 1)
     def owners_from(fixed):
@@ -124,7 +233,7 @@ def resolve_and_place(writers, anchors, counts, log=print, max_bucket=None):
             if (w, ri) in fixed or len(hl) < 2: continue
             k = bisect.bisect_left(idxs[w], ri)
             lo = bks[w][k - 1] if k > 0 else buckets[0]; hi = bks[w][k] if k < len(bks[w]) else buckets[-1]
-            ok = [h for h in hl if lo <= h[0] <= hi and owner.get(h[0], w) == w]
+            ok = [h for h in _hits_between(hl, lo, hi) if owner.get(h[0], w) == w]
             if len(ok) == 1: fixed[(w, ri)] = ok[0]; newly += 1
         owner, conf = owners_from(fixed); report[f"resolved-it{it}"] = newly
         if not newly: break
@@ -214,5 +323,10 @@ def export_map(writers, owner, placements, counts, outdir, mapped_upto):
         s = SET_OF_WRITER[w]; recs = writers[w]
         out["placements"][str(s)] = {str(recs[i].off): segs for i, segs in placements[w].items()}
         out["ranges"][str(s)] = [[a, L, r.off] for r in recs for a, L in r.ranges]
-    json.dump(out, open(os.path.join(outdir, "poolmap2.json"), "w"))
+    with open(os.path.join(outdir, "poolmap2.json"), "w") as f: json.dump(out, f)
     return out
+
+if __name__ == "__main__":
+    import sys
+    if len(sys.argv) == 4 and sys.argv[1] == "--worker": _worker_main(sys.argv[2:])
+    else: sys.exit("usage: python hbk_anchor.py --worker <job.pkl> <out.pkl>")
