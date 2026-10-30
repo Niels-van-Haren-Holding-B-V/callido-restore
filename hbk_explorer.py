@@ -751,8 +751,14 @@ class Backup:
                     if len(pending) < 12: pending[bk] = ex.submit(fetch, bk)
         # Every file is extracted into a staging folder and then moved into place. For a local destination the folder is inside
         # dest (same filesystem, so place_file can hard-link atomically); it is new (mkdtemp) and removed in the finally below,
-        # nothing else under dest is touched.
-        stage = tempfile.mkdtemp(prefix="hbk-stage-") if remote_dest else tempfile.mkdtemp(prefix=".hbk-restore-", dir=dest)
+        # nothing else under dest is touched. If the app is killed mid-restore the folder stays behind; it carries the job id,
+        # so a resume of the same job removes its own leftover and nothing else.
+        if remote_dest: stage = tempfile.mkdtemp(prefix="hbk-stage-")
+        else:
+            own = f".hbk-restore-{job['id']}-"
+            for left in Path(dest).glob(own + "*"):
+                if left.is_dir() and not left.is_symlink(): shutil.rmtree(left, ignore_errors=True)
+            stage = tempfile.mkdtemp(prefix=own, dir=dest)
         job["next_index"] = start_at; persist()
         try:
             for i, f in enumerate(files):

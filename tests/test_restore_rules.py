@@ -139,6 +139,13 @@ class RestoreLoopLocal(unittest.TestCase):
         self.assertEqual(job["skipped"], 1); self.assertEqual(b.pool.calls, ["b.txt"])
         self.assertEqual(sorted(os.listdir(self.dest)), ["share"])            # staging folder removed, nothing else added
 
+    def test_resume_removes_only_this_jobs_leftover_staging_folder(self):
+        mine = os.path.join(self.dest, ".hbk-restore-t1-abc"); other = os.path.join(self.dest, ".hbk-restore-zz-abc")
+        for d in (mine, other): os.makedirs(d); Path(d, "share", "x").parent.mkdir(); Path(d, "share", "x").write_bytes(b"part")
+        self.run_restore([("b.txt", 4, 1700000001)])
+        self.assertFalse(os.path.exists(mine)); self.assertTrue(os.path.exists(os.path.join(other, "share", "x")))
+        self.assertEqual(sorted(os.listdir(self.dest)), [".hbk-restore-zz-abc", "share"])
+
     def test_file_appearing_during_extract_is_kept(self):
         res, job, b = self.run_restore([("c.txt", 3, 1700000000)], appear={"c.txt"})
         self.assertEqual(Path(self.dest, "share", "c.txt").read_bytes(), b"INTRUDER")

@@ -13,4 +13,7 @@
    progress bar; Stop keeps index files already downloaded, and running it again continues) → choose the target: back into the
    original NAS shares, one folder on a NAS share, or a local path → Preview → Start.
    The bar at the top shows running jobs. Pause/Resume from the wizard; after a crash or reboot the job is listed for resuming.
+   Files already at the target are never overwritten or deleted. During a restore to a local folder, files are staged in a hidden
+   `.hbk-restore-<job id>-…` folder inside the target and moved into place one by one; it is removed when the job ends or is resumed.
+   If the app was killed mid-restore, that folder may remain; it is safe to delete.
 Encrypted (`.L0CK3D`) copies are detected and reported as unreadable.
