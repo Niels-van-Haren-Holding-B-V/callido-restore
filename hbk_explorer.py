@@ -107,6 +107,33 @@ def human(n):
         n /= 1024
     return f"{n:.1f} PB"
 
+def place_file(tmp, out):
+    """Move the staged file ``tmp`` to ``out`` without ever replacing what is at ``out``. True when placed; False when something
+    (a file, directory or symlink) already existed there, in which case it is left untouched. ``tmp`` is removed either way.
+    A hard link is atomic and keeps the mtime; where the destination has no hard links (some SMB/exFAT mounts) the name is
+    claimed with O_EXCL first and only that empty placeholder is replaced."""
+    try:
+        os.makedirs(os.path.dirname(out), exist_ok=True)
+        try:
+            os.link(tmp, out); return True
+        except FileExistsError:
+            return False
+        except OSError:
+            pass
+        try: fd = os.open(out, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError: return False
+        os.close(fd)
+        try: os.replace(tmp, out)
+        except OSError:
+            try: os.unlink(out)
+            except OSError: pass
+            raise
+        return True
+    finally:
+        try:
+            if os.path.lexists(tmp): os.unlink(tmp)
+        except OSError: pass
+
 def list_destination(dest):
     """Paths of every file already at a remote destination (recursive). Raises when the listing fails: an unknown
     destination must never be treated as empty, because the restore never writes over what is there."""
@@ -699,9 +726,8 @@ class Backup:
                                       "errors": job.get("errors", [])[-200:], "total_files": job.get("total_files"), "total_bytes": job.get("total_bytes"),
                                       "done_bytes": job.get("done_bytes", 0), "state": state, "label": job["label"], "started": job["started"], "updated": time.time()}))
         remote_dest = ":" in dest and not dest.startswith("/")    # rclone remote, e.g. nas:GDriveRestore/restore
+        import shutil, tempfile
         if remote_dest:
-            import tempfile
-            stage = tempfile.mkdtemp(prefix="hbk-stage-")
             job["message"] = "listing destination"
             try: existing = list_destination(dest)
             except Exception:
@@ -744,6 +770,16 @@ class Backup:
                     if bk in seen or bk in pending: continue
                     seen.add(bk)
                     if len(pending) < 12: pending[bk] = ex.submit(fetch, bk)
+        # Every file is extracted into a staging folder and then moved into place. For a local destination the folder is inside
+        # dest (same filesystem, so place_file can hard-link atomically); it is new (mkdtemp) and removed in the finally below,
+        # nothing else under dest is touched. If the app is killed mid-restore the folder stays behind; it carries the job id,
+        # so a resume of the same job removes its own leftover and nothing else.
+        if remote_dest: stage = tempfile.mkdtemp(prefix="hbk-stage-")
+        else:
+            own = f".hbk-restore-{job['id']}-"
+            for left in Path(dest).glob(own + "*"):
+                if left.is_dir() and not left.is_symlink(): shutil.rmtree(left, ignore_errors=True)
+            stage = tempfile.mkdtemp(prefix=own, dir=dest)
         job["next_index"] = start_at; persist()
         try:
             for i, f in enumerate(files):
@@ -780,8 +816,10 @@ class Backup:
                         job["done_files"] += 1; break
                     if os.path.lexists(out):         # anything already there is kept as is, whatever its size or date
                         job["skipped"] += 1; job["done_files"] += 1; break
-                    os.makedirs(os.path.dirname(out), exist_ok=True)
-                    pool.extract(f["off"], out, size=f["size"], mtime=f["mtime"], job=None, fh_cache=fh_cache)
+                    tmp = os.path.join(stage, rel); os.makedirs(os.path.dirname(tmp), exist_ok=True)
+                    pool.extract(f["off"], tmp, size=f["size"], mtime=f["mtime"], job=None, fh_cache=fh_cache)
+                    if not place_file(tmp, out):     # appeared since the check above: kept, counted as skipped
+                        job["skipped"] += 1; job["done_files"] += 1; break
                     job["done_files"] += 1; break
                   except Exception as e:
                     if attempt < 2 and not isinstance(e, KeyError):      # KeyError = chunk not in pool map: retrying will not help
@@ -796,6 +834,7 @@ class Backup:
         finally:
             ex.shutdown(wait=False, cancel_futures=True)
             for fh in fh_cache.values(): fh.close()
+            shutil.rmtree(stage, ignore_errors=True)   # only this job's staging folder; never anything else at the destination
         job["progress"] = 1.0; job["next_index"] = len(files); persist("done")
         return {"files": len(files), "restored": job["done_files"], "skipped": job["skipped"], "errors": len(job["errors"]), "bytes": done_bytes}
 
