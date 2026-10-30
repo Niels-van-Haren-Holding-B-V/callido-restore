@@ -1,0 +1,402 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hyper Backup Desktop</title>
+<style>
+:root{--bg:#f6f7f9;--panel:#fff;--ink:#1c2128;--muted:#6b7280;--line:#e2e5ea;--accent:#2563eb;--accent2:#0ea5e9;
+  --new:#2563eb;--mod:#d97706;--rem:#dc2626;--ok:#16a34a;--warn:#b45309;--bad:#b91c1c;--chip:#eef1f5;--sel:#dbeafe;--mono:ui-monospace,SFMono-Regular,Menlo,monospace}
+@media (prefers-color-scheme:dark){:root{--bg:#0f1217;--panel:#171b22;--ink:#e6e8ec;--muted:#9aa3af;--line:#2a313c;--chip:#232a35;--sel:#1e3a8a;--new:#60a5fa;--mod:#fbbf24;--rem:#f87171}}
+*{box-sizing:border-box}body{margin:0;font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--ink)}
+header{display:flex;gap:12px;align-items:center;padding:10px 16px;background:var(--panel);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:5;flex-wrap:wrap}
+header h1{font-size:16px;margin:0 8px 0 0}
+select,input,button{font:inherit;color:inherit;background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:5px 8px}
+button{cursor:pointer}button.primary{background:var(--accent);color:#fff;border-color:var(--accent)}button:disabled{opacity:.5;cursor:default}
+button.small{padding:2px 7px;font-size:12px}
+main{padding:12px 16px;display:grid;gap:12px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px}
+.panel h2{font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin:0 0 8px}
+.muted{color:var(--muted)}.mono{font-family:var(--mono);font-size:12px}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.chip{display:inline-flex;gap:6px;align-items:center;background:var(--chip);border-radius:999px;padding:3px 10px;font-size:12px;border:1px solid transparent;cursor:pointer}
+.chip.on{border-color:var(--accent);background:var(--sel)}
+.chip .dot{width:8px;height:8px;border-radius:50%;background:var(--muted)}.dot.ok{background:var(--ok)}.dot.dl{background:var(--accent2)}.dot.bad{background:var(--bad)}.dot.warn{background:var(--warn)}
+.tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin-bottom:10px}
+.tabs button{border:none;background:none;padding:8px 12px;border-bottom:2px solid transparent;border-radius:0;color:var(--muted)}
+.tabs button.on{color:var(--ink);border-bottom-color:var(--accent)}
+table{width:100%;border-collapse:collapse;font-size:12.5px}th,td{text-align:left;padding:5px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--muted);font-weight:600;position:sticky;top:0;background:var(--panel);cursor:pointer;white-space:nowrap}
+tr.f:hover{background:var(--chip);cursor:pointer}td.num{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+td.path{word-break:break-all}td.path b{font-weight:600}
+.flag{display:inline-block;font-size:10.5px;padding:0 5px;border-radius:4px;margin-right:3px;background:var(--chip);color:var(--muted)}
+.flag.exec,.flag.script,.flag.ransom,.flag.ssh,.flag.double-ext,.flag.timestomp{background:#fee2e2;color:#991b1b}
+@media (prefers-color-scheme:dark){.flag.exec,.flag.script,.flag.ransom,.flag.ssh,.flag.double-ext,.flag.timestomp{background:#4c1d1d;color:#fecaca}}
+.flag.changed,.flag.N{background:#dbeafe;color:#1e40af}.flag.M{background:#fef3c7;color:#92400e}.flag.D{background:#fee2e2;color:#991b1b}
+.tablewrap{max-height:60vh;overflow:auto;border:1px solid var(--line);border-radius:8px}
+svg text{fill:var(--muted);font-size:10px}
+.bar{cursor:pointer}.bar:hover{opacity:.7}
+.tip{position:fixed;background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:6px 9px;font-size:12px;pointer-events:none;z-index:50;box-shadow:0 4px 14px rgba(0,0,0,.15);display:none;max-width:360px}
+#drawer{position:fixed;top:0;right:0;width:460px;max-width:100vw;height:100vh;background:var(--panel);border-left:1px solid var(--line);box-shadow:-8px 0 24px rgba(0,0,0,.15);transform:translateX(100%);transition:transform .15s;z-index:20;overflow:auto;padding:14px}
+#drawer.open{transform:none}
+dl{display:grid;grid-template-columns:110px 1fr;gap:3px 10px;margin:8px 0}dt{color:var(--muted)}dd{margin:0;word-break:break-all}
+.crumbs a{cursor:pointer;color:var(--accent)}.crumbs span{color:var(--muted);margin:0 4px}
+.status{font-size:12px;color:var(--muted)}
+.prog{height:6px;background:var(--chip);border-radius:3px;overflow:hidden;width:220px}.prog i{display:block;height:100%;background:var(--accent)}
+dialog{border:1px solid var(--line);border-radius:10px;background:var(--panel);color:var(--ink);padding:16px;min-width:420px}
+dialog::backdrop{background:rgba(0,0,0,.4)}
+label.f{display:grid;gap:3px;margin-bottom:8px;font-size:12px;color:var(--muted)}label.f input{color:var(--ink)}
+.kpi{display:flex;gap:16px;flex-wrap:wrap}.kpi div{background:var(--chip);border-radius:8px;padding:8px 12px;min-width:120px}.kpi b{display:block;font-size:18px}.kpi span{font-size:11px;color:var(--muted)}
+.alert{border-left:4px solid var(--bad);padding:8px 12px;background:var(--chip);border-radius:6px}
+.help{font-size:11.5px;color:var(--muted)}
+.basket li{display:flex;gap:8px;align-items:center;padding:3px 0}
+</style>
+</head>
+<body>
+<header>
+  <h1>Hyper Backup Desktop</h1>
+  <select id="srcSel"></select>
+  <button id="addSrc">+ Add backup</button>
+  <button id="refreshSrc" title="Re-scan source">↻</button>
+  <span id="srcStatus" class="status"></span>
+  <span id="jobs" class="row" style="flex:1;justify-content:flex-end;gap:14px"></span>
+  <button id="quit" class="small" title="Stop the app">Quit</button>
+</header>
+<main>
+  <div id="overview" class="panel"></div>
+  <div id="versions" class="panel">
+    <h2>Backup versions <span class="help">· bar = files new / modified / removed in that run (log scale). Click a bar to select a version.</span></h2>
+    <div class="row" style="margin-bottom:6px">
+      <span>Range:</span>
+      <button class="small rng" data-d="30">30 d</button><button class="small rng" data-d="90">90 d</button><button class="small rng on" data-d="365">1 y</button><button class="small rng" data-d="0">all</button>
+      <span style="flex:1"></span>
+      <label>Go to version <input id="verInput" style="width:90px"></label>
+      <select id="verList" style="max-width:260px"></select>
+    </div>
+    <div id="verChart"></div>
+  </div>
+  <div id="snap" class="panel" style="display:none">
+    <div id="snapHead" class="row"></div>
+    <div id="snapShares" class="row" style="margin:8px 0"></div>
+    <div class="tabs">
+      <button data-t="changes" class="on">Changes in this version</button>
+      <button data-t="timeline">File timeline</button>
+      <button data-t="browse">Browse folders</button>
+      <button data-t="search">Search &amp; flags</button>
+      <button data-t="compare">Compare versions</button>
+      <button data-t="restore">Restore wizard</button>
+    </div>
+    <div id="tab-changes"></div>
+    <div id="tab-timeline" style="display:none"></div>
+    <div id="tab-browse" style="display:none"></div>
+    <div id="tab-search" style="display:none"></div>
+    <div id="tab-compare" style="display:none"></div>
+    <div id="tab-restore" style="display:none"></div>
+  </div>
+</main>
+<div id="drawer"><button id="closeDrawer" style="float:right">✕</button><div id="drawerBody"></div></div>
+<div id="tip" class="tip"></div>
+<dialog id="dlgSrc" style="min-width:640px">
+  <h3 style="margin-top:0">Add a backup — <span id="wzS" class="muted">step 1 of 3</span></h3>
+  <div id="ws1">
+    <p>Where is the Hyper Backup (<code>.hbk</code>) folder?</p>
+    <div class="row" style="flex-direction:column;align-items:flex-start;gap:6px">
+      <label><input type="radio" name="wsk" value="existing" checked> an rclone remote I already have: <select id="wsRem"></select></label>
+      <label><input type="radio" name="wsk" value="drive"> Google Drive — connect now (opens Google sign-in in your browser)</label>
+      <div id="wsDrive" style="display:none;margin-left:22px"><label class="f">remote name <input id="wsDName" value="gdrive"></label>
+        <label class="f">your own Google OAuth client id (optional, recommended: avoids the shared rate limit) <input id="wsCid" placeholder="xxxxx.apps.googleusercontent.com"></label>
+        <label class="f">client secret <input id="wsCsec" type="password"></label>
+        <p class="help">How to get one: console.cloud.google.com → APIs &amp; Services → enable “Google Drive API” → Credentials → “OAuth client ID”, type <i>Desktop app</i>. Copy id and secret here. Only read access is requested.</p></div>
+      <label><input type="radio" name="wsk" value="smb"> a NAS share over SMB — connect now</label>
+      <div id="wsSmb" style="display:none;margin-left:22px"><label class="f">remote name <input id="wsSName" value="nas"></label><label class="f">host (IP or name) <input id="wsHost"></label><label class="f">user <input id="wsUser"></label><label class="f">password <input id="wsPass" type="password"></label></div>
+      <label><input type="radio" name="wsk" value="local"> a folder on this Mac / a mounted disk</label>
+    </div>
+    <div id="wsConn" class="status" style="margin-top:6px"></div>
+  </div>
+  <div id="ws2" style="display:none">
+    <p>Pick the <code>.hbk</code> folder: <span class="mono" id="wsPathShow"></span></p>
+    <div class="row" style="margin-bottom:6px"><button class="small" id="wsUp">↑ up</button><input id="wsPath" style="flex:1" placeholder="path"><button class="small" id="wsGoPath">go</button></div>
+    <div id="wsList" class="tablewrap" style="max-height:260px"></div>
+    <p id="wsHint" class="help"></p>
+  </div>
+  <div id="ws3" style="display:none">
+    <label class="f">Name for this backup <input id="nName"></label>
+    <label class="f">Local cache folder on this Mac (metadata and temporarily fetched bucket data land here) <input id="nLocal"></label>
+    <p class="help" id="wsSummary"></p>
+  </div>
+  <div class="row" style="justify-content:flex-end;margin-top:10px"><button id="nCancel">Cancel</button><button id="wsBack" style="display:none">Back</button><button id="wsNext" class="primary">Next</button></div>
+</dialog>
+<script>
+const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
+const S={src:null,info:null,ver:null,snaps:{},tab:'changes',range:365,basket:JSON.parse(localStorage.getItem('basket')||'[]')};
+const api=async(p,q={})=>{const u=new URL(p,location.origin);Object.entries(q).forEach(([k,v])=>v!==undefined&&v!==null&&v!==''&&u.searchParams.set(k,v));const r=await fetch(u);const j=await r.json();if(j&&j.error)throw new Error(j.error);return j;};
+const post=async(p,b)=>{const r=await fetch(p,{method:'POST',body:JSON.stringify(b)});const j=await r.json();if(j.error)throw new Error(j.error);return j;};
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const human=n=>{if(n==null)return'';const u=['B','KB','MB','GB','TB'];let i=0;while(n>=1024&&i<u.length-1){n/=1024;i++}return (i?n.toFixed(1):n)+' '+u[i]};
+const dt=t=>t?new Date(t*1000).toISOString().replace('T',' ').slice(0,19):'';
+const dd=t=>t?new Date(t*1000).toISOString().slice(0,10):'';
+const octal=m=>m==null?'':(m&0o7777).toString(8).padStart(4,'0');
+const tip=$('#tip');
+function showTip(e,html){tip.innerHTML=html;tip.style.display='block';tip.style.left=Math.min(e.clientX+14,innerWidth-380)+'px';tip.style.top=(e.clientY+14)+'px'}
+function hideTip(){tip.style.display='none'}
+function flagsHtml(f,status){let h='';if(status&&status!=='U')h+=`<span class="flag ${status}">${status==='N'?'new':status==='M'?'modified':status==='D'?'deleted':status}</span>`;(f||'').split(',').filter(x=>x&&x!=='changed').forEach(x=>h+=`<span class="flag ${x}">${x}</span>`);return h}
+
+// ---------- sources
+async function loadSources(){const list=await api('/api/sources');const sel=$('#srcSel');sel.innerHTML=list.map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join('')+'<option value="">— none —</option>';
+  if(!list.length){$('#overview').innerHTML='<p>No backups configured yet. Click <b>+ Add backup</b>.</p>';return}
+  const want=localStorage.getItem('src');sel.value=list.some(s=>s.id===want)?want:list[0].id;openSource();}
+$('#srcSel').onchange=openSource;$('#refreshSrc').onclick=()=>openSource(true);
+async function openSource(refresh){const id=$('#srcSel').value;if(!id)return;S.src=id;localStorage.setItem('src',id);$('#srcStatus').textContent='scanning…';$('#snap').style.display='none';S.ver=null;
+  try{S.info=await api('/api/open',{src:id,refresh:refresh===true?1:0});}catch(e){$('#overview').innerHTML=`<div class="alert">Could not open: ${esc(e.message)}</div>`;$('#srcStatus').textContent='';return}
+  $('#srcStatus').textContent='';renderOverview();renderVersions();
+  if(S.info.readable&&S.info.versions.length){const last=S.info.versions[S.info.versions.length-1];selectVersion(last.id)}}
+function renderOverview(){const i=S.info,t=i.task||{},r=i.ransomware;let h='';
+  if(r.locked_files>0||i.problems.length){h+=`<div class="alert"><b>${r.locked_files>0?'Ransomware-encrypted backup.':'Problems.'}</b> ${r.locked_files>0?`${r.locked_files} metadata files carry the <code>${esc(r.examples[0]?.split('.').pop())}</code> suffix and are unreadable (e.g. ${r.examples.slice(0,3).map(esc).join(', ')}).`:''} ${i.problems.map(esc).join(' · ')}</div>`}
+  const shares=i.shares.map(s=>`<div><b>${s.snapshots.toLocaleString()}</b><span>${esc(s.name)} · snapshots${s.locked?` · <span style="color:var(--bad)">${s.locked} encrypted</span>`:''}</span></div>`).join('');
+  const first=i.versions[0],last=i.versions[i.versions.length-1];
+  h+=`<div class="row" style="margin-bottom:8px"><b>${esc(t.host_name||'?')}</b> · task “${esc(t.name||'?')}” · source folders: ${(t.backup_folders||[]).map(x=>`<code>${esc(x)}</code>`).join(' ')}
+     <span class="muted">· client-side encryption ${t.enable_data_encrypt?'<b style="color:var(--warn)">ON</b>':'off'} · compression ${t.data_compress_type??'?'} · rotation ${t.enable_version_rotation?'on':'off'}</span></div>
+  <div class="kpi"><div><b>${i.versions.length.toLocaleString()}</b><span>backup versions${first?` · ${dd(first.ts)} → ${dd(last.ts)}`:''}</span></div>${shares}
+  <div><b>${i.layout.pool_present?'yes':'no'}</b><span>data pool present</span></div><div><b>${esc(i.source.remote||'local only')}</b><span>${esc(i.source.local)}</span></div></div>`;
+  $('#overview').innerHTML=h;}
+
+// ---------- version chart
+$$('.rng').forEach(b=>b.onclick=()=>{$$('.rng').forEach(x=>x.classList.remove('on'));b.classList.add('on');S.range=+b.dataset.d;renderVersions()});
+$('#verInput').onchange=e=>{const v=+e.target.value;if(S.info.versions.some(x=>x.id===v))selectVersion(v)};
+$('#verList').onchange=e=>selectVersion(+e.target.value);
+function vcount(v){if(v.counts){let n=0;for(const sh in v.counts){const c=v.counts[sh];n+=Object.entries(c.status||{}).filter(([k])=>k!=='U').reduce((a,[,x])=>a+x,0)}return {n,src:'index'}}
+  if(v.stats)return {n:v.stats.new+v.stats.mod+v.stats.rem,src:'stats'};return {n:null}}
+function chartW(id){const el=$(id);return Math.max(600,(el.parentElement.clientWidth||900)-4)}
+function renderVersions(){const all=S.info.versions;if(!all.length){$('#verChart').innerHTML='<p class="muted">No version list readable.</p>';return}
+  const now=all[all.length-1].ts;const vs=S.range?all.filter(v=>v.ts>=now-S.range*86400):all;
+  $('#verList').innerHTML=[...vs].reverse().map(v=>{const c=vcount(v);return `<option value="${v.id}">v${v.id} · ${dt(v.ts).slice(0,16)}${c.n!=null?` · ${c.n} changes`:''}</option>`}).join('');
+  const W=chartW('#verChart'),H=150,pl=36,pb=28;
+  // aggregate into groups so that each bar is >= 3px wide
+  const per=Math.max(1,Math.ceil(vs.length/((W-pl-8)/3)));const groups=[];
+  for(let i=0;i<vs.length;i+=per){const g=vs.slice(i,i+per);const st={new:0,mod:0,rem:0,n:0,has:false,idx:false};
+    g.forEach(v=>{const c=vcount(v);if(c.n!=null){st.has=true;st.n+=c.n;if(v.stats){st.new+=v.stats.new;st.mod+=v.stats.mod;st.rem+=v.stats.rem}else st.new+=c.n}if(v.indexed.length)st.idx=true});groups.push({vs:g,st})}
+  const n=groups.length,bw=(W-pl-8)/n;const maxv=Math.max(1,...groups.map(g=>g.st.n));const ly=x=>x>0?Math.log10(x+1)/Math.log10(maxv+1):0;
+  let s=`<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" style="display:block;max-width:100%">`;
+  [1,10,100,1000,10000,100000].filter(t=>t<=maxv*1.2).forEach(t=>{const y=H-pb-ly(t)*(H-pb-10);s+=`<line x1="${pl}" x2="${W}" y1="${y}" y2="${y}" stroke="var(--line)"/><text x="2" y="${y+3}">${t>=1000?t/1000+'k':t}</text>`});
+  groups.forEach((g,i)=>{const x=pl+i*bw,w=Math.max(1,bw-1);const sel=g.vs.some(v=>v.id===S.ver);const st=g.st;
+    if(!st.has){s+=`<rect class="bar" data-i="${i}" x="${x}" y="${H-pb-2}" width="${w}" height="2" fill="var(--line)"/>`}
+    else{const tot=st.new+st.mod+st.rem||st.n;let y=H-pb;const hh=ly(st.n)*(H-pb-10);
+      [[st.new,'var(--new)'],[st.mod,'var(--mod)'],[st.rem,'var(--rem)']].forEach(([k,col])=>{if(!k)return;const h=hh*k/tot;y-=h;s+=`<rect class="bar" data-i="${i}" x="${x}" y="${y}" width="${w}" height="${h}" fill="${col}"/>`});
+      if(st.n===0)s+=`<rect class="bar" data-i="${i}" x="${x}" y="${H-pb-2}" width="${w}" height="2" fill="var(--muted)"/>`}
+    if(st.idx)s+=`<rect x="${x}" y="${H-pb+2}" width="${w}" height="3" fill="var(--ok)"/>`;
+    if(sel)s+=`<rect x="${x-1}" y="4" width="${w+2}" height="${H-pb-4}" fill="none" stroke="var(--accent)" stroke-width="1.5"/>`;
+    const lab=Math.ceil(n/Math.floor((W-pl)/90));if(i%lab===0)s+=`<text x="${x}" y="${H-8}">${dd(g.vs[0].ts)}</text>`;});
+  s+=`</svg><div class="help">■ <span style="color:var(--new)">new</span> ■ <span style="color:var(--mod)">modified</span> ■ <span style="color:var(--rem)">removed</span> · flat grey = no statistics for that run (load its snapshot to count) · green underline = snapshot loaded · ${vs.length} of ${all.length} versions${per>1?`, ${per} per bar`:''}</div>`;
+  $('#verChart').innerHTML=s;
+  $$('#verChart .bar').forEach(b=>{const g=groups[+b.dataset.i];b.onclick=()=>{if(g.vs.length===1)selectVersion(g.vs[0].id);else{$$('.rng').forEach(x=>x.classList.remove('on'));S.range=Math.max(7,Math.round((now-g.vs[0].ts)/86400)+1);S.rangeEnd=g.vs[g.vs.length-1].ts;renderVersions()}};
+    b.onmousemove=e=>{if(g.vs.length===1){const v=g.vs[0];const c=vcount(v);const st=v.stats;
+      showTip(e,`<b>Version ${v.id}</b> · ${dt(v.ts)} UTC · ${esc(v.status)}<br>${st?`new ${st.new.toLocaleString()} · modified ${st.mod.toLocaleString()} · removed ${st.rem.toLocaleString()} · total ${st.total.toLocaleString()} files`:(c.n!=null?`${c.n} changed entries (from loaded snapshot)`:'no statistics')}${v.indexed.length?`<br>loaded: ${v.indexed.map(esc).join(', ')}`:''}`)}
+      else showTip(e,`<b>${g.vs.length} versions</b> v${g.vs[0].id}–v${g.vs[g.vs.length-1].id}<br>${dd(g.vs[0].ts)} → ${dd(g.vs[g.vs.length-1].ts)}<br>${g.st.has?`new ${g.st.new.toLocaleString()} · modified ${g.st.mod.toLocaleString()} · removed ${g.st.rem.toLocaleString()}`:'no statistics'}<br><i>click to zoom in</i>`)};b.onmouseleave=hideTip});}
+addEventListener('resize',()=>{if(S.info)renderVersions()});
+// ---------- snapshot
+async function selectVersion(id){S.ver=id;$('#verInput').value=id;$('#verList').value=id;renderVersions();$('#snap').style.display='';
+  const v=S.info.versions.find(x=>x.id===id);const st=v.stats;
+  $('#snapHead').innerHTML=`<h2 style="margin:0">Version ${id} — ${dt(v.ts)} UTC — ${esc(v.status)}</h2>${st?`<span class="muted">${st.new.toLocaleString()} new · ${st.mod.toLocaleString()} modified · ${st.rem.toLocaleString()} removed · ${st.total.toLocaleString()} files · ${human(st.src_size)}</span>`:''}`;
+  await refreshShares();showTab(S.tab);}
+async function refreshShares(){const id=S.ver;S.snaps={};const infos=await Promise.all(S.info.shares.map(s=>api('/api/snapshot_info',{src:S.src,share:s.name,ver:id}).catch(e=>({share:s.name,error:e.message}))));
+  infos.forEach(i=>S.snaps[i.share]=i);
+  const allIdx=infos.every(i=>i.indexed);
+  $('#snapShares').innerHTML=infos.map(i=>{let dot='',txt='';if(i.error){dot='bad';txt=i.error}else if(i.indexed){dot='ok';txt=`${(i.meta?.files||0).toLocaleString()} files · ${human(i.meta?.bytes||0)}`}else if(i.locked){dot='bad';txt='encrypted'}else if(!i.available){dot='bad';txt='no snapshot'}else if(i.local){dot='warn';txt='downloaded, click to load'}else{dot='dl';txt=`click to download ${human(i.size)} + load`}
+    return `<span class="chip ${i.indexed?'on':''}" data-share="${esc(i.share)}" title="${esc(txt)}"><i class="dot ${dot}"></i>${esc(i.share)} <span class="muted">${esc(txt)}</span></span>`}).join('')+
+    (allIdx?'':`<button class="small primary" id="loadAll">Load all shares for this version</button>`)+`<span id="jobStatus" class="status"></span>`;
+  $$('#snapShares .chip').forEach(c=>c.onclick=()=>{const i=S.snaps[c.dataset.share];if(!i.indexed&&i.available&&!i.locked)runIndex(c.dataset.share)});
+  const la=$('#loadAll');if(la)la.onclick=()=>runIndex('*');}
+async function runIndex(share){const j=await api('/api/index',{src:S.src,share,ver:S.ver});const el=$('#jobStatus');
+  const poll=async()=>{const job=await api('/api/job',{id:j.id});el.innerHTML=`<span class="prog" style="display:inline-block;vertical-align:middle"><i style="width:${Math.round(job.progress*100)}%"></i></span> ${esc(job.message||'')}`;
+    if(job.state==='running')setTimeout(poll,700);else{el.textContent=job.state==='error'?'Error: '+job.error:'';const errs=(job.result||[]).filter(r=>!r.ok);if(errs.length)el.textContent=errs.map(e=>e.share+': '+e.error).join(' · ');
+      S.info=await api('/api/open',{src:S.src});renderVersions();await refreshShares();showTab(S.tab)}};poll();}
+$$('.tabs button').forEach(b=>b.onclick=()=>showTab(b.dataset.t));
+function showTab(t){S.tab=t;$$('.tabs button').forEach(b=>b.classList.toggle('on',b.dataset.t===t));$$('[id^=tab-]').forEach(d=>d.style.display=d.id==='tab-'+t?'':'none');
+  ({changes:tabChanges,timeline:tabTimeline,browse:tabBrowse,search:tabSearch,compare:tabCompare,restore:tabRestore})[t]();}
+const indexedShares=()=>Object.values(S.snaps).filter(i=>i.indexed).map(i=>i.share);
+function needLoad(el){if(!indexedShares().length){el.innerHTML='<p class="muted">Load at least one share for this version (chips above).</p>';return true}return false}
+
+// ---------- table
+function table(rows,opts={}){if(!rows.length)return '<p class="muted">Nothing here.</p>';
+  const cols=opts.cols||['share','path','size','mtime','ctime','mode','flags'];const head={share:'Share',path:'Path',size:'Size',mtime:'Modified (UTC)',ctime:'Changed (UTC)',mode:'Mode',flags:'Status / flags',old_size:'Old size',old_mtime:'Old modified'};
+  let h=`<div class="tablewrap"><table><thead><tr>${cols.map(c=>`<th data-c="${c}">${head[c]||c}</th>`).join('')}${opts.basket?'<th></th>':''}</tr></thead><tbody>`;
+  rows.forEach((r,i)=>{h+=`<tr class="f" data-i="${i}">${cols.map(c=>{switch(c){
+    case 'path':{const p=r.path||'';const k=p.lastIndexOf('/');return `<td class="path">${r.is_dir?'📁 ':''}${esc(k>=0?p.slice(0,k+1):'')}<b>${esc(k>=0?p.slice(k+1):p)}</b>${r.n!=null?` <span class="muted">(${r.n} items)</span>`:''}</td>`}
+    case 'size':case 'old_size':return `<td class="num">${r.is_dir?'':human(r[c])}</td>`;
+    case 'mtime':case 'ctime':case 'old_mtime':return `<td class="num">${dt(r[c])}</td>`;
+    case 'mode':return `<td class="mono">${octal(r.mode)}${r.is_exec?' <span class="flag exec">x</span>':''}</td>`;
+    case 'flags':return `<td>${flagsHtml(r.flags,r.status)}</td>`;
+    default:return `<td>${esc(r[c])}</td>`}}).join('')}${opts.basket?`<td><button class="small bk" data-i="${i}" title="Add to restore basket">+</button></td>`:''}</tr>`});
+  return h+'</tbody></table></div>'}
+function bindTable(root,rows,opts={}){root.querySelectorAll('tr.f').forEach(tr=>tr.onclick=e=>{if(e.target.classList.contains('bk'))return;const r=rows[+tr.dataset.i];if(opts.onRow)opts.onRow(r);else if(r.id)openDetail(r.share,r.ver||S.ver,r.id)});
+  root.querySelectorAll('.bk').forEach(b=>b.onclick=()=>addBasket(rows[+b.dataset.i]));}
+
+// ---------- tabs
+async function tabChanges(){const el=$('#tab-changes');if(needLoad(el))return;el.innerHTML='<p class="muted">Loading…</p>';
+  const res=await api('/api/query',{src:S.src,ver:S.ver,share:'*',q:'-status:U',sort:'path',order:'asc',limit:5000});
+  const cnt={};res.rows.forEach(r=>cnt[r.status]=(cnt[r.status]||0)+1);
+  el.innerHTML=`<p class="help">Entries whose status in this snapshot is not “unchanged”: ${Object.entries(cnt).map(([k,v])=>`<b>${v.toLocaleString()}</b> ${k==='N'?'new':k==='M'?'modified':k==='D'?'deleted':k}`).join(' · ')||'none'} (${res.total.toLocaleString()} total${res.total>5000?', first 5000 shown':''}). The hourly histogram below shows when those files were last modified.</p>
+  <div id="chgHist"></div><div id="chgTable"></div>`;
+  const hist=await api('/api/histogram',{src:S.src,ver:S.ver,share:'*',q:'-status:U',by:'mtime',bucket:'day'});
+  $('#chgHist').innerHTML=histSvg(hist,{onPick:null});
+  $('#chgTable').innerHTML=table(res.rows,{basket:true});bindTable($('#chgTable'),res.rows,{});}
+
+function histSvg(hist,opts){const b=hist.buckets;if(!b.length)return '<p class="muted">No dated files.</p>';
+  const W=chartW('#snap')-28,H=140,pl=40,pb=30,bw=Math.min(40,Math.max(1,(W-pl-8)/b.length));const maxv=Math.max(1,...b.map(x=>x.n));const ly=x=>Math.log10(x+1)/Math.log10(maxv+1);
+  let s=`<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" style="display:block;max-width:100%">`;
+  [1,10,100,1000,10000,100000].filter(t=>t<=maxv*1.2).forEach(t=>{const y=H-pb-ly(t)*(H-pb-10);s+=`<line x1="${pl}" x2="${W}" y1="${y}" y2="${y}" stroke="var(--line)"/><text x="2" y="${y+3}">${t>=1000?t/1000+'k':t}</text>`});
+  b.forEach((x,i)=>{const h=ly(x.n)*(H-pb-10);s+=`<rect class="bar hb" data-k="${esc(x.k)}" x="${pl+i*bw}" y="${H-pb-h}" width="${Math.max(1,bw-0.5)}" height="${h}" fill="var(--accent2)"/>`;
+    if(b.length<=40||i%Math.ceil(b.length/14)===0)s+=`<text x="${pl+i*bw}" y="${H-12}">${esc(x.k)}</text>`});
+  s+='</svg>';setTimeout(()=>{$$('.hb').forEach(r=>{r.onmousemove=e=>{const x=b.find(y=>y.k===r.dataset.k);showTip(e,`<b>${esc(x.k)}</b><br>${x.n.toLocaleString()} files · ${human(x.bytes)}`)};r.onmouseleave=hideTip;r.onclick=()=>opts.onPick&&opts.onPick(r.dataset.k)})},0);return s}
+
+function keyRange(k,bucket){const p=k.split(/[- :]/).map(Number);let a,b;
+  if(bucket==='year'){a=Date.UTC(p[0],0,1);b=Date.UTC(p[0]+1,0,1)}else if(bucket==='month'){a=Date.UTC(p[0],p[1]-1,1);b=Date.UTC(p[0],p[1],1)}else if(bucket==='hour'){a=Date.UTC(p[0],p[1]-1,p[2],p[3]);b=a+3600e3}else{a=Date.UTC(p[0],p[1]-1,p[2]);b=a+86400e3}
+  return [a/1000,b/1000]}
+let TL={by:'mtime',bucket:'month',scope:'',pick:null};
+async function tabTimeline(){const el=$('#tab-timeline');if(needLoad(el))return;
+  el.innerHTML=`<div class="row" style="margin-bottom:8px"><label>Date field <select id="tlBy"><option value="mtime">modified (mtime)</option><option value="ctime">changed (ctime)</option></select></label>
+    <label>Bucket <select id="tlBucket"><option value="year">year</option><option value="month" selected>month</option><option value="day">day</option><option value="hour">hour</option></select></label>
+    <label>Scope (path prefix) <input id="tlScope" placeholder="e.g. nielsvanharen/Documents" style="width:260px"></label><label>Share <select id="tlShare"><option value="*">all loaded</option>${indexedShares().map(s=>`<option>${esc(s)}</option>`).join('')}</select></label>
+    <span class="help">Click a bar to list the files in that period.</span></div><div id="tlChart"></div><div id="tlPick" class="muted" style="margin:6px 0"></div><div id="tlTable"></div>`;
+  $('#tlBy').value=TL.by;$('#tlBucket').value=TL.bucket;$('#tlScope').value=TL.scope;
+  const redraw=async()=>{TL.by=$('#tlBy').value;TL.bucket=$('#tlBucket').value;TL.scope=$('#tlScope').value.trim();const share=$('#tlShare').value;
+    const hist=await api('/api/histogram',{src:S.src,ver:S.ver,share,by:TL.by,bucket:TL.bucket,prefix:TL.scope});
+    $('#tlChart').innerHTML=histSvg(hist,{onPick:async k=>{const [a,b]=keyRange(k,TL.bucket);$('#tlPick').textContent=`Files with ${TL.by} in ${k} (UTC)…`;
+      const res=await api('/api/query',{src:S.src,ver:S.ver,share,by:TL.by,from:a,to:b,prefix:TL.scope,files_only:1,sort:TL.by,order:'asc',limit:2000});
+      $('#tlPick').textContent=`${res.total.toLocaleString()} files with ${TL.by} in ${k} (UTC)${res.total>2000?', first 2000 shown':''}`;$('#tlTable').innerHTML=table(res.rows,{basket:true});bindTable($('#tlTable'),res.rows)}});};
+  ['tlBy','tlBucket','tlShare'].forEach(i=>$('#'+i).onchange=redraw);$('#tlScope').onchange=redraw;redraw();}
+
+let BR={share:null,dir:''};
+async function tabBrowse(){const el=$('#tab-browse');if(needLoad(el))return;const shares=indexedShares();if(!shares.includes(BR.share)){BR.share=shares[0];BR.dir=''}
+  el.innerHTML=`<div class="row" style="margin-bottom:8px"><label>Share <select id="brShare">${shares.map(s=>`<option ${s===BR.share?'selected':''}>${esc(s)}</option>`).join('')}</select></label><span class="crumbs" id="crumbs"></span><span style="flex:1"></span><button class="small" id="brBasket">+ add this folder to restore basket</button></div><div id="brTable"></div>`;
+  $('#brShare').onchange=e=>{BR.share=e.target.value;BR.dir='';tabBrowse()};$('#brBasket').onclick=()=>addBasket({share:BR.share,path:BR.dir,is_dir:1,name:BR.dir.split('/').pop()||'(share root)'});
+  const parts=BR.dir?BR.dir.split('/'):[];let c=`<a data-p="">${esc(BR.share)}</a>`;parts.forEach((p,i)=>c+=`<span>/</span><a data-p="${esc(parts.slice(0,i+1).join('/'))}">${esc(p)}</a>`);$('#crumbs').innerHTML=c;
+  $$('#crumbs a').forEach(a=>a.onclick=()=>{BR.dir=a.dataset.p;tabBrowse()});
+  const rows=await api('/api/children',{src:S.src,share:BR.share,ver:S.ver,dir:BR.dir});
+  rows.forEach(r=>r.ver=S.ver);
+  $('#brTable').innerHTML=table(rows.map(r=>({...r,path:r.name})),{cols:['path','size','mtime','ctime','mode','flags'],basket:true});
+  bindTable($('#brTable'),rows,{onRow:r=>{if(r.is_dir){BR.dir=r.path;tabBrowse()}else openDetail(r.share,S.ver,r.id)}});}
+
+const FLAGS=[['exec','executable without any extension'],['script','script / binary extension'],['hidden','dotfile'],['ransom','ransomware name'],['ssh','ssh keys'],['sensitive','shell history / system files'],['timestomp','mtime newer than ctime'],['double-ext','document.ext.exe'],['symlink','symlink'],['future','mtime in the future'],['changed','changed in this version']];
+let SQ={q:'',flags:[],sort:'mtime',order:'desc'};
+async function tabSearch(){const el=$('#tab-search');if(needLoad(el))return;
+  el.innerHTML=`<div class="row" style="margin-bottom:6px"><input id="sq" style="flex:1;min-width:300px" placeholder="search… e.g.  .sh  ext:php  path:Downloads  size>100000000  -status:U" value="${esc(SQ.q)}"><label>sort <select id="sSort"><option value="mtime">modified</option><option value="ctime">changed</option><option value="size">size</option><option value="path">path</option></select></label><select id="sOrder"><option value="desc">desc</option><option value="asc">asc</option></select><button class="primary" id="sGo">Search</button></div>
+  <div class="row" style="margin-bottom:8px">${FLAGS.map(([f,d])=>`<span class="chip fl ${SQ.flags.includes(f)?'on':''}" data-f="${f}" title="${d}">${f}</span>`).join('')}<span class="help">terms: <code>ext:</code> <code>flag:</code> <code>status:</code> <code>path:</code> <code>size&gt;</code> <code>size&lt;</code>, prefix with <code>-</code> to negate</span></div><div id="sCount" class="muted"></div><div id="sTable"></div>`;
+  $('#sSort').value=SQ.sort;$('#sOrder').value=SQ.order;
+  const go=async()=>{SQ.q=$('#sq').value;SQ.sort=$('#sSort').value;SQ.order=$('#sOrder').value;$('#sCount').textContent='Searching…';
+    const res=await api('/api/query',{src:S.src,ver:S.ver,share:'*',q:SQ.q,flags:SQ.flags.join(','),sort:SQ.sort,order:SQ.order,limit:2000});
+    $('#sCount').textContent=`${res.total.toLocaleString()} matches${res.total>2000?', first 2000 shown':''}`;$('#sTable').innerHTML=table(res.rows,{basket:true});bindTable($('#sTable'),res.rows)};
+  $('#sGo').onclick=go;$('#sq').onkeydown=e=>{if(e.key==='Enter')go()};$$('.fl').forEach(c=>c.onclick=()=>{const f=c.dataset.f;SQ.flags=SQ.flags.includes(f)?SQ.flags.filter(x=>x!==f):[...SQ.flags,f];c.classList.toggle('on');go()});
+  if(SQ.q||SQ.flags.length)go();}
+
+async function tabCompare(){const el=$('#tab-compare');const vs=S.info.versions.filter(v=>v.indexed.length);
+  el.innerHTML=`<p class="help">Compares two loaded snapshots of one share by path (added / removed / size-or-mtime changed). Load more versions from the chart above to compare further back.</p>
+  <div class="row" style="margin-bottom:8px"><label>Share <select id="cpShare">${S.info.shares.map(s=>`<option>${esc(s.name)}</option>`).join('')}</select></label><label>From <select id="cpA"></select></label><label>To <select id="cpB"></select></label><button class="primary" id="cpGo">Compare</button><span id="cpStat" class="muted"></span></div><div id="cpOut"></div>`;
+  const fill=()=>{const sh=$('#cpShare').value;const list=vs.filter(v=>v.indexed.includes(sh));const o=list.map(v=>`<option value="${v.id}">v${v.id} · ${dd(v.ts)}</option>`).join('');$('#cpA').innerHTML=o;$('#cpB').innerHTML=o;if(list.length>1){$('#cpA').value=list[list.length-2].id;$('#cpB').value=list[list.length-1].id}};
+  $('#cpShare').onchange=fill;fill();
+  $('#cpGo').onclick=async()=>{$('#cpStat').textContent='comparing…';const d=await api('/api/diff',{src:S.src,share:$('#cpShare').value,a:$('#cpA').value,b:$('#cpB').value});
+    $('#cpStat').textContent=`${d.n_added.toLocaleString()} added · ${d.n_removed.toLocaleString()} removed · ${d.n_modified.toLocaleString()} modified`;
+    const sec=(t,rows,cols)=>`<h3 style="font-size:13px;margin:12px 0 4px">${t} (${rows.length.toLocaleString()})</h3>${table(rows.map(r=>({...r,share:d.share})),{cols})}`;
+    $('#cpOut').innerHTML=sec('Added in v'+d.b,d.added,['path','size','mtime','ctime','mode','flags'])+sec('Modified',d.modified,['path','old_size','size','old_mtime','mtime','flags'])+sec('Removed (present in v'+d.a+' only)',d.removed,['path','size','mtime','mode','flags']);};}
+
+function addBasket(r){const it={share:r.share,ver:S.ver,path:r.path,is_dir:r.is_dir?1:0,name:r.name||r.path.split('/').pop()};if(S.basket.some(b=>b.share===it.share&&b.ver===it.ver&&b.path===it.path))return;S.basket.push(it);localStorage.setItem('basket',JSON.stringify(S.basket));if(S.tab==='restore')tabRestore();}
+async function tabRestore(){const el=$('#tab-restore');
+  let pool={};try{pool=await api('/api/pool',{src:S.src})}catch(e){pool={error:e.message}}
+  const mapped=pool.mapped_buckets||0,total=pool.total_buckets||0;const pct=total?Math.round(100*mapped/total):0;const mapOk=total&&mapped>=total;
+  const v=S.info.versions.find(x=>x.id===S.ver);const latest=S.info.versions[S.info.versions.length-1];
+  const basketV=S.basket.length?S.basket[0].ver:S.ver;
+  const step=(n,title,body,done)=>`<div class="panel" style="margin-bottom:10px;border-left:4px solid ${done?'var(--ok)':'var(--accent)'}"><h2>Step ${n} — ${title} ${done?'✓':''}</h2>${body}</div>`;
+  el.innerHTML=
+  step(1,'Which backup run?',`<p>Selected: <b>version ${S.ver}</b> · ${dt(v.ts)} UTC · ${esc(v.status)}${S.ver===latest.id?' · <b>this is the latest run</b>':` · latest is version ${latest.id} (${dd(latest.ts)})`}.</p>
+     <p class="help">The last run before the ransomware is the one you want. Change it by clicking a bar in the chart above or with “Go to version”.</p>${S.ver!==latest.id?`<button class="small" id="wzLatest">Use latest (${latest.id})</button>`:''}`,true)+
+  step(2,'What to restore?',`<div class="row"><button class="small primary" id="rsAddAll">Everything from version ${S.ver} (all shares except @AppConfig)</button><span class="muted">or pick folders/files in <b>Browse folders</b> / <b>Search</b> with the + buttons</span></div>
+     <ul class="basket" style="margin:8px 0">${S.basket.map((b,i)=>`<li><span class="flag">v${b.ver}</span><b>${esc(b.share)}</b>/${esc(b.path||'')}${b.is_dir?' <span class="muted">(folder)</span>':''}<button class="small rm" data-i="${i}">remove</button></li>`).join('')||'<li class="muted">nothing selected yet</li>'}</ul>
+     <div class="row"><label><input type="checkbox" id="rsMeta" checked> skip Synology metadata (@eaDir thumbnails, @SynoResource, .DS_Store)</label><label><input type="checkbox" id="rsOver"> overwrite files already at the target</label></div>`,S.basket.length>0)+
+  step(3,'Pool map (one-time)',`<p class="help">To read file contents without Hyper Backup the tool needs to know which pool bucket holds which chunk. Building that downloads every bucket <i>index</i> file (~200 KB each, ${total.toLocaleString()} of them, ~7 GB) and then matches file sizes against them. No bucket data is downloaded here. Runs once; later restores reuse it.</p>
+     <div class="row"><div class="prog"><i style="width:${pct}%"></i></div><span>${mapped.toLocaleString()} / ${total.toLocaleString()} buckets mapped</span><button class="small ${mapOk?'':'primary'}" id="poolBuild">${mapOk?'Rebuild':'Build pool map now'}</button><span id="poolJob" class="status"></span></div>`,mapOk)+
+  step(4,'Where to put the files? (target)',`<p class="help">Files are written as <code>&lt;target&gt;/&lt;share&gt;/&lt;path&gt;</code>, e.g. <code>&lt;target&gt;/homes/nielsvanharen/Drive/…</code>, keeping the original modification times. Use a <b>new, empty folder on the NAS</b>, not the folder that holds the backup. Two ways to point at the NAS:</p>
+     <div class="row" style="margin-bottom:6px"><label><input type="radio" name="wzT" value="orig" ${localStorage.getItem('rsMode')==='orig'?'checked':''}> back into the <b>original shares</b> on the NAS (homes → homes, NIKON D3400 → NIKON D3400, …)</label><label><input type="radio" name="wzT" value="remote" ${(localStorage.getItem('rsMode')||'remote')==='remote'?'checked':''}> into one folder on a NAS share</label><label><input type="radio" name="wzT" value="local" ${localStorage.getItem('rsMode')==='local'?'checked':''}> a mounted share / local path</label></div>
+     <div id="wzOrig" class="row" style="margin-bottom:6px"><label>remote <select id="wzRem2"></select></label><span class="help">the shares must already exist on the NAS with the same names (they do: see the list under “share”). For <code>homes</code> the user folders must exist, i.e. recreate the users first.</span></div>
+     <div id="wzRemote" class="row" style="margin-bottom:6px"><label>remote <select id="wzRem"></select></label><label>share <select id="wzShare"><option value="">(loading…)</option></select></label><label>folder <input id="wzFolder" placeholder="restore-2333" value="${esc(localStorage.getItem('wzFolder')||'restore-'+S.ver)}" style="width:160px"></label></div>
+     <div id="wzLocal" class="row" style="margin-bottom:6px"><label>local path <input id="wzPath" placeholder="/Volumes/GDriveRestore/restore-2333" style="width:380px" value="${esc(localStorage.getItem('wzPath')||'')}"></label></div>
+     <p>Target: <b class="mono" id="wzTarget"></b></p>
+     <p class="help">Speed: data flows Google Drive → this Mac (decompress + verify) → NAS. Drive download is the limit; bucket files are fetched 4 in parallel ahead of the writer and deleted from the Mac after use (cache ≤ 20 GB). Nothing to set up on the NAS beyond the SMB share and the <code>nas:</code> rclone remote you already have.</p>`,false)+
+  step(5,'Preview and start',`<div class="row"><button class="small" id="rsPlan">Preview (count files and size)</button><button class="primary" id="rsGo" ${S.basket.length&&mapOk?'':'disabled'}>Start restore</button><span class="help">${mapOk?'':'enabled once steps 2 and 3 are done · '}interrupted? just start again: files already at the target with the same size are skipped</span></div>
+     <div id="rsPlanOut" class="muted" style="margin:6px 0"></div><div id="rsProg"></div><div id="rsErrors"></div><div id="rsSaved" style="margin-top:8px"></div>`,false);
+  // wiring
+  const wl=$('#wzLatest');if(wl)wl.onclick=()=>selectVersion(latest.id);
+  $('#rsAddAll').onclick=()=>{S.info.shares.filter(x=>x.name!=='@AppConfig').forEach(x=>{if(!S.basket.some(b=>b.share===x.name&&b.ver===S.ver&&b.path===''))S.basket.push({share:x.name,ver:S.ver,path:'',is_dir:1,name:'(share root)'})});localStorage.setItem('basket',JSON.stringify(S.basket));tabRestore()};
+  $$('.rm').forEach(b=>b.onclick=()=>{S.basket.splice(+b.dataset.i,1);localStorage.setItem('basket',JSON.stringify(S.basket));tabRestore()});
+  $('#poolBuild').onclick=async()=>{const j=await api('/api/pool/build',{src:S.src});pollJob(j.id,$('#poolJob'),()=>tabRestore())};
+  const mode=()=>document.querySelector('input[name=wzT]:checked').value;
+  const target=()=>mode()==='orig'?$('#wzRem2').value:mode()==='remote'?`${$('#wzRem').value}${$('#wzShare').value}${$('#wzShare').value?'/':''}${$('#wzFolder').value.trim()}`:$('#wzPath').value.trim();
+  const upd=()=>{localStorage.setItem('rsMode',mode());$('#wzRemote').style.display=mode()==='remote'?'':'none';$('#wzOrig').style.display=mode()==='orig'?'':'none';$('#wzLocal').style.display=mode()==='local'?'':'none';$('#wzTarget').textContent=target()||'—';localStorage.setItem('wzFolder',$('#wzFolder').value);localStorage.setItem('wzPath',$('#wzPath').value)};
+  $$('input[name=wzT]').forEach(r=>r.onchange=upd);['wzFolder','wzPath'].forEach(i=>$('#'+i).oninput=upd);
+  try{const r=await api('/api/remotes');const pref=localStorage.getItem('wzRem');$('#wzRem').innerHTML=r.remotes.map(x=>`<option ${x===pref?'selected':''}>${esc(x)}</option>`).join('');$('#wzRem2').innerHTML=$('#wzRem').innerHTML;$('#wzRem2').onchange=upd;
+    const loadShares=async()=>{localStorage.setItem('wzRem',$('#wzRem').value);const d=await api('/api/remotes',{remote:$('#wzRem').value});const prefS=localStorage.getItem('wzShare');$('#wzShare').innerHTML=d.dirs.map(x=>`<option ${x===prefS?'selected':''}>${esc(x)}</option>`).join('')||'<option value="">(none found)</option>';upd()};
+    $('#wzRem').onchange=loadShares;$('#wzShare').onchange=()=>{localStorage.setItem('wzShare',$('#wzShare').value);upd()};if(r.remotes.length)loadShares()}catch(e){$('#wzShare').innerHTML='<option value="">(rclone not available)</option>'}
+  upd();
+  const showSaved=async()=>{try{const js=await api('/api/jobs/saved');const un=js.filter(j=>j.state!=='done');if(!un.length){$('#rsSaved').innerHTML='';return}
+    $('#rsSaved').innerHTML=`<h4 style="font-size:12px;color:var(--muted);margin:6px 0">Earlier restores you can resume</h4><table>${un.map(j=>`<tr><td>${esc(j.state)}</td><td class="mono">${esc(j.dest)}</td><td class="num">${(j.done_files||0).toLocaleString()} / ${(j.total_files||0).toLocaleString()} files · ${human(j.done_bytes||0)} of ${human(j.total_bytes||0)}${j.errors?` · ${j.errors} errors`:''}</td><td>${new Date((j.updated||j.started)*1000).toLocaleString()}</td><td>${j.state==='running'?`<button class="small jc" data-i="${esc(j.id)}">Pause</button>`:`<button class="small primary jr" data-i="${esc(j.id)}">Resume</button>`}</td></tr>`).join('')}</table>`;
+    $$('.jr').forEach(b=>b.onclick=async()=>{const j=await post('/api/restore/resume',{id:b.dataset.i});pollJob(j.id,$('#rsProg'),()=>showSaved(),true);showSaved()});
+    $$('.jc').forEach(b=>b.onclick=async()=>{await api('/api/job/cancel',{id:b.dataset.i});setTimeout(showSaved,1500)})}catch(e){}};
+  showSaved();
+  $('#rsPlan').onclick=async()=>{$('#rsPlanOut').textContent='counting…';const r=await api('/api/restore_plan',{src:S.src,items:JSON.stringify(S.basket),skip_meta:$('#rsMeta').checked?1:0});$('#rsPlanOut').innerHTML=`<b>${r.files.toLocaleString()} files · ${human(r.bytes)}</b> → <span class="mono">${esc(target())}</span><br><span class="mono">${r.sample.map(esc).join('<br>')}${r.files>20?'<br>…':''}</span>`};
+  $('#rsGo').onclick=async()=>{const dest=target();if(!dest){alert('Choose a target first');return}
+    try{const j=await post('/api/restore',{src:S.src,dest,items:S.basket,skip_meta:$('#rsMeta').checked,overwrite:$('#rsOver').checked});
+      showSaved();
+      pollJob(j.id,$('#rsProg'),job=>{showSaved();$('#rsProg').innerHTML+=`<p><b>${job.result&&job.result.paused?'Paused':'Done'}:</b> ${job.result?`${job.result.restored} restored · ${job.result.skipped} skipped · ${job.result.errors} errors · ${human(job.result.bytes)}`:esc(job.error||'')}</p>`;
+        if(job.errors&&job.errors.length)$('#rsErrors').innerHTML=`<h4 style="font-size:12px;color:var(--muted)">Errors (${job.errors.length})</h4><div class="tablewrap"><table>${job.errors.slice(0,500).map(e=>`<tr><td class="mono">${esc(e.path)}</td><td>${esc(e.error)}</td></tr>`).join('')}</table></div>`},true)}
+    catch(e){alert(e.message)}};}
+function pollJob(id,el,done,rich){const t=async()=>{const job=await api('/api/job',{id});
+  el.innerHTML=`<div class="row"><span class="prog" style="display:inline-block;vertical-align:middle"><i style="width:${Math.round((job.progress||0)*100)}%"></i></span> <span>${esc(job.message||'')}</span>${rich&&job.total_files!=null?`<span class="muted">· ${job.done_files||0}/${job.total_files} files · ${human(job.done_bytes||0)} of ${human(job.total_bytes||0)}${job.errors&&job.errors.length?` · <b style="color:var(--bad)">${job.errors.length} errors</b>`:''}</span>`:''}</div>`;
+  if(job.state==='running')setTimeout(t,800);else{if(job.state==='error')el.innerHTML+=`<p style="color:var(--bad)">${esc(job.error)}</p>`;done&&done(job)}};t();}
+// ---------- drawer
+$('#closeDrawer').onclick=()=>$('#drawer').classList.remove('open');
+async function openDetail(share,ver,id){const d=await api('/api/file',{src:S.src,share,ver,id});if(!d)return;
+  const h=d.history||[];
+  $('#drawerBody').innerHTML=`<h3 style="margin:0 0 4px;word-break:break-all">${esc(d.name)}</h3><div class="mono muted" style="word-break:break-all">${esc(share)}/${esc(d.path)}</div>
+  <div style="margin:8px 0">${flagsHtml(d.flags,d.status)}</div>
+  <dl><dt>Type</dt><dd>${d.is_dir?'directory':'file'} · mode ${d.mode_oct}${d.is_exec?' (executable)':''}</dd><dt>Size</dt><dd>${d.size.toLocaleString()} B (${human(d.size)})</dd>
+  <dt>Modified</dt><dd>${dt(d.mtime)} UTC</dd><dt>Changed</dt><dd>${dt(d.ctime)} UTC</dd><dt>Inode</dt><dd>${d.inode??''} · links ${d.nlink??''}</dd>
+  <dt>Status</dt><dd>${esc(d.status)} in v${ver}</dd><dt>Storage</dt><dd class="mono">${d.off<0?`file_pool/${-d.off}.file`:`virtual_file offset ${d.off}`} · dedup ${d.dedup}</dd></dl>
+  <div class="row"><button class="small" id="dAdd">+ restore basket</button>${!d.is_dir?`<button class="small" id="dExtract">Inspect stored content</button><a class="small" href="/api/download?src=${encodeURIComponent(S.src)}&share=${encodeURIComponent(share)}&ver=${ver}&id=${d.id}" download><button class="small">Download file</button></a>`:''}</div>
+  <h4 style="margin:12px 0 4px;font-size:12px;color:var(--muted)">Presence in loaded versions</h4>
+  <table>${h.map(x=>`<tr><td>v${x.ver} ${dd(x.ts)}</td><td>${x.present?`${esc(x.status)} · ${human(x.size)} · ${dt(x.mtime)}`:'<span class="muted">absent</span>'}</td></tr>`).join('')}</table><div id="dExtractOut"></div>`;
+  $('#dAdd').onclick=()=>addBasket({...d,share});const ex=$('#dExtract');if(ex)ex.onclick=async()=>{ex.disabled=true;try{const r=await api('/api/extract',{src:S.src,share,ver,id});$('#dExtractOut').innerHTML=`<h4 style="font-size:12px;color:var(--muted)">Stored object ${esc(r.pool_file)} · ${r.stored_bytes} B (declared ${r.declared_size} B) · sha256 of stored bytes <span class="mono">${r.sha256_stored}</span></h4><pre class="mono" style="white-space:pre-wrap;max-height:300px;overflow:auto;background:var(--chip);padding:8px;border-radius:6px">${esc(r.head_text)}</pre>`}catch(e){$('#dExtractOut').innerHTML=`<p class="muted">${esc(e.message)}</p>`}};
+  $('#drawer').classList.add('open');}
+
+// ---------- add source wizard
+const WS={step:1,remote:'',path:'',kind:'existing'};
+function wsShow(){$('#wzS').textContent=`step ${WS.step} of 3`;[1,2,3].forEach(i=>$('#ws'+i).style.display=WS.step===i?'':'none');$('#wsBack').style.display=WS.step>1?'':'none';$('#wsNext').textContent=WS.step===3?'Add backup':'Next'}
+$('#addSrc').onclick=async()=>{WS.step=1;wsShow();$('#dlgSrc').showModal();try{const r=await api('/api/remotes');$('#wsRem').innerHTML=r.remotes.map(x=>`<option>${esc(x)}</option>`).join('')||'<option value="">(none configured)</option>'}catch(e){}};
+$$('input[name=wsk]').forEach(r=>r.onchange=()=>{WS.kind=r.value;$('#wsDrive').style.display=WS.kind==='drive'?'':'none';$('#wsSmb').style.display=WS.kind==='smb'?'':'none'});
+$('#nCancel').onclick=()=>$('#dlgSrc').close();$('#wsBack').onclick=()=>{WS.step--;wsShow()};
+async function wsList(){const r=await api('/api/rclone/ls',{remote:WS.remote,path:WS.path});if(r.error){$('#wsList').innerHTML=`<p style="color:var(--bad)">${esc(r.error)}</p>`;return}
+  WS.path=r.path;$('#wsPath').value=WS.path;$('#wsPathShow').textContent=(WS.remote||'')+WS.path;
+  $('#wsList').innerHTML=`<table>${r.dirs.map(d=>`<tr class="f wsd" data-d="${esc(d)}"><td>📁 ${esc(d)}${d.endsWith('.hbk')?' <span class="flag">backup</span>':''}</td></tr>`).join('')||'<tr><td class="muted">no sub-folders</td></tr>'}</table>`;
+  $$('.wsd').forEach(tr=>tr.onclick=()=>{WS.path=(WS.remote?(WS.path?WS.path.replace(/\/$/,'')+'/':''):(WS.path.replace(/\/$/,'')+'/'))+tr.dataset.d;wsList()});
+  $('#wsHint').innerHTML=r.looks_like_hbk?'<b style="color:var(--ok)">This folder looks like a Hyper Backup (has Config and Pool). Click Next.</b>':(r.hbk_dirs.length?`Open the <b>${esc(r.hbk_dirs[0])}</b> folder, then click Next.`:'Navigate into the folder that ends with <code>.hbk</code>.')}
+$('#wsUp').onclick=()=>{const p=WS.path.replace(/\/$/,'');WS.path=p.includes('/')?p.slice(0,p.lastIndexOf('/')):(WS.remote?'':'/');wsList()};$('#wsGoPath').onclick=()=>{WS.path=$('#wsPath').value;wsList()};
+$('#wsNext').onclick=async()=>{
+  if(WS.step===1){const k=WS.kind;
+    if(k==='existing'){WS.remote=$('#wsRem').value;if(!WS.remote){alert('No remote selected');return}WS.path=''}
+    else if(k==='local'){WS.remote='';WS.path='~'}
+    else{const q=k==='drive'?{kind:'drive',name:$('#wsDName').value,client_id:$('#wsCid').value.trim(),client_secret:$('#wsCsec').value.trim()}:{kind:'smb',name:$('#wsSName').value,host:$('#wsHost').value.trim(),user:$('#wsUser').value.trim(),password:$('#wsPass').value};
+      $('#wsConn').textContent=k==='drive'?'A Google sign-in page opens in your browser. Approve it, then come back here…':'Connecting…';$('#wsNext').disabled=true;
+      try{const j=await api('/api/rclone/connect',q);const job=await new Promise(res=>{const t=async()=>{const x=await api('/api/job',{id:j.id});if(x.state==='running'){$('#wsConn').textContent=x.message||'';setTimeout(t,1000)}else res(x)};t()});
+        if(job.state==='error'){$('#wsConn').textContent='Failed: '+job.error;$('#wsNext').disabled=false;return}
+        WS.remote=job.result.remote;WS.path='';$('#wsConn').textContent='Connected: '+WS.remote}catch(e){$('#wsConn').textContent=e.message;$('#wsNext').disabled=false;return}
+      $('#wsNext').disabled=false}
+    WS.step=2;wsShow();wsList();return}
+  if(WS.step===2){const r=await api('/api/rclone/ls',{remote:WS.remote,path:WS.path});if(!r.looks_like_hbk){if(!confirm('This folder does not contain Config and Pool. Use it anyway (e.g. a partial copy)?'))return}
+    const base=(WS.path.replace(/\/$/,'').split('/').pop()||'backup');$('#nName').value=WS.remote?`${base} on ${WS.remote.replace(':','')}`:base;
+    $('#nLocal').value=WS.remote?`~/HyperBackupDesktop/${base}`:WS.path;$('#nLocal').disabled=!WS.remote;
+    $('#wsSummary').textContent=WS.remote?`Metadata is fetched on demand from ${WS.remote}${WS.path} into the cache folder; bucket data only when restoring.`:`The backup is read directly from ${WS.path}.`;
+    WS.step=3;wsShow();return}
+  try{const body=WS.remote?{name:$('#nName').value||'backup',local:$('#nLocal').value,remote:WS.remote+WS.path}:{name:$('#nName').value||'backup',local:WS.path,remote:null};
+    const s=await post('/api/sources',body);$('#dlgSrc').close();localStorage.setItem('src',s.id);loadSources()}catch(e){alert(e.message)}};
+loadSources();
+</script>
+</body>
+</html>

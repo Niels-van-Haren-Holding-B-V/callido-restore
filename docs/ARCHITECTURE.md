@@ -1,0 +1,20 @@
+# Architecture
+
+* `hbk_explorer.py` — HTTP server (stdlib `http.server`), JSON API, static UI, sources, snapshot indexing, jobs, restore.
+* `hbk_pool.py` — pool format: sliced streams, virtual file index, chunk records, buckets, LZ4, `PoolReader` (reconstructs files).
+* `hbk_poolmap.py` — offline mapping of chunk ids to buckets (see `docs/FORMAT.md`).
+* `static/index.html` — single-page UI, no build step, no external dependencies.
+* `~/.hbk-explorer/` — `sources.json`, `index/<source>/<share>__<ver>.sqlite` (derived, queryable snapshot), `index/<source>/pool/`
+  (`listing.json`, `runs_set*.bin`, `recsize_set*.json`, `poolmap.json`), `jobs/` (persisted restore jobs).
+
+Data flow: a **Source** is a local folder plus optional rclone remotes (first wins) plus extra local roots; `Source.ensure(rel)`
+returns a local path, fetching with retries if needed. **Backup** scans version list and shares. Loading a snapshot = fetching
+`<ver>.db` and building a derived SQLite with resolved paths and flags. Timeline/search/compare query that SQLite.
+Restore: `restore_plan` (rows) → `PoolReader.extract` per file (file_pool or chunks via pool map) → local path or `rclone moveto` to a remote;
+buckets are prefetched 4-wide and evicted LRU (≤ `HBK_CACHE_GB`, default 20). Jobs are persisted every 50 files; pause = cancel flag;
+resume restarts at `next_index` and also skips files already present with the same size.
+
+API (all GET unless noted): `/api/sources`, `POST /api/sources`, `/api/open`, `/api/snapshot_info`, `/api/index` (job), `/api/query`,
+`/api/children`, `/api/histogram`, `/api/file`, `/api/diff`, `/api/extract`, `/api/download`, `/api/pool`, `/api/pool/build` (job),
+`/api/restore_plan`, `POST /api/restore` (job), `POST /api/restore/resume`, `/api/job`, `/api/jobs`, `/api/jobs/saved`, `/api/job/cancel`,
+`/api/remotes`, `/api/rclone/ls`, `/api/rclone/connect` (job), `/api/about`, `/api/quit`.
