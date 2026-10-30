@@ -751,7 +751,7 @@ class H(BaseHTTPRequestHandler):
                     line = (r.stdout.splitlines() or ["not found"])[0] if r.returncode == 0 else "rclone not found"
                 except OSError:
                     line = "rclone not found"
-                return self._json({"version": VERSION, "rclone": line, "rclone_path": RCLONE, "config": str(CONF_DIR)})
+                return self._json({"name": APP_NAME, "tagline": TAGLINE, "notice": NOTICE, "version": VERSION, "rclone": line, "rclone_path": RCLONE, "config": str(CONF_DIR)})
             if u.path == "/api/quit":
                 threading.Timer(0.3, _exit_app).start(); return self._json({"ok": True})
             if u.path == "/api/ls":   # directory picker helper
@@ -894,7 +894,9 @@ def _log(msg):
     if stream is None: return
     try: print(msg, file=stream, flush=True)
     except Exception: pass
-APP_NAME = "Hyper Backup Desktop"
+APP_NAME = "Callido Restore"                                   # the one place the product name lives (build_app.sh reads it)
+TAGLINE = "Restore Synology Hyper Backup (.hbk) files"
+NOTICE = "Not affiliated with or endorsed by Synology. Hyper Backup is a trademark of Synology Inc."
 def _exit_app(code=0):
     """Stop the whole app: rclone children first (an `rclone lsjson` used to survive Quit), then the process. Restore jobs are
     persisted and can be resumed; the desktop window (if any) closes with the process."""
@@ -905,7 +907,7 @@ def _open_browser(port):
         import webbrowser; webbrowser.open(f"http://127.0.0.1:{port}")
     except Exception: _log(f"could not open a browser; open http://127.0.0.1:{port}")
 def _already_running(port):
-    """True when a Hyper Backup Desktop instance already answers on this port (e.g. the app was opened twice)."""
+    """True when an instance of the app already answers on this port (e.g. the app was opened twice)."""
     try:
         from urllib.request import urlopen
         with urlopen(f"http://127.0.0.1:{port}/api/about", timeout=2) as r: return b'"version"' in r.read()

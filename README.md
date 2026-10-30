@@ -1,6 +1,8 @@
-<img src="assets/logo.png" width="96" align="left" alt="Hyper Backup Desktop logo">
+<img src="assets/logo.png" width="96" align="left" alt="Callido Restore logo">
 
-# Hyper Backup Desktop (macOS, Apple silicon)
+# Callido Restore (macOS, Apple silicon)
+
+Restore Synology Hyper Backup (.hbk) files.
 
 <br clear="left">
 
@@ -41,4 +43,6 @@ window; add `--browser` to use your browser instead).
 ## Docs
 `docs/USER-GUIDE.md`, `docs/FORMAT.md` (the reverse-engineered format), `docs/ARCHITECTURE.md`, `docs/HANDOVER.md`, `docs/TASKS.md`.
 
-MIT licensed. Not affiliated with Synology.
+MIT licensed. Not affiliated with or endorsed by Synology. Hyper Backup is a trademark of Synology Inc.
+
+Made by [Callido](https://callido.nl) · [callido.nl](https://callido.nl) · [callido.dev](https://callido.dev)

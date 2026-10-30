@@ -6,7 +6,7 @@ dir=${1:?release directory}
 python3 - "$dir" <<'PY'
 import hashlib, pathlib, sys
 root = pathlib.Path(sys.argv[1])
-names = ["HyperBackupDesktop-arm64.dmg", "HyperBackupDesktop-amd64.dmg"]
+names = ["CallidoRestore-arm64.dmg", "CallidoRestore-amd64.dmg"]
 missing = [name for name in names if not (root / name).is_file()]
 if missing:
     raise SystemExit("missing disk images: " + ", ".join(missing))
