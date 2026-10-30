@@ -16,30 +16,32 @@ Layout facts
   32-byte entries [u32 clen][u32 off][u32 ulen][md5 16][crc32 of first 28 bytes].
 """
 import struct, os, re, json, glob, hashlib, collections
+def lz4_decompress_py(src, usize):
+    """LZ4 block decode used when the lz4 package is not installed. `usize` is the caller's expected size; this fallback does not check it."""
+    dst = bytearray(); i = 0; n = len(src)
+    while i < n:
+        tok = src[i]; i += 1; ll = tok >> 4
+        if ll == 15:
+            while True:
+                b = src[i]; i += 1; ll += b
+                if b != 255: break
+        dst += src[i:i + ll]; i += ll
+        if i >= n: break
+        off = src[i] | (src[i + 1] << 8); i += 2; ml = tok & 15
+        if ml == 15:
+            while True:
+                b = src[i]; i += 1; ml += b
+                if b != 255: break
+        ml += 4; start = len(dst) - off
+        if off >= ml: dst += dst[start:start + ml]
+        else:
+            for k in range(ml): dst.append(dst[start + k])
+    return bytes(dst)
 try:
     import lz4.block as _lz4
     def lz4_decompress(src, usize): return _lz4.decompress(src, uncompressed_size=usize)
 except Exception:  # pure python fallback (slow)
-    def lz4_decompress(src, usize):
-        dst = bytearray(); i = 0; n = len(src)
-        while i < n:
-            tok = src[i]; i += 1; ll = tok >> 4
-            if ll == 15:
-                while True:
-                    b = src[i]; i += 1; ll += b
-                    if b != 255: break
-            dst += src[i:i + ll]; i += ll
-            if i >= n: break
-            off = src[i] | (src[i + 1] << 8); i += 2; ml = tok & 15
-            if ml == 15:
-                while True:
-                    b = src[i]; i += 1; ml += b
-                    if b != 255: break
-            ml += 4; start = len(dst) - off
-            if off >= ml: dst += dst[start:start + ml]
-            else:
-                for k in range(ml): dst.append(dst[start + k])
-        return bytes(dst)
+    lz4_decompress = lz4_decompress_py
 
 SLICE = 8388608
 BLOCK = 2260
@@ -275,10 +277,11 @@ class PoolReader:
         listing = os.path.join(self.pool_dir, "listing.json")
         st = {"listing": os.path.isfile(listing), "runs": all(os.path.isfile(os.path.join(self.pool_dir, f"runs_set{s}.bin")) for s in (1, 2, 3, 4)),
               "recsizes": os.path.isfile(os.path.join(self.pool_dir, "recsize_set1.json")), "map": self.map is not None,
-              "mapped_buckets": len(self.map["buckets"]) if self.map else 0, "total_buckets": 0, "indexes_local": 0}
+              "mapped_buckets": len(self.map["buckets"]) if self.map else 0, "total_buckets": 0, "indexes_local": 0, "index_files": 0}
         if st["listing"]:
             l = json.load(open(listing)); idx = [e for e in l if e["t"] == "index"]
             st["total_buckets"] = len({e["b"] for e in idx})
+            st["index_files"] = len(idx)
             n = 0
             for e in idx:
                 if (self.src.local / f"Pool/0/{e['b'] // 2048}/{e['name']}").is_file(): n += 1

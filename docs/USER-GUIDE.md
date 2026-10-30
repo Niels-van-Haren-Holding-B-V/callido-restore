@@ -8,6 +8,7 @@
 4. Tabs: **Changes** (what that run added/changed), **File timeline**, **Browse folders**, **Search & flags** (suspicious files),
    **Compare versions**, **Restore wizard**.
 5. **Restore wizard**: pick the run → pick everything or folders (+ buttons) → build the pool map once (downloads ~200 KB per bucket;
-   progress bar) → choose the target: back into the original NAS shares, one folder on a NAS share, or a local path → Preview → Start.
+   progress bar; Stop keeps index files already downloaded, and running it again continues) → choose the target: back into the
+   original NAS shares, one folder on a NAS share, or a local path → Preview → Start.
    The bar at the top shows running jobs. Pause/Resume from the wizard; after a crash or reboot the job is listed for resuming.
 Encrypted (`.L0CK3D`) copies are detected and reported as unreadable.

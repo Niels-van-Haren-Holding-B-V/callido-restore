@@ -57,7 +57,8 @@ def start_job(fn, label):
     JOBS[jid] = job
     def run():
         try:
-            job["result"] = fn(job); job["state"] = "done"; job["progress"] = 1.0
+            job["result"] = fn(job); job["state"] = "done"
+            if not (isinstance(job["result"], dict) and job["result"].get("stopped")): job["progress"] = 1.0
         except Exception as e:
             job["state"] = "error"; job["error"] = f"{e}"; job["trace"] = traceback.format_exc()
     threading.Thread(target=run, daemon=True).start()
@@ -468,37 +469,47 @@ class Backup:
         except Exception: st["lz4"] = False
         return st
     def build_pool(self, job, max_bucket=None):
-        import hbk_pool, hbk_poolmap
+        import hbk_pool, hbk_poolmap, hbk_indexfetch
         pool_dir = self.src.index_dir / "pool"; pool_dir.mkdir(parents=True, exist_ok=True)
         log = lambda m: job.__setitem__("message", str(m))
+        def stopped(stage):
+            job["message"] = f"stopped during {stage} — run Build again to continue"
+            return {"stopped": True, "stage": stage}
+        if job.get("cancel"): return stopped("start")
         listing = pool_dir / "listing.json"
         if not listing.is_file():
             job["message"] = "listing pool directories"; out = []
             dirs = sorted(int(n) for n, e in self.src.listdir("Pool/0").items() if e["dir"] and n.isdigit())
             for i, d in enumerate(dirs):
-                job["progress"] = 0.05 * i / len(dirs)
+                if job.get("cancel"): return stopped("listing")
+                job["progress"] = 0.05 * i / max(1, len(dirs))
                 for n, e in self.src.listdir(f"Pool/0/{d}", refresh=True).items():
                     m = re.match(r"^(\d+)\.(bucket|index)\.(\d+)$", n)
                     if m: out.append({"b": d * 2048 + int(m.group(1)), "t": m.group(2), "rev": int(m.group(3)), "size": e["size"], "mtime": "", "name": n})
-            listing.write_text(json.dumps(out))
+            tmp = listing.with_name(".listing.json.part")
+            tmp.write_text(json.dumps(out)); os.replace(tmp, listing)
+        if job.get("cancel"): return stopped("listing")
         if not all((pool_dir / f"runs_set{k}.bin").is_file() for k in (1, 2, 3, 4)):
             job["message"] = "parsing chunk records (downloads the 4 file_chunk index sets if needed)"; job["progress"] = 0.1
             hbk_pool.build_runs(self.src, str(pool_dir), log)
+        if job.get("cancel"): return stopped("chunk-records")
         job["message"] = "collecting file sizes from loaded snapshots"; job["progress"] = 0.3
         dbs = [(str(p), "index") for p in self.src.index_dir.glob("*__*.sqlite")]
         for sh in self.shares:
             for n, e in self.src.listdir(f"Config/@Share/{sh}").items():
                 if e["local"] and re.match(r"^\d+\.db\.\d+$", n): dbs.append((str(self.src.ensure(f"Config/@Share/{sh}/{n}")), "raw"))
         hbk_pool.build_recsizes(self.src, dbs, str(pool_dir), log)
+        if job.get("cancel"): return stopped("record-sizes")
         if self.src.remotes:
-            dirs = sorted({e["b"] // 2048 for e in json.loads(listing.read_text())})
-            for i, d in enumerate(dirs):
-                job["message"] = f"fetching bucket index files: directory {i + 1}/{len(dirs)}"; job["progress"] = 0.4 + 0.3 * i / len(dirs)
-                dst = self.src.local / f"Pool/0/{d}"; dst.mkdir(parents=True, exist_ok=True)
-                for remote in self.src.remotes:
-                    subprocess.run([RCLONE, "copy", f"{remote}/Pool/0/{d}", str(dst), "--include", "*.index.*", "--transfers", "16", "--checkers", "16",
-                                    "--drive-pacer-min-sleep", "10ms", "--drive-pacer-burst", "200"], capture_output=True, text=True)
+            entries = json.loads(listing.read_text())
+            fetch = hbk_indexfetch.fetch_bucket_indexes(self.src.local, self.src.remotes, entries, job)
             self.src._list.clear()
+            if fetch.get("stopped") or job.get("cancel"):
+                fetch["stopped"] = True
+                return fetch
+            if fetch.get("failed"):
+                raise RuntimeError(fetch.get("error") or "bucket index fetch failed")
+        if job.get("cancel"): return stopped("before-mapping")
         job["message"] = "mapping buckets to writers"; job["progress"] = 0.7
         def mlog(m):
             job["message"] = str(m)
