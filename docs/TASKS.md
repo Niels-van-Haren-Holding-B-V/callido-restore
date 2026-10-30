@@ -15,7 +15,7 @@ Acceptance: files present with correct sizes and mtimes; pause/resume works; err
 
 ## T3 — Packaging
 Run `./build_app.sh` on an Apple-silicon Mac; fix PyInstaller issues (hidden imports, `static` path, bundled `rclone` permissions).
-Acceptance: the .app starts, opens the browser, "About" shows the bundled rclone version, Quit works. Tag `v0.1.0` to publish via CI.
+Acceptance: the .app starts in its own window, "About" shows the bundled rclone version, Quit works. Tag `v0.1.0` to publish via CI.
 
 ## T4 — Robustness of the pool map step inside the app
 `Backup.build_pool` fetches indexes per directory with one rclone call each; add per-directory progress from rclone `--stats` output,
