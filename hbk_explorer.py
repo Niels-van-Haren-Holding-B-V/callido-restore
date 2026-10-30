@@ -59,6 +59,9 @@ def _find_rclone():
     found.sort(key=lambda p: (p.is_symlink(), str(p)))  # real file before a cross-link
     for c in found:
         if _ensure_executable(c): return str(c)
+    # A packaged app must not silently run whatever rclone is on the machine.
+    if getattr(sys, "frozen", False):
+        return ""
     for c in (Path("/opt/homebrew/bin/rclone"), Path("/usr/local/bin/rclone")):
         if c.is_file() and os.access(c, os.X_OK): return str(c)
     return "rclone.exe" if os.name == "nt" else "rclone"
@@ -70,8 +73,8 @@ def _verify_frozen():
     if _bundled("static/index.html") is None:
         roots = ", ".join(str(r) for r in _resource_roots())
         raise SystemExit("bundled static/index.html not found in: " + roots)
-    if not Path(RCLONE).is_file() or not os.access(RCLONE, os.X_OK):
-        raise SystemExit(f"bundled rclone is missing or not executable: {RCLONE}")
+    if not RCLONE or not Path(RCLONE).is_file() or not os.access(RCLONE, os.X_OK):
+        raise SystemExit("bundled rclone is missing or not executable; refusing to use an rclone installed on the system")
 CONF_DIR = Path.home() / ".hbk-explorer"
 CONF_FILE = CONF_DIR / "sources.json"
 INDEX_DIR = CONF_DIR / "index"

@@ -15,7 +15,7 @@ Requires no client-side encryption on the backup task (encrypted tasks are not s
 ## Install
 Download the `.dmg` from Releases, drag the app to Applications, open it (first start: right-click → Open, it is not notarized).
 Or from source: `python3 -m venv .venv && .venv/bin/pip install -r requirements.txt && .venv/bin/python hbk_explorer.py`.
-`rclone` is bundled in the app; from source install it with Homebrew.
+`rclone` is bundled in the app (MIT; `rclone-COPYING` and `THIRD-PARTY-NOTICES.txt` are inside the app under `Contents/Resources/Licenses/` and on the disk image). From source, install rclone with Homebrew.
 
 ## Docs
 `docs/USER-GUIDE.md`, `docs/FORMAT.md` (the reverse-engineered format), `docs/ARCHITECTURE.md`, `docs/HANDOVER.md`.
