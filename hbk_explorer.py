@@ -129,7 +129,7 @@ class Source:
         with self._lock:
             if rel in self._list and not refresh: return self._list[rel]
         ents = {}
-        for root in [self.local] + self.extra:
+        for root in [self.cache_dir, *self.read_roots()]:          # a file fetched into the app cache is local too
             p = root / rel if rel else root
             if not p.is_dir(): continue
             try: it = list(p.iterdir())

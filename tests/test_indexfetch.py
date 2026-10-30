@@ -356,6 +356,30 @@ class FetchTests(unittest.TestCase):
         self.assertEqual(_manifest(source), before)
 
 
+class ListdirCacheTests(unittest.TestCase):
+    """A file that Source.ensure downloaded into the app cache is listed as local, so build_pool uses the snapshot
+    databases it fetched (they were silently skipped when listdir only looked at the source folders)."""
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.old = hbk_explorer.INDEX_DIR; self.old_cache = hbk_explorer.CACHE_DIR
+        hbk_explorer.INDEX_DIR = Path(self.tmp.name) / "index"; hbk_explorer.CACHE_DIR = Path(self.tmp.name) / "cache"
+        local = Path(self.tmp.name) / "src"; (local / "Config/@Share/s").mkdir(parents=True)
+        (local / "Config/@Share/s/1.db.2").write_bytes(b"in-source")
+        self.src = hbk_explorer.Source("t4l", "t4l", str(local))
+        cached = self.src.cache_dir / "Config/@Share/s"; cached.mkdir(parents=True)
+        (cached / "2.db.3").write_bytes(b"in-cache!")
+        (cached / "1.db.2").write_bytes(b"cache-copy-ignored")           # source copy wins when both exist
+    def tearDown(self):
+        hbk_explorer.INDEX_DIR = self.old; hbk_explorer.CACHE_DIR = self.old_cache; self.tmp.cleanup()
+    def test_cache_files_are_local(self):
+        ents = self.src.listdir("Config/@Share/s")
+        self.assertEqual(sorted(ents), ["1.db.2", "2.db.3"])
+        self.assertTrue(ents["2.db.3"]["local"]); self.assertEqual(ents["2.db.3"]["size"], 9)
+        self.assertTrue(ents["1.db.2"]["local"])
+        self.assertEqual(self.src.ensure("Config/@Share/s/2.db.3").read_bytes(), b"in-cache!")
+        self.assertEqual(self.src.ensure("Config/@Share/s/1.db.2").read_bytes(), b"cache-copy-ignored")
+
+
 class BuildPoolWiringTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

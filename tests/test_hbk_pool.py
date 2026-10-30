@@ -63,6 +63,9 @@ class _LocalSource:
         self.local = Path(root)
         self.extra = []
         self.remotes = []
+    def has_sized_file(self, rel, size):
+        p = self.local / rel
+        return p.is_file() and size is not None and p.stat().st_size == int(size)
     def ensure(self, rel, job=None):
         p = self.local / rel
         if p.is_file():
