@@ -149,6 +149,12 @@ class RestoreCountTests(_Fixture):
         self.assertEqual(self.b.restore_count([{"share": "B", "ver": 2333, "path": "docs/z.txt", "is_dir": 0}]), {"files": 1, "bytes": 9})
         self.assertEqual(self.b.restore_count([]), {"files": 0, "bytes": 0})
 
+    def test_prefix_is_exact_and_case_sensitive(self):                         # H17: LIKE would match Foto_2024 -> FotoX2024, Photos -> photos
+        files = [{"share": "A", "path": p, "size": 1, "mtime": 0, "off": -1} for p in ("Foto_2024/a.jpg", "FotoX2024/b.jpg", "Photos/c.jpg", "photos/d.jpg", "100%/e.txt", "100x/f.txt", "Photos.old/g.jpg")]
+        b = FakeBackup(self.src, files)
+        for folder, want in (("Foto_2024", 1), ("Photos", 1), ("photos", 1), ("100%", 1), ("", 7)):
+            self.assertEqual(b.restore_count([{"share": "A", "ver": 1, "path": folder, "is_dir": 1}])["files"], want, folder)
+
     def test_skip_meta_in_sql(self):
         files = FILES + [{"share": "A", "path": "@eaDir/x.txt", "size": 5, "mtime": 0, "off": -9}, {"share": "A", "path": "a/@eaDir/SYNOPHOTO_THUMB.jpg", "size": 5, "mtime": 0, "off": -9},
                          {"share": "A", "path": "doc.docx@SynoResource", "size": 5, "mtime": 0, "off": -9}, {"share": "A", "path": "sub/.DS_Store", "size": 5, "mtime": 0, "off": -9}]
