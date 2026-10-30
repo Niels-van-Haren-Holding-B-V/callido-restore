@@ -14,12 +14,67 @@ from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs, unquote
 
-HERE = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+def _resource_roots():
+    """Directories that may hold bundled files (static/, rclone).
+
+    Source checkout: the directory of this file. PyInstaller sets sys._MEIPASS
+    (onedir `_internal`, or Contents/Frameworks inside a macOS .app). Data files
+    in a .app live under Contents/Resources and are normally cross-linked into
+    Frameworks; sibling folders are checked so a missing link still resolves.
+    """
+    roots, seen = [], set()
+    def add(p):
+        key = os.path.normpath(str(p))
+        if key not in seen:
+            seen.add(key); roots.append(Path(key))
+    if getattr(sys, "frozen", False):
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass: add(meipass)
+        exe_dir = Path(sys.executable).resolve().parent
+        add(exe_dir); add(exe_dir / "_internal")
+        if exe_dir.name == "MacOS":
+            contents = exe_dir.parent
+            add(contents / "Frameworks"); add(contents / "Resources")
+    else:
+        add(Path(__file__).resolve().parent)
+    return roots
+def _bundled(rel):
+    for root in _resource_roots():
+        p = root / rel
+        if p.is_file(): return p
+    return None
+def _ensure_executable(path):
+    """Copies of a collected binary sometimes lose the executable bit."""
+    if os.name == "nt" or os.access(path, os.X_OK): return True
+    try: path.chmod(path.stat().st_mode | 0o755)
+    except OSError: return False
+    return os.access(path, os.X_OK)
 def _find_rclone():
-    for c in [Path(getattr(sys, "_MEIPASS", HERE)) / "rclone", HERE / "rclone", Path("/opt/homebrew/bin/rclone"), Path("/usr/local/bin/rclone")]:
-        if c.is_file(): return str(c)
-    return "rclone"
+    names = ("rclone.exe", "rclone") if os.name == "nt" else ("rclone",)
+    found = []
+    for root in _resource_roots():
+        for name in names:
+            c = root / name
+            if c.is_file(): found.append(c)
+    found.sort(key=lambda p: (p.is_symlink(), str(p)))  # real file before a cross-link
+    for c in found:
+        if _ensure_executable(c): return str(c)
+    # A packaged app must not silently run whatever rclone is on the machine.
+    if getattr(sys, "frozen", False):
+        return ""
+    for c in (Path("/opt/homebrew/bin/rclone"), Path("/usr/local/bin/rclone")):
+        if c.is_file() and os.access(c, os.X_OK): return str(c)
+    return "rclone.exe" if os.name == "nt" else "rclone"
 RCLONE = _find_rclone()
+def _verify_frozen():
+    """Fail fast when a packaged build is missing modules or bundled files."""
+    if not getattr(sys, "frozen", False): return
+    import hbk_pool, hbk_poolmap, lz4.block  # noqa: F401
+    if _bundled("static/index.html") is None:
+        roots = ", ".join(str(r) for r in _resource_roots())
+        raise SystemExit("bundled static/index.html not found in: " + roots)
+    if not RCLONE or not Path(RCLONE).is_file() or not os.access(RCLONE, os.X_OK):
+        raise SystemExit("bundled rclone is missing or not executable; refusing to use an rclone installed on the system")
 CONF_DIR = Path.home() / ".hbk-explorer"
 CONF_FILE = CONF_DIR / "sources.json"
 INDEX_DIR = CONF_DIR / "index"
@@ -684,12 +739,18 @@ class H(BaseHTTPRequestHandler):
         u = urlparse(self.path); q = {k: v[0] for k, v in parse_qs(u.query).items()}
         try:
             if u.path in ("/", "/index.html"):
-                return self._send(200, (HERE / "static" / "index.html").read_bytes(), "text/html; charset=utf-8")
+                page = _bundled("static/index.html")
+                if page is None: return self._send(500, b"UI not found", "text/plain; charset=utf-8")
+                return self._send(200, page.read_bytes(), "text/html; charset=utf-8")
             if u.path == "/api/sources":
                 return self._json([s.to_json() for s in SOURCES.values()])
             if u.path == "/api/about":
-                r = subprocess.run([RCLONE, "version"], capture_output=True, text=True)
-                return self._json({"version": VERSION, "rclone": (r.stdout.splitlines() or ["not found"])[0] if r.returncode == 0 else "rclone not found", "config": str(CONF_DIR)})
+                try:
+                    r = subprocess.run([RCLONE, "version"], capture_output=True, text=True)
+                    line = (r.stdout.splitlines() or ["not found"])[0] if r.returncode == 0 else "rclone not found"
+                except OSError:
+                    line = "rclone not found"
+                return self._json({"version": VERSION, "rclone": line, "rclone_path": RCLONE, "config": str(CONF_DIR)})
             if u.path == "/api/quit":
                 threading.Timer(0.3, lambda: os._exit(0)).start(); return self._json({"ok": True})
             if u.path == "/api/ls":   # directory picker helper
@@ -827,13 +888,22 @@ class H(BaseHTTPRequestHandler):
         except Exception as e:
             self._json({"error": str(e), "trace": traceback.format_exc()}, 500)
 
+def _log(msg):
+    stream = sys.stdout if sys.stdout is not None else sys.stderr
+    if stream is None: return
+    try: print(msg, file=stream, flush=True)
+    except Exception: pass
+def _open_browser(port):
+    try: webbrowser.open(f"http://127.0.0.1:{port}")
+    except Exception: _log(f"could not open a browser; open http://127.0.0.1:{port}")
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument("--port", type=int, default=8765); ap.add_argument("--no-browser", action="store_true")
     a = ap.parse_args()
+    _verify_frozen()
     load_sources()
     srv = ThreadingHTTPServer(("127.0.0.1", a.port), H)
-    print(f"Hyper Backup Desktop {VERSION} on http://127.0.0.1:{a.port}  (config: {CONF_DIR})")
-    if not a.no_browser: threading.Timer(0.6, lambda: webbrowser.open(f"http://127.0.0.1:{a.port}")).start()
+    _log(f"Hyper Backup Desktop {VERSION} on http://127.0.0.1:{a.port}  (config: {CONF_DIR})")
+    if not a.no_browser: threading.Timer(0.6, lambda: _open_browser(a.port)).start()
     try: srv.serve_forever()
     except KeyboardInterrupt: pass
 
