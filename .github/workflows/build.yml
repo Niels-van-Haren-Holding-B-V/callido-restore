@@ -28,8 +28,8 @@ jobs:
       - run: ./scripts/smoke_macos_app.sh
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: HyperBackupDesktop-${{ matrix.arch }}
-          path: dist/HyperBackupDesktop-*.dmg
+          name: CallidoRestore-${{ matrix.arch }}
+          path: dist/CallidoRestore-*.dmg
 
   # Same steps a tag push uses to prepare the release, without publishing.
   # Pull requests and workflow_dispatch stop here. A v* tag continues to publish.
@@ -40,7 +40,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          pattern: HyperBackupDesktop-*
+          pattern: CallidoRestore-*
           path: release
           merge-multiple: true
       - run: ./scripts/assemble_release.sh release
@@ -48,8 +48,8 @@ jobs:
         with:
           name: release-bundle
           path: |
-            release/HyperBackupDesktop-arm64.dmg
-            release/HyperBackupDesktop-amd64.dmg
+            release/CallidoRestore-arm64.dmg
+            release/CallidoRestore-amd64.dmg
             release/SHA256SUMS
       - name: Note whether this run publishes
         run: |
@@ -75,6 +75,6 @@ jobs:
         with:
           fail_on_unmatched_files: true
           files: |
-            release/HyperBackupDesktop-arm64.dmg
-            release/HyperBackupDesktop-amd64.dmg
+            release/CallidoRestore-arm64.dmg
+            release/CallidoRestore-amd64.dmg
             release/SHA256SUMS

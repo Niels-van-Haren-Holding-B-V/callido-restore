@@ -4,7 +4,9 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-APP_NAME="Hyper Backup Desktop"
+APP_NAME=$(sed -n 's/^APP_NAME = "\([^"]*\)".*/\1/p' hbk_explorer.py)
+[ -n "$APP_NAME" ] || { echo "APP_NAME not found in hbk_explorer.py" >&2; exit 1; }
+DMG_BASE=$(printf '%s' "$APP_NAME" | tr -d ' ')
 PORT=${HBK_SMOKE_PORT:-8765}
 MNT=
 LOG=
@@ -147,7 +149,7 @@ smoke_one() {
 
   page=$(curl -sf "http://127.0.0.1:${PORT}/") || die "homepage request failed"
   case "$page" in
-    *"Hyper Backup Desktop"*) ;;
+    *"$APP_NAME"*) ;;
     *) die "homepage did not contain the app UI" ;;
   esac
   check_about || die "about check failed"
@@ -170,9 +172,9 @@ smoke_one() {
   echo "smoke test passed: $dmg"
 }
 
-dmgs=(dist/HyperBackupDesktop-*.dmg)
+dmgs=(dist/"${DMG_BASE}"-*.dmg)
 if [ ${#dmgs[@]} -eq 0 ] || [ ! -f "${dmgs[0]}" ]; then
-  die "missing dist/HyperBackupDesktop-*.dmg (run ./build_app.sh first)"
+  die "missing dist/${DMG_BASE}-*.dmg (run ./build_app.sh first)"
 fi
 for dmg in "${dmgs[@]}"; do
   smoke_one "$dmg"
