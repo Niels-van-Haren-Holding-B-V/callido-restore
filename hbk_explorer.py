@@ -175,6 +175,25 @@ class Source:
                 continue
         return False
 
+    def contains_dest(self, dest):
+        """True when a restore destination (local path or rclone 'remote:path') is the backup itself or lies inside it.
+        The source is read-only: a restore must never write into or next to the .hbk."""
+        d = dest.strip().rstrip("/")
+        if ":" in d and not d.startswith("/"):
+            rem, _, path = d.partition(":"); path = path.strip("/")
+            for r in self.remotes:
+                rr, _, rp = r.partition(":"); rp = rp.strip("/")
+                if rem == rr and (path == rp or path.startswith(rp + "/") or rp.startswith(path + "/") or path == ""):
+                    return True
+            return False
+        try: dp = Path(os.path.expanduser(d)).resolve()
+        except OSError: dp = Path(os.path.expanduser(d))
+        for root in [self.local, *self.extra]:
+            try: rr = root.resolve()
+            except OSError: rr = root
+            if dp == rr or rr in dp.parents or dp in rr.parents: return True
+        return False
+
     def to_json(self):
         return {"id": self.id, "name": self.name, "local": str(self.local), "remote": self.remote, "remotes": self.remotes, "extra": [str(x) for x in self.extra],
                 "local_exists": self.local.is_dir()}
@@ -821,6 +840,26 @@ class H(BaseHTTPRequestHandler):
                 if not p.is_dir(): p = p.parent
                 items = sorted([e.name for e in p.iterdir() if e.is_dir() and not e.name.startswith(".")], key=str.lower)
                 return self._json({"path": str(p), "parent": str(p.parent), "dirs": items})
+            if u.path == "/api/dest/check":   # restore destination: is it inside the backup? does it exist? is it empty?
+                dest = (q.get("dest") or "").strip(); src = SOURCES.get(q.get("src") or "")     # no backup scan needed for this
+                out = {"dest": dest, "inside_source": bool(src and src.contains_dest(dest)), "exists": False, "empty": None, "files": 0}
+                if not dest: return self._json(out | {"error": "no destination"})
+                if ":" in dest and not dest.startswith("/"):
+                    r = subprocess.run([RCLONE, "lsjson", "--no-mimetype", "--max-depth", "1", dest], capture_output=True, text=True, timeout=120)
+                    if r.returncode == 0:
+                        ents = json.loads(r.stdout or "[]"); out["exists"] = True; out["files"] = len(ents); out["empty"] = not ents
+                    else:
+                        err = r.stderr.strip()[-200:]
+                        if "directory not found" in err or "not found" in err: out["exists"] = False
+                        else: out["error"] = err
+                else:
+                    pp = Path(os.path.expanduser(dest))
+                    out["exists"] = pp.is_dir()
+                    if out["exists"]:
+                        try: ents = [e for e in pp.iterdir() if e.name != ".DS_Store"]; out["files"] = len(ents); out["empty"] = not ents
+                        except OSError as e: out["error"] = str(e)
+                    elif pp.exists(): out["error"] = "destination exists but is not a folder"
+                return self._json(out)
             if u.path == "/api/remotes":
                 r = subprocess.run([RCLONE, "listremotes"], capture_output=True, text=True)
                 rems = [x.strip() for x in r.stdout.splitlines() if x.strip()]
@@ -861,7 +900,8 @@ class H(BaseHTTPRequestHandler):
                     if r.returncode != 0: raise RuntimeError(r.stderr.strip()[-400:] or "rclone config failed")
                     t = subprocess.run([RCLONE, "lsd", f"{name}:"], capture_output=True, text=True, timeout=60)
                     if t.returncode != 0: raise RuntimeError("remote created but listing failed: " + t.stderr.strip()[-300:])
-                    return {"remote": name + ":"}
+                    shares = [ln.split(None, 4)[-1] for ln in t.stdout.splitlines() if ln.strip()]
+                    return {"remote": name + ":", "shares": shares}
                 return self._json(start_job(run, f"connect {kind}"))
             if u.path == "/api/jobs/saved":
                 out = []
@@ -935,6 +975,7 @@ class H(BaseHTTPRequestHandler):
                 s = add_source(body["name"], body["local"], body.get("remote"), body.get("extra")); return self._json(s.to_json())
             if u.path == "/api/restore":
                 b = backup_for(body["src"]); dest = os.path.expanduser(body["dest"].strip())
+                if b.src.contains_dest(dest): return self._json({"error": f"refusing to restore into the backup itself: {dest} is the source or lies inside it"}, 400)
                 if ":" in dest and not dest.startswith("/"):
                     r = subprocess.run([RCLONE, "mkdir", dest], capture_output=True, text=True)
                     if r.returncode != 0: return self._json({"error": f"cannot use remote destination {dest}: {r.stderr.strip()[-200:]}"}, 400)

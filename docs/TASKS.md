@@ -64,6 +64,7 @@ the settings UI.
 Serves the goal: quieter flags and parser tests so someone restoring their own files can trust what the app shows.
 
 ## T7 — NAS destination preparation wizard
+IN REVIEW (hbk-3): branch `hbk3/nas-destination` on #29. "Prepare the NAS and connect" guide on the target step (shared folder, user + permissions, SMB, other protocols), inline SMB connect, "Check target" (new/empty/has files/inside the backup), and the server refuses a destination inside the backup source.
 The restore target step lists an existing rclone remote, a share and a folder, or a local path. Add a wizard on that step that explains how to prepare the NAS, then connect the destination: an SMB share, a user and its permissions, or another protocol. The source wizard can already create an SMB remote; this wizard is for the restore destination. Acceptance: from Restore, a user with no destination remote yet can follow the steps to a target the restore job can write, and the text covers an SMB share, a user and its permissions, and another protocol. The destination is a new or empty folder, or the restore skips existing files. The wizard and the restore never overwrite or delete existing NAS data, and they refuse a destination inside the backup source.
 
 ## T8 — Never overwrite on restore
