@@ -27,7 +27,7 @@ Packaging as a `.app` / `.dmg` ([T3](docs/TASKS.md)) is essential for making it 
 * Timeline of every backup run (new/modified/removed), per-run changes, file timeline by mtime/ctime, folder browser, search with
   suspicious-file flags, version compare, single-file download.
 * Restore wizard: pick a run, pick everything or folders, choose the target (back into the original NAS shares (existing files are skipped, never overwritten), a folder on a share,
-  or a local path). Skipping existing files and never overwriting them is a requirement, not current behaviour ([T8](docs/TASKS.md)). Resilient: retries, parallel prefetch, pause/resume, survives restarts.
+  or a local path). Files already at the target are skipped, never overwritten or deleted, and a target inside the backup is refused. Resilient: retries, parallel prefetch, pause/resume, survives restarts.
 * Detects ransomware-encrypted copies (`.L0CK3D`) and reports them as unreadable.
 
 Requires no client-side encryption on the backup task (encrypted tasks are not supported yet).
