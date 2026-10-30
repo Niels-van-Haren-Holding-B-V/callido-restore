@@ -136,7 +136,7 @@ class DestCheckApiTests(SourceFixture):
             if args[1] == "obscure": return subprocess.CompletedProcess(args, 0, stdout="OBSCURED\n", stderr="")
             if args[1] == "config": return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
             return subprocess.CompletedProcess(args, 0, stdout=json.dumps([{"Name": "Restore"}]), stderr="")
-        body = json.dumps({"kind": "smb", "name": "nas", "host": "10.0.0.2", "user": "restore", "password": "s3cret pw"}).encode()
+        body = json.dumps({"kind": "smb", "name": "nas", "host": "192.0.2.10", "user": "restore", "password": "s3cret pw"}).encode()
         base = f"http://127.0.0.1:{self.srv.server_address[1]}/api/rclone/connect"
         with mock.patch.object(hbk_explorer.subprocess, "run", run):
             with urlopen(Request(base, data=body, headers={"Content-Type": "application/json"})) as r: job = json.loads(r.read())
