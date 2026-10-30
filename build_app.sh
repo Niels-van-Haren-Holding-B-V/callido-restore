@@ -190,6 +190,9 @@ build_bundle() {
     --hidden-import lz4 \
     --hidden-import lz4.block \
     --collect-submodules lz4 \
+    --hidden-import webview \
+    --hidden-import webview.platforms.cocoa \
+    --collect-submodules webview \
     "$ROOT/hbk_explorer.py"
   bundle_file "static/index.html" || die "static/index.html missing from the app bundle"
   [ -f "$APP/Contents/Resources/AppIcon.icns" ] || die "AppIcon.icns missing from the app bundle"
