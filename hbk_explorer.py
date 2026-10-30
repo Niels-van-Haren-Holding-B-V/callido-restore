@@ -728,7 +728,7 @@ class Backup:
                  "sample_from": None, "sample_to": None}
             if mine:
                 root, rel = file_target(mine[0], items, dest)
-                m["sample_from"] = f"{mine[0]['share']}/{mine[0]['path']}"; m["sample_to"] = f"{root}/{rel}"
+                m["sample_from"] = f"{mine[0]['share']}/{mine[0]['path']}"; m["sample_to"] = f"{root}/{rel}" if root else rel
             out.append(m)
         return {"files": len(files), "bytes": sum(f["size"] for f in files), "mappings": out, "sample": [f"{f['share']}/{f['path']}" for f in files[:20]]}
     def restore(self, items, dest, job, skip_meta=True, start_at=0):
@@ -946,9 +946,12 @@ class H(BaseHTTPRequestHandler):
                     elif not pp.parent.is_dir(): out["error"] = f"the folder above it does not exist: {pp.parent} (is the share mounted?)"
                 return self._json(out)
             if u.path == "/api/remotes":
-                r = subprocess.run([RCLONE, "listremotes"], capture_output=True, text=True)
-                rems = [x.strip() for x in r.stdout.splitlines() if x.strip()]
-                out = {"remotes": rems, "dirs": []}
+                r = subprocess.run([RCLONE, "listremotes", "--long"], capture_output=True, text=True)      # "name: type" per line
+                rems, types = [], {}
+                for ln in r.stdout.splitlines():
+                    name, _, typ = ln.partition(":")
+                    if name.strip(): rems.append(name.strip() + ":"); types[name.strip() + ":"] = typ.strip()
+                out = {"remotes": rems, "types": types, "dirs": []}
                 if q.get("remote"):
                     r2 = subprocess.run([RCLONE, "lsjson", "--no-mimetype", "--dirs-only", q["remote"] + (q.get("path") or "")], capture_output=True, text=True)
                     if r2.returncode == 0: out["dirs"] = [e["Name"] for e in json.loads(r2.stdout or "[]")]
