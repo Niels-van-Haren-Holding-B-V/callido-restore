@@ -9,12 +9,12 @@ from array import array
 from hbk_pool import BLOCK, WRITER_OF_SET, SET_OF_WRITER, load_runs, bucket_index_entries
 from hbk_poolmap import new_range
 
-LOOK = 400           # how many upcoming records (stream order) are considered as "the file starting here"
+LOOK = 96            # how many upcoming records (stream order) are considered as "the file starting here"
 TAGK = 9
 
 class Rec:
-    __slots__ = ("off", "ranges", "n", "dedup", "size", "tag", "tail", "idx")
-    def __init__(self, off): self.off = off; self.ranges = []; self.n = 0; self.dedup = []; self.size = None; self.tag = None; self.tail = None; self.idx = -1
+    __slots__ = ("off", "ranges", "n", "dedup", "size", "tag", "tail", "idx", "head_new")
+    def __init__(self, off): self.off = off; self.ranges = []; self.n = 0; self.dedup = []; self.size = None; self.tag = None; self.tail = None; self.idx = -1; self.head_new = 0
 
 def build_writers(outdir, log=print):
     """Per writer: records in stream order with new-id ranges, dedup ids, size, tag."""
@@ -37,10 +37,13 @@ def build_writers(outdir, log=print):
         while i < n:
             r = Rec(rec[i]); j = i
             while j < n and rec[j] == r.off: j += 1
+            head_open = True
             for k in range(i, j):
                 g = g0[k]; L = ln[k]; nr = new_range(g, L, frontier)
                 if nr and owner.get(nr[0] // BLOCK) == w:
                     ns, ne = nr; r.dedup.extend(range(g, ns))
+                    if head_open and ns == g: r.head_new += ne - ns
+                    else: head_open = False
                     while ns < ne:
                         blk = ns // BLOCK; seg_end = min(ne, (blk + 1) * BLOCK)
                         if owner.get(blk) != w: r.dedup.extend(range(ns, seg_end))
@@ -50,7 +53,7 @@ def build_writers(outdir, log=print):
                             r.n += seg_end - ns
                         ns = seg_end
                     frontier = ne - 1
-                else: r.dedup.extend(range(g, g + L))
+                else: r.dedup.extend(range(g, g + L)); head_open = False
             m = mt.get(r.off)
             if m: r.size = m[0]; r.tag = m[1]; r.tail = m[2]
             r.idx = len(recs); recs.append(r); i = j
