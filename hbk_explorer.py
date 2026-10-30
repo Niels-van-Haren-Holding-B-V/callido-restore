@@ -747,12 +747,14 @@ class Backup:
     def restore_count(self, items, skip_meta=True):
         """Files and bytes the selection would restore, counted in SQL (no row materialisation; H13 shows it live)."""
         files = bytes_ = 0
-        meta = " and path not like '%/@eaDir/%' and path not like '@eaDir/%' and name not like '%@SynoResource' and name not like '%@SynoEAStream' and name != '.DS_Store'" if skip_meta else ""
+        # instr/substr are exact and case-sensitive, unlike LIKE (case-insensitive for ASCII, with _ and % as wildcards)
+        meta = " and instr('/' || path, '/@eaDir/') = 0 and substr(name, -13) != '@SynoResource' and substr(name, -13) != '@SynoEAStream' and name != '.DS_Store'" if skip_meta else ""
         for it in items:
             c = self.conn(it["share"], int(it["ver"]))
             if it.get("is_dir"):
-                q = f"select count(*), coalesce(sum(size), 0) from files where is_dir=0 and (mode & 61440)=32768 and (path like ? or ? = ''){meta}"
-                n, b = c.execute(q, (it["path"].rstrip("/") + "/%", it["path"])).fetchone()
+                prefix = it["path"].rstrip("/") + "/"
+                q = f"select count(*), coalesce(sum(size), 0) from files where is_dir=0 and (mode & 61440)=32768 and (? = '' or substr(path, 1, ?) = ?){meta}"
+                n, b = c.execute(q, (it["path"], len(prefix), prefix)).fetchone()
             else:
                 n, b = c.execute(f"select count(*), coalesce(sum(size), 0) from files where path = ? and is_dir=0{meta}", (it["path"],)).fetchone()
             files += n; bytes_ += b; c.close()
