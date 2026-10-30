@@ -107,6 +107,31 @@ def human(n):
         n /= 1024
     return f"{n:.1f} PB"
 
+def is_remote_path(p):
+    """rclone 'remote:path' rather than a local path."""
+    return ":" in p and not p.startswith("/")
+
+def file_target(f, items, dest):
+    """(root, rel) for a planned file. An item with its own 'dest' (H8, per-folder mapping) receives the item's contents
+    directly: root = item dest, rel = the file's path below the item. Items without 'dest' go under the common dest as
+    <share>/<path> (one-folder mode)."""
+    it = items[f["item"]] if f.get("item") is not None and f["item"] < len(items) else None
+    d = (it or {}).get("dest")
+    if not d: return dest, f"{f['share']}/{f['path']}"
+    base = it["path"].strip("/")
+    if not it.get("is_dir") or not base: rel = f["path"] if base == "" and it.get("is_dir") else os.path.basename(f["path"])
+    elif f["path"].startswith(base + "/"): rel = f["path"][len(base) + 1:]
+    else: rel = os.path.basename(f["path"])
+    return d.rstrip("/"), rel
+
+def restore_roots(items, dest):
+    """The distinct roots a restore writes into, in item order; the common dest only when an item has no 'dest'."""
+    roots = []
+    for it in items:
+        r = (it.get("dest") or dest or "").rstrip("/")
+        if r and r not in roots: roots.append(r)
+    return roots
+
 def list_destination(dest):
     """Paths of every file already at a remote destination (recursive). Raises when the listing fails: an unknown
     destination must never be treated as empty, because the restore never writes over what is there."""
@@ -201,6 +226,11 @@ class Source:
         for w in roots:
             if self._writes_into_source(w, remote, both_ways=bool(shares)): return w
         return ""
+
+    def contains_root(self, root):
+        """True when an exact written root (an H8 per-folder target) is the backup, lies inside it, or has it inside."""
+        r = root.strip().replace("\\", "/").rstrip("/")
+        return bool(r) and self._writes_into_source(r, is_remote_path(r), both_ways=True)
 
     def _writes_into_source(self, w, remote, both_ways):
         """True when the written root w equals or lies inside a source path, or (both_ways) has a source path inside it."""
@@ -676,7 +706,7 @@ class Backup:
         files = []
         def meta(path, name):
             return skip_meta and ("/@eaDir/" in f"/{path}" or name.endswith("@SynoResource") or name.endswith("@SynoEAStream") or name == ".DS_Store")
-        for it in items:
+        for idx, it in enumerate(items):
             c = self.conn(it["share"], int(it["ver"]))
             if it.get("is_dir"):
                 q = "select * from files where is_dir=0 and (mode & 61440)=32768 and (path like ? or ? = '') order by path"
@@ -685,25 +715,43 @@ class Backup:
                 rows = c.execute("select * from files where path = ? and is_dir=0", (it["path"],)).fetchall()
             for r in rows:
                 if meta(r["path"], r["name"]): continue
-                d = dict(r); d["share"] = it["share"]; d["ver"] = int(it["ver"]); files.append(d)
+                d = dict(r); d["share"] = it["share"]; d["ver"] = int(it["ver"]); d["item"] = idx; files.append(d)
             c.close()
         return files
+
+    def plan_mappings(self, items, dest, skip_meta=True):
+        """Per item: where its files go, with one sample file (the first) so the user can check the final path (H8)."""
+        files = self.restore_plan(items, skip_meta); out = []
+        for idx, it in enumerate(items):
+            mine = [f for f in files if f.get("item") == idx]
+            m = {"share": it["share"], "path": it["path"], "dest": (it.get("dest") or dest or "").rstrip("/"), "files": len(mine), "bytes": sum(f["size"] for f in mine),
+                 "sample_from": None, "sample_to": None}
+            if mine:
+                root, rel = file_target(mine[0], items, dest)
+                m["sample_from"] = f"{mine[0]['share']}/{mine[0]['path']}"; m["sample_to"] = f"{root}/{rel}"
+            out.append(m)
+        return {"files": len(files), "bytes": sum(f["size"] for f in files), "mappings": out, "sample": [f"{f['share']}/{f['path']}" for f in files[:20]]}
     def restore(self, items, dest, job, skip_meta=True, start_at=0):
-        """Restore the selected items under dest. Files that already exist at the destination are skipped, whatever their
-        size or date; nothing at the destination is ever written over or deleted (T8)."""
+        """Restore the selected items. An item with its own 'dest' gets its contents there (H8: one target per folder);
+        the others go under dest as <share>/<path>. Files that already exist at a destination are skipped, whatever their
+        size or date; nothing at a destination is ever written over or deleted (T8)."""
         JOBS_DIR.mkdir(parents=True, exist_ok=True)
         jf = JOBS_DIR / f"{job['id']}.json"
         def persist(state="running"):
-            jf.write_text(json.dumps({"id": job["id"], "src": self.src.id, "items": items, "dest": dest, "skip_meta": skip_meta,
+            jf.write_text(json.dumps({"id": job["id"], "src": self.src.id, "items": items, "dest": dest, "roots": roots, "skip_meta": skip_meta,
                                       "next_index": job.get("next_index", 0), "done_files": job.get("done_files", 0), "skipped": job.get("skipped", 0),
                                       "errors": job.get("errors", [])[-200:], "total_files": job.get("total_files"), "total_bytes": job.get("total_bytes"),
                                       "done_bytes": job.get("done_bytes", 0), "state": state, "label": job["label"], "started": job["started"], "updated": time.time()}))
-        remote_dest = ":" in dest and not dest.startswith("/")    # rclone remote, e.g. nas:GDriveRestore/restore
-        if remote_dest:
-            import tempfile
-            stage = tempfile.mkdtemp(prefix="hbk-stage-")
-            job["message"] = "listing destination"
-            try: existing = list_destination(dest)
+        roots = restore_roots(items, dest)                       # every folder written into, local paths or rclone remotes
+        existing = {}                                            # remote root -> files already there (never written over)
+        stage = None
+        for root in roots:
+            if not is_remote_path(root): continue
+            if stage is None:
+                import tempfile
+                stage = tempfile.mkdtemp(prefix="hbk-stage-")
+            job["message"] = f"listing destination {root}"
+            try: existing[root] = list_destination(root)
             except Exception:
                 persist("error"); raise
         files = self.restore_plan(items, skip_meta)
@@ -761,19 +809,19 @@ class Backup:
                             with dl_lock:
                                 if bk in downloaded: downloaded.move_to_end(bk)
                     except Exception: pass
-                rel = f"{f['share']}/{f['path']}"; out = os.path.join(dest, rel)
-                job["message"] = f"{i + 1}/{len(files)}: {rel}"; job["progress"] = done_bytes / total_bytes if total_bytes else (i / max(1, len(files)))
+                root, rel = file_target(f, items, dest); remote_dest = is_remote_path(root); out = os.path.join(root, rel)
+                job["message"] = f"{i + 1}/{len(files)}: {f['share']}/{f['path']}"; job["progress"] = done_bytes / total_bytes if total_bytes else (i / max(1, len(files)))
                 job["next_index"] = i
                 if i % 50 == 0: persist()
                 for attempt in range(3):
                   try:
                     if remote_dest:
-                        if rel in existing:
+                        if rel in existing[root]:
                             job["skipped"] += 1; job["done_files"] += 1; break
-                        out = os.path.join(stage, rel); os.makedirs(os.path.dirname(out), exist_ok=True)
+                        out = os.path.join(stage, f"{roots.index(root)}", rel); os.makedirs(os.path.dirname(out), exist_ok=True)
                         pool.extract(f["off"], out, size=f["size"], mtime=f["mtime"], job=None, fh_cache=fh_cache)
                         # --ignore-existing: if the file appeared at the target since the listing, rclone leaves it alone
-                        r = subprocess.run([RCLONE, "moveto", out, f"{dest}/{rel}", "--ignore-existing", "--retries", "5", "--low-level-retries", "20", "--retries-sleep", "5s"], capture_output=True, text=True)
+                        r = subprocess.run([RCLONE, "moveto", out, f"{root}/{rel}", "--ignore-existing", "--retries", "5", "--low-level-retries", "20", "--retries-sleep", "5s"], capture_output=True, text=True)
                         if r.returncode != 0: raise RuntimeError("upload failed: " + r.stderr.strip()[-200:])
                         if os.path.exists(out):      # not moved: the target already had it
                             os.unlink(out); job["skipped"] += 1; job["done_files"] += 1; break
@@ -785,8 +833,8 @@ class Backup:
                     job["done_files"] += 1; break
                   except Exception as e:
                     if attempt < 2 and not isinstance(e, KeyError):      # KeyError = chunk not in pool map: retrying will not help
-                        job["message"] = f"{rel}: {e} — retrying"; time.sleep([2, 10][attempt]); continue
-                    job["errors"].append({"path": rel, "error": str(e)})
+                        job["message"] = f"{f['share']}/{f['path']}: {e} — retrying"; time.sleep([2, 10][attempt]); continue
+                    job["errors"].append({"path": f"{f['share']}/{f['path']}", "error": str(e)})
                     if len(job["errors"]) > 2000: raise RuntimeError("too many errors, aborting")
                 done_bytes += f["size"]; job["done_bytes"] = done_bytes
                 if len(fh_cache) > 64:
@@ -876,7 +924,8 @@ class H(BaseHTTPRequestHandler):
             if u.path == "/api/dest/check":   # restore destination: is it inside the backup? does it exist? is it empty?
                 dest = (q.get("dest") or "").strip(); src = SOURCES.get(q.get("src") or "")     # no backup scan needed for this
                 shares = json.loads(q.get("shares") or "[]")                                    # selected shares: the restore writes dest/<share>/...
-                conflict = src.contains_dest(dest, shares) if src and dest else ""
+                if q.get("root"): conflict = src.contains_root(dest) if src and dest else ""      # dest is itself a written root (H8 mapping row)
+                else: conflict = src.contains_dest(dest, shares) if src and dest else ""
                 out = {"dest": dest, "inside_source": bool(conflict), "conflict": conflict or None, "exists": False, "empty": None, "files": 0}
                 if not dest: return self._json(out | {"error": "no destination"})
                 if ":" in dest and not dest.startswith("/"):
@@ -928,7 +977,7 @@ class H(BaseHTTPRequestHandler):
                     try: d = json.loads(jf.read_text())
                     except Exception: continue
                     if d["id"] in JOBS and JOBS[d["id"]]["state"] == "running": d["state"] = "running"
-                    out.append({k: d.get(k) for k in ("id", "label", "state", "dest", "items", "next_index", "total_files", "done_files", "skipped", "total_bytes", "done_bytes", "started", "updated", "src")} | {"errors": len(d.get("errors") or [])})
+                    out.append({k: d.get(k) for k in ("id", "label", "state", "dest", "roots", "items", "next_index", "total_files", "done_files", "skipped", "total_bytes", "done_bytes", "started", "updated", "src")} | {"errors": len(d.get("errors") or [])})
                 return self._json(out[:20])
             if u.path == "/api/job/cancel":
                 j = JOBS.get(q.get("id"))
@@ -964,8 +1013,8 @@ class H(BaseHTTPRequestHandler):
                 mb = int(q["max_bucket"]) if q.get("max_bucket") else None
                 return self._json(start_job(lambda job: b.build_pool(job, mb), "build pool map"))
             if u.path == "/api/restore_plan":
-                items = json.loads(q["items"]); files = b.restore_plan(items, q.get("skip_meta", "1") == "1")
-                return self._json({"files": len(files), "bytes": sum(f["size"] for f in files), "sample": [f"{f['share']}/{f['path']}" for f in files[:20]]})
+                items = json.loads(q["items"])
+                return self._json(b.plan_mappings(items, (q.get("dest") or "").strip(), q.get("skip_meta", "1") == "1"))
             if u.path == "/api/download":
                 c = b.conn(q["share"], int(q["ver"])); r = c.execute("select * from files where id = ?", (q["id"],)).fetchone(); c.close()
                 if not r: return self._json({"error": "no such file"}, 404)
@@ -1018,16 +1067,29 @@ class H(BaseHTTPRequestHandler):
                 return self._json(start_job(run, f"connect {kind}"))
 
             if u.path == "/api/restore":
-                b = backup_for(body["src"]); dest = os.path.expanduser(body["dest"].strip())
-                bad = b.src.contains_dest(dest, sorted({it["share"] for it in body["items"]}))
+                b = backup_for(body["src"]); dest = os.path.expanduser((body.get("dest") or "").strip())
+                items = []
+                for it in body["items"]:                                           # H8: an item may carry its own target
+                    it = dict(it); d = os.path.expanduser((it.get("dest") or "").strip()).rstrip("/")
+                    if d: it["dest"] = d
+                    else: it.pop("dest", None)
+                    items.append(it)
+                if not items: return self._json({"error": "nothing selected"}, 400)
+                unmapped = sorted({it["share"] for it in items if not it.get("dest")})
+                if unmapped and not dest: return self._json({"error": "no destination for " + ", ".join(unmapped)}, 400)
+                bad = b.src.contains_dest(dest, unmapped) if unmapped else ""
+                for it in items:
+                    if bad: break
+                    if it.get("dest") and b.src.contains_root(it["dest"]): bad = it["dest"]
                 if bad: return self._json({"error": f"refusing to write {bad}: it is the backup itself, lies inside it, or the backup lies inside it (the source is read-only)"}, 400)
-                if ":" in dest and not dest.startswith("/"):
-                    r = subprocess.run([RCLONE, "mkdir", dest], capture_output=True, text=True)
-                    if r.returncode != 0: return self._json({"error": f"cannot use remote destination {dest}: {r.stderr.strip()[-200:]}"}, 400)
-                elif not os.path.isdir(dest):
-                    if os.path.isdir(os.path.dirname(dest.rstrip("/"))): os.makedirs(dest, exist_ok=True)     # "new folder, it will be created"
-                    else: return self._json({"error": f"the folder above {dest} does not exist (is the share mounted?)"}, 400)
-                return self._json(start_job(lambda job: b.restore(body["items"], dest, job, body.get("skip_meta", True)), "restore"))
+                for root in restore_roots(items, dest):
+                    if is_remote_path(root):
+                        r = subprocess.run([RCLONE, "mkdir", root], capture_output=True, text=True)
+                        if r.returncode != 0: return self._json({"error": f"cannot use remote destination {root}: {r.stderr.strip()[-200:]}"}, 400)
+                    elif not os.path.isdir(root):
+                        if os.path.isdir(os.path.dirname(root)): os.makedirs(root, exist_ok=True)      # a new folder next to existing ones
+                        else: return self._json({"error": f"the folder above {root} does not exist (is the share mounted?)"}, 400)
+                return self._json(start_job(lambda job: b.restore(items, dest, job, body.get("skip_meta", True)), "restore"))
             if u.path == "/api/restore/resume":
                 d = json.loads((JOBS_DIR / f"{body['id']}.json").read_text()); b = backup_for(d["src"])
                 (JOBS_DIR / f"{body['id']}.json").unlink()
