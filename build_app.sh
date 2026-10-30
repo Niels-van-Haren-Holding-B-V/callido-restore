@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build "Hyper Backup Desktop.app" and a .dmg.
+# Build "<APP_NAME>.app" (APP_NAME from hbk_explorer.py, currently "Callido Restore") and a .dmg.
 # Arch comes from RCLONE_ARCH (arm64 or amd64) or from uname.
 # Needs python3, pip, curl, unzip, gpg, and hdiutil. Packaging only; the app stays cross-platform.
 set -euo pipefail
@@ -7,7 +7,9 @@ cd "$(dirname "$0")"
 
 RCLONE_VERSION=v1.75.2
 RCLONE_SIGNING_FPR=FBF737ECE9F8AB18604BD2AC93935E02FF3B54FA
-APP_NAME="Hyper Backup Desktop"
+APP_NAME=$(sed -n 's/^APP_NAME = "\([^"]*\)".*/\1/p' hbk_explorer.py)
+[ -n "$APP_NAME" ] || { echo "APP_NAME not found in hbk_explorer.py" >&2; exit 1; }
+DMG_BASE=$(printf '%s' "$APP_NAME" | tr -d ' ')
 ROOT=$(pwd)
 ARCH=
 APP=
@@ -114,7 +116,7 @@ if b"Permission is hereby granted" not in data:
 pathlib.Path(out).write_bytes(data)
 PY
   cat > "$ROOT/build/licenses/THIRD-PARTY-NOTICES.txt" <<EOF
-Third-party software bundled with Hyper Backup Desktop
+Third-party software bundled with ${APP_NAME}
 
 rclone ${RCLONE_VERSION}
   License: MIT
@@ -122,8 +124,8 @@ rclone ${RCLONE_VERSION}
   Source: https://github.com/rclone/rclone
   License text: rclone-COPYING (this directory)
 
-Hyper Backup Desktop itself is MIT licensed. It is not affiliated with
-Synology or with rclone.
+${APP_NAME} itself is MIT licensed. It is not affiliated with or endorsed by
+Synology or with rclone. Hyper Backup is a trademark of Synology Inc.
 EOF
 }
 
@@ -175,7 +177,7 @@ build_bundle() {
   # Absolute paths: --specpath resolves relative --add-data sources from the spec directory.
   pyinstaller --noconfirm --windowed \
     --name "$APP_NAME" \
-    --osx-bundle-identifier nl.vanharen.hyperbackupdesktop \
+    --osx-bundle-identifier nl.callido.restore \
     --specpath "$ROOT/build" \
     --distpath "$ROOT/dist" \
     --workpath "$ROOT/build/work" \
@@ -231,7 +233,7 @@ sign_bundle() {
 }
 
 make_dmg() {
-  local stage="$ROOT/dist/dmg" image="$ROOT/dist/HyperBackupDesktop-${ARCH}.dmg" rw="$ROOT/dist/HyperBackupDesktop-${ARCH}-rw.dmg" mnt try
+  local stage="$ROOT/dist/dmg" image="$ROOT/dist/${DMG_BASE}-${ARCH}.dmg" rw="$ROOT/dist/${DMG_BASE}-${ARCH}-rw.dmg" mnt try
   rm -rf "$stage"
   mkdir -p "$stage"
   ditto "$APP" "$stage/${APP_NAME}.app"
@@ -240,7 +242,7 @@ make_dmg() {
   cp "$ROOT/assets/AppIcon.icns" "$stage/.VolumeIcon.icns"
   rm -f "$image" "$rw"
   for try in 1 2 3; do
-    if hdiutil create -volname "Hyper Backup Desktop" -srcfolder "$stage" -ov -format UDRW "$rw" >/dev/null; then break; fi
+    if hdiutil create -volname "$APP_NAME" -srcfolder "$stage" -ov -format UDRW "$rw" >/dev/null; then break; fi
     [ "$try" = 3 ] && die "hdiutil create failed"
     sleep 2
   done
@@ -257,7 +259,7 @@ make_dmg() {
   rmdir "$mnt" 2>/dev/null || true
   hdiutil convert -quiet "$rw" -format UDZO -o "$image" || die "hdiutil convert failed"
   rm -f "$rw"
-  echo "built dist/HyperBackupDesktop-${ARCH}.dmg"
+  echo "built dist/${DMG_BASE}-${ARCH}.dmg"
 }
 
 choose_arch
