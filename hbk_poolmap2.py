@@ -4,9 +4,9 @@ Storage order inside a writer's bucket stream is NOT chunk-id order: big files g
 stored after the smaller files queued behind them. So the mapper identifies the file starting at each position by its
 snapshot *tag* (md5 of the first K chunk hashes + their total length), keeps unmatched big files pending, verifies file
 ends by size, and assigns buckets to writers with the round-robin rhythm as a prior plus limited-discrepancy search."""
-import os, json, struct, bisect, collections, time, hashlib
+import os, bisect, collections, time, hashlib
 from array import array
-from hbk_pool import BLOCK, WRITER_OF_SET, SET_OF_WRITER, load_runs, bucket_index_entries
+from hbk_pool import BLOCK, WRITER_OF_SET, SET_OF_WRITER, load_runs, bucket_index_entries, load_json, dump_json
 from hbk_poolmap import new_range
 
 LOOK = 96            # how many upcoming records (stream order) are considered as "the file starting here"
@@ -30,7 +30,7 @@ def build_writers(outdir, log=print):
                 for b in range(nr[0] // BLOCK, (nr[1] - 1) // BLOCK + 1): claims[b].add(w)
                 frontier = nr[1] - 1
     for b, ws in claims.items(): owner[b] = next(iter(ws)) if len(ws) == 1 else max(ws, key=lambda w: votes[b][w])
-    meta = {s: {int(k): v for k, v in json.load(open(os.path.join(outdir, f"recmeta_set{s}.json"))).items()} for s in (1, 2, 3, 4)}
+    meta = {s: {int(k): v for k, v in load_json(os.path.join(outdir, f"recmeta_set{s}.json")).items()} for s in (1, 2, 3, 4)}
     writers = {}
     for w in range(4):
         rec, g0, ln = runs[w]; s = SET_OF_WRITER[w]; mt = meta[s]; recs = []; frontier = -1; i = 0; n = len(rec)
@@ -79,6 +79,7 @@ class Mapper2:
             self.rng[w] = (array("q", [starts[i] for i in order]), array("q", [lens[i] for i in order]), array("l", [ridx[i] for i in order]))
         self.place = {w: {} for w in range(4)}      # rec idx -> list of (bucket, entry, count) in storage order
         self.placelog = []                           # (w, idx) appended when a record gets placed (for backtracking)
+        self.how = {w: {} for w in range(4)}         # rec idx -> "tag" | "end-anchored" | "assumed": the evidence it was identified by
     def entries(self, b):
         e = self.cache.get(b)
         if e is None:
@@ -127,9 +128,9 @@ class Mapper2:
                     for r in untagged[:12]:
                         e = pos + r.n
                         if e < c and any(x.tag and self.tag_matches(ents, e, x) for x in cands[:60]):
-                            chosen = r; self.stats["untagged-end-anchored"] += 1; break
-                    if chosen is None: chosen = untagged[0]; self.stats["untagged-assumed"] += 1
-                else: ev += max(10, min(chosen.n, 5000)); self.stats["tag-match"] += 1
+                            chosen = r; self.stats["untagged-end-anchored"] += 1; self.how[w][r.idx] = "end-anchored"; break
+                    if chosen is None: chosen = untagged[0]; self.stats["untagged-assumed"] += 1; self.how[w][chosen.idx] = "assumed"   # a guess, exported for flagging
+                else: ev += max(10, min(chosen.n, 5000)); self.stats["tag-match"] += 1; self.how[w][chosen.idx] = "tag"
                 # records before it in the window (stream order) with tags that did not match are deferred
                 for r in recs[qi:chosen.idx]:
                     if r.n > 0 and r.idx not in self.place[w] and r.idx not in deferred: deferred.append(r.idx)
@@ -177,7 +178,7 @@ class Mapper2:
         """Forward assignment with the rhythm prior; on a contradiction, a targeted repair tries adjacent bucket swaps
         in the recent window (the real perturbations are local), replaying the affected stretch."""
         buckets = sorted(b for b in self.counts if max_bucket is None or b <= max_bucket)
-        self.place = {w: {} for w in range(4)}; self.placelog = []
+        self.place = {w: {} for w in range(4)}; self.placelog = []; self.how = {w: {} for w in range(4)}
         state = {w: (0, (), None) for w in range(4)}; result = {}; snaps = {}
         i = 0; t0 = time.time(); last_log = 0; repairs = 0; perturb = 0
         while i < len(buckets):
@@ -202,10 +203,15 @@ class Mapper2:
             if i - last_log >= 1000: last_log = i; self.log(f"  {i}/{len(buckets)} buckets, repairs={repairs}, perturbations={perturb}, {time.time()-t0:.0f}s, {dict(self.stats)}")
         self.log(f"done: {len(result)} buckets, repairs={repairs}, perturbations accepted={perturb}")
         return result, i
+    def probe(self, w, b, st):
+        """try_assign without side effects: the placements it marks while probing are undone again."""
+        lg = len(self.placelog)
+        try: return self.try_assign(w, b, st)
+        finally: self._undo(lg)
     def _cands(self, b, state):
         cands = []; reasons = {}
         for w in range(4):
-            lg = len(self.placelog); r = self.try_assign(w, b, state[w]); self._undo(lg)
+            r = self.probe(w, b, state[w])
             if r[0] is not None: cands.append((w, r[0], r[1], r[2]))
             else: reasons[w] = r[1]
         return cands, reasons
@@ -236,9 +242,7 @@ class Mapper2:
                 for j in range(k, i): res.pop(buckets[j], None)
                 assign = dict(old); assign[x], assign[y] = old[y], w
                 ok = self._replay(buckets, k, i, assign, st, res)
-                if ok:
-                    r = self.try_assign(w, buckets[i], st[w]); self._undo(len(self.placelog) if False else len(self.placelog))
-                    ok = r[0] is not None
+                if ok: ok = self.probe(w, buckets[i], st[w])[0] is not None     # the probe's placements must not leak into self.place
                 if ok:
                     state.clear(); state.update(st); result.clear(); result.update(res)
                     for j in range(k, i): snaps.pop(j, None)
@@ -254,18 +258,19 @@ class Mapper2:
         return False
     def export(self, result):
         out = {"buckets": {str(b): w for b, w in result.items()}, "counts": {str(b): self.counts[b] for b in result},
-               "placements": {}, "ranges": {}}
+               "placements": {}, "ranges": {}, "guessed": {}, "stats": dict(self.stats)}
         for w in range(4):
             s = SET_OF_WRITER[w]; recs = self.W[w]
             out["placements"][str(s)] = {str(recs[i].off): segs for i, segs in self.place[w].items()}
             out["ranges"][str(s)] = [[a, L, r.off] for r in recs for a, L in r.ranges]
+            out["guessed"][str(s)] = sorted(recs[i].off for i in self.place[w] if self.how[w].get(i) == "assumed")   # placed with no tag evidence
         return out
 
 def build_poolmap2(source, outdir, log=print, max_bucket=None):
-    listing = json.load(open(os.path.join(outdir, "listing.json")))
+    listing = load_json(os.path.join(outdir, "listing.json"))
     writers = build_writers(outdir, log)
     mp = Mapper2(source, outdir, listing, writers, log)
     result, upto = mp.run(max_bucket=max_bucket)
     out = mp.export(result); out["mapped_upto"] = upto
-    json.dump(out, open(os.path.join(outdir, "poolmap2.json"), "w"))
+    dump_json(os.path.join(outdir, "poolmap2.json"), out)
     return result, upto, mp
