@@ -1,6 +1,8 @@
 # User guide
 
-1. Start the app (or `python3 hbk_explorer.py`). It opens http://127.0.0.1:8765.
+1. Start the app (or `python3 hbk_explorer.py`). It opens its own window; the UI is served on http://127.0.0.1:8765 only on this
+   machine. Closing the window stops the app (running restores are saved and can be resumed). `--browser` opens the UI in your
+   browser instead; `--no-window` runs only the server.
 2. **+ Add backup** → choose where the `.hbk` lives: an rclone remote you already have, Google Drive (sign in; optionally use your own
    OAuth client id to get your own API quota), a NAS over SMB, or a local folder → browse to the `.hbk` folder → name it.
 3. The overview shows the task, the shares and all backup runs. Click a run in the chart (or "Go to version"). The latest run is

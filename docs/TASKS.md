@@ -33,7 +33,7 @@ Serves the goal: this is the end-to-end check that a chosen folder is restored o
 
 ## T3 — Packaging
 Run `./build_app.sh` on an Apple-silicon Mac; fix PyInstaller issues (hidden imports, `static` path, bundled `rclone` permissions).
-Acceptance: the .app starts, opens the browser, "About" shows the bundled rclone version, Quit works. Tag `v0.1.0` to publish via CI.
+Acceptance: the .app starts in its own window, "About" shows the bundled rclone version, Quit works. Tag `v0.1.0` to publish via CI.
 Serves the goal: shipping this as a `.app` / `.dmg` is what makes the app usable by everyone.
 Signing and notarisation are a later step.
 
