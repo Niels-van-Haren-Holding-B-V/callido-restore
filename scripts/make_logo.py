@@ -55,12 +55,15 @@ def write_icns(logo1024, out_path):
 
 
 def embed(png_path, html_path):
-    """Replace the data: URI of the header logo in index.html (the favicon reuses it at runtime)."""
+    """Replace the data: URI of the app logo in index.html: the header <img id="logo"> and, if it carries its own
+    data URI, the favicon <link rel="icon">. Other embedded images (e.g. the footer logo) are left alone."""
     b64 = base64.b64encode(open(png_path, "rb").read()).decode()
     html = open(html_path).read()
-    html, n = re.subn(r"data:image/png;base64,[A-Za-z0-9+/=]+", "data:image/png;base64," + b64, html)
+    uri = "data:image/png;base64," + b64
+    html, n1 = re.subn(r'(<img id="logo" src=")data:image/png;base64,[A-Za-z0-9+/=]+(")', lambda m: m.group(1) + uri + m.group(2), html, count=1)
+    html, n2 = re.subn(r'(<link rel="icon"[^>]*href=")data:image/png;base64,[A-Za-z0-9+/=]+(")', lambda m: m.group(1) + uri + m.group(2), html, count=1)
     open(html_path, "w").write(html)
-    return n
+    return n1 + n2
 
 
 def main(argv):
