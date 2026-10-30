@@ -396,6 +396,7 @@ async function tabCompare(){const el=$('#tab-compare');const vs=S.info.versions.
     const sec=(t,rows,cols)=>`<h3 style="font-size:13px;margin:12px 0 4px">${t} (${rows.length.toLocaleString()})</h3>${table(rows.map(r=>({...r,share:d.share})),{cols})}`;
     $('#cpOut').innerHTML=sec('Added in v'+d.b,d.added,['path','size','mtime','ctime','mode','flags'])+sec('Modified',d.modified,['path','old_size','size','old_mtime','mtime','flags'])+sec('Removed (present in v'+d.a+' only)',d.removed,['path','size','mtime','mode','flags']);};}
 
+function shareRows(){const rows=[];S.basket.forEach(b=>{let r=rows.find(x=>x.share===b.share);if(!r){r={share:b.share,paths:[]};rows.push(r)}r.paths.push(b.path)});return rows}
 function addBasket(r){const it={share:r.share,ver:S.ver,path:r.path,is_dir:r.is_dir?1:0,name:r.name||r.path.split('/').pop()};if(S.basket.some(b=>b.share===it.share&&b.ver===it.ver&&b.path===it.path))return;S.basket.push(it);localStorage.setItem('basket',JSON.stringify(S.basket));renderFlow();if(S.tab==='restore')tabRestore();}
 async function tabRestore(){const el=$('#tab-restore');
   let pool={};try{pool=await api('/api/pool',{src:S.src})}catch(e){pool={error:e.message}}
@@ -413,11 +414,10 @@ async function tabRestore(){const el=$('#tab-restore');
      <details class="adv"><summary>Advanced</summary><div class="row"><label><input type="checkbox" id="rsMeta" checked> skip Synology metadata (@eaDir thumbnails, @SynoResource, .DS_Store)</label></div></details>`,S.basket.length>0)+
   step(3,'Prepare the backup for reading (one time)',`<p class="help" style="margin:0">Before files can be read without Hyper Backup, the app has to learn where every piece of every file is stored. This is done once and takes a while (it downloads about 7 GB of small index files, no file data). You can stop at any time: what is already downloaded is kept, and running it again continues from there. Later restores reuse it.</p>
      <div class="row"><div class="prog"><i style="width:${pct}%"></i></div><span>${pct}% · ${mapped.toLocaleString()} of ${total.toLocaleString()} blocks${idxFiles?` · ${idxLocal.toLocaleString()} of ${idxFiles.toLocaleString()} index files on disk`:''}</span><button class="small ${!mapOk&&firstOpen===3?'primary':''}" id="poolBuild">${mapOk?'Redo':idxLocal?'Continue':'Prepare now'}</button></div><div id="poolJob"></div>`,mapOk)+
-  step(4,'Where should the files go?',`<p class="help" style="margin:0">Use a <b>new, empty folder on the NAS</b>, never the folder that holds the backup (the app refuses that). Existing files at the target are never overwritten or deleted. Files keep their original modification times and land in <code>&lt;target&gt;/&lt;share&gt;/&lt;path&gt;</code>.</p>
-     <div class="row" style="margin-bottom:6px"><label><input type="radio" name="wzT" value="orig" ${localStorage.getItem('rsMode')==='orig'?'checked':''}> back into the <b>original shares</b> on the NAS (homes → homes, NIKON D3400 → NIKON D3400, …)</label><label><input type="radio" name="wzT" value="remote" ${(localStorage.getItem('rsMode')||'remote')==='remote'?'checked':''}> into one folder on a NAS share</label><label><input type="radio" name="wzT" value="local" ${localStorage.getItem('rsMode')==='local'?'checked':''}> a mounted share / local path</label></div>
-     <div id="wzOrig" class="row" style="margin-bottom:6px"><label>NAS connection <select id="wzRem2"></select></label><span class="help">the shares must already exist on the NAS with the same names. For <code>homes</code> the user folders must exist, so recreate the users first.</span></div>
-     <div id="wzRemote" class="row" style="margin-bottom:6px"><label>NAS connection <select id="wzRem"></select></label><label>share <select id="wzShare"><option value="">(loading…)</option></select></label><label>new folder <input id="wzFolder" placeholder="restore-2333" value="${esc(localStorage.getItem('wzFolder')||'restore-'+S.ver)}" style="width:160px"></label></div>
-     <div id="wzLocal" class="row" style="margin-bottom:6px"><label>local path <input id="wzPath" placeholder="/Volumes/GDriveRestore/restore-2333" style="width:380px" value="${esc(localStorage.getItem('wzPath')||'')}"></label></div>
+  step(4,'Where should the files go?',`<p class="help" style="margin:0">Each shared folder you selected from is restored into a folder of your choice on the NAS, usually the shared folder with the same name. Selected subfolders keep their place under it (<code>Documents/Invoices/2025</code> → <code>&lt;target&gt;/Invoices/2025</code>), with no version or source folder in between. Nothing at a target is ever overwritten or deleted; files keep their original modification times.</p>
+     <div class="row" style="margin:6px 0"><label>NAS connection <select id="wzRem"></select></label><span class="help" id="wzRemHelp"></span></div>
+     <table id="wzMap" style="margin:0 0 6px"><thead><tr><th>Folder from backup</th><th>Restore to</th><th></th></tr></thead><tbody>${shareRows().map((b,i)=>`<tr><td class="mono">${esc(b.share)}<div class="muted" style="font-size:11.5px">${b.paths.map(p=>p?esc(p):'(whole share)').join(' · ')}</div></td><td><span class="mapRemote"><select class="mapShare" data-i="${i}"><option value="">(loading…)</option></select> / <input class="mapSub" data-i="${i}" placeholder="(share root)" style="width:200px"></span><span class="mapLocal" style="display:none"><input class="mapPath" data-i="${i}" placeholder="/Volumes/share/folder" style="width:380px"></span><div class="mono muted mapTo" data-i="${i}"></div></td><td class="status mapStat" data-i="${i}"></td></tr>`).join('')||'<tr><td colspan="3" class="muted">Select folders in step 3 first.</td></tr>'}</tbody></table>
+     <div class="row" style="margin:6px 0"><button class="small" id="wzCheck">Check targets and preview</button><span id="wzCheckOut" class="status"></span></div>
      <details class="adv" id="wzPrep"><summary>No NAS connection yet? Prepare the NAS and connect</summary>
        <ol class="help" style="margin:6px 0 8px 18px;padding:0">
          <li><b>Shared folder</b>: in DSM open Control Panel → Shared Folder → Create, for example <code>Restore</code>. Keep it empty; the restore only adds files to it.</li>
@@ -429,8 +429,7 @@ async function tabRestore(){const el=$('#tab-restore');
        <div id="wdConn" class="status"></div>
        <p class="help" style="margin:4px 0 0">The app never deletes anything on the NAS. It creates the target folder and writes the restored files; a target inside the backup itself is refused.</p>
      </details>
-     <div class="row" style="margin:6px 0"><button class="small" id="wzCheck">Check target</button><span id="wzCheckOut" class="status"></span></div>
-     <p style="margin:0">Files go to: <b class="mono" id="wzTarget"></b></p>
+     <details class="adv"><summary>Advanced: everything under one folder</summary><div class="row"><label><input type="checkbox" id="wzOne"> put all selected folders under one folder, as <code>&lt;folder&gt;/&lt;share&gt;/&lt;path&gt;</code></label><input id="wzOnePath" placeholder="nas:Restore/restore-${S.ver} or /Volumes/Restore/restore-${S.ver}" style="width:380px"></div></details>
      <details class="adv"><summary>How the data flows</summary><p class="help">Google Drive → this Mac (decompress and verify) → NAS. The Drive download speed is the limit; data blocks are fetched 4 in parallel ahead of the writer and deleted from the Mac after use (cache ≤ 20 GB).</p></details>`,false)+
   step(5,'Check and start',`<div class="row"><button class="small" id="rsPlan">Count files and size</button><button class="${S.basket.length&&mapOk?'primary':''}" id="rsGo" ${S.basket.length&&mapOk?'':'disabled'}>Start restore</button><span class="help">${mapOk?'':'available once steps 2 and 3 are done · '}nothing at the target is ever overwritten or deleted: files already there are skipped, so an interrupted restore can simply be started again</span></div>
      <div id="rsPlanOut" class="muted" style="margin:6px 0"></div><div id="rsProg"></div><div id="rsErrors"></div><div id="rsSaved" style="margin-top:8px"></div>`,false);
@@ -439,37 +438,65 @@ async function tabRestore(){const el=$('#tab-restore');
   $('#rsAddAll').onclick=()=>{S.info.shares.filter(x=>x.name!=='@AppConfig').forEach(x=>{if(!S.basket.some(b=>b.share===x.name&&b.ver===S.ver&&b.path===''))S.basket.push({share:x.name,ver:S.ver,path:'',is_dir:1,name:'(share root)'})});localStorage.setItem('basket',JSON.stringify(S.basket));tabRestore()};
   $$('.rm').forEach(b=>b.onclick=()=>{S.basket.splice(+b.dataset.i,1);localStorage.setItem('basket',JSON.stringify(S.basket));tabRestore()});
   $('#poolBuild').onclick=async()=>{const j=await api('/api/pool/build',{src:S.src});pollJob(j.id,$('#poolJob'),()=>tabRestore(),false,'Stop');};
-  const mode=()=>document.querySelector('input[name=wzT]:checked').value;
-  const target=()=>mode()==='orig'?$('#wzRem2').value:mode()==='remote'?`${$('#wzRem').value}${$('#wzShare').value}${$('#wzShare').value?'/':''}${$('#wzFolder').value.trim()}`:$('#wzPath').value.trim();
-  const upd=()=>{localStorage.setItem('rsMode',mode());$('#wzRemote').style.display=mode()==='remote'?'':'none';$('#wzOrig').style.display=mode()==='orig'?'':'none';$('#wzLocal').style.display=mode()==='local'?'':'none';$('#wzTarget').textContent=target()||'—';localStorage.setItem('wzFolder',$('#wzFolder').value);localStorage.setItem('wzPath',$('#wzPath').value)};
-  $$('input[name=wzT]').forEach(r=>r.onchange=upd);['wzFolder','wzPath'].forEach(i=>$('#'+i).oninput=upd);
-  try{const r=await api('/api/remotes');const pref=localStorage.getItem('wzRem');$('#wzRem').innerHTML=r.remotes.map(x=>`<option ${x===pref?'selected':''}>${esc(x)}</option>`).join('');$('#wzRem2').innerHTML=$('#wzRem').innerHTML;$('#wzRem2').onchange=upd;
-    const loadShares=async()=>{localStorage.setItem('wzRem',$('#wzRem').value);const d=await api('/api/remotes',{remote:$('#wzRem').value});const prefS=localStorage.getItem('wzShare');$('#wzShare').innerHTML=d.dirs.map(x=>`<option ${x===prefS?'selected':''}>${esc(x)}</option>`).join('')||'<option value="">(none found)</option>';upd()};
-    $('#wzRem').onchange=loadShares;$('#wzShare').onchange=()=>{localStorage.setItem('wzShare',$('#wzShare').value);upd()};if(r.remotes.length)loadShares()}catch(e){$('#wzShare').innerHTML='<option value="">(rclone not available)</option>'}
-  upd();
-  const checkDest=async(quiet)=>{const dest=target();const out=$('#wzCheckOut');if(!dest){out.textContent='';return null}
-    out.textContent='checking…';try{const r=await api('/api/dest/check',{src:S.src,dest,shares:JSON.stringify([...new Set(S.basket.map(b=>b.share))])});
-      const msg=r.inside_source?`✗ ${r.conflict||dest} is the backup itself, a folder inside it, or the folder around it. Choose another folder.`:r.error?'? '+r.error:!r.exists?'✓ New folder, it will be created.':r.empty?'✓ Empty folder.':`! Folder already has ${r.files} entries: files that are already there are skipped, nothing is deleted.`;
-      out.textContent=msg;out.className='status '+(r.inside_source?'bad':r.error?'':'ok');return r}catch(e){out.textContent='? '+e.message;return null}};
-  $('#wzCheck').onclick=()=>checkDest();
+  // H8: one target per shared folder in the selection. MAP (localStorage) remembers the choice per share, plus the connection and the one-folder option.
+  const key=b=>b.share;const ROWS=shareRows();let MAP={};try{MAP=JSON.parse(localStorage.getItem('wzMap')||'{}')}catch(e){}
+  const saveMap=()=>localStorage.setItem('wzMap',JSON.stringify(MAP));
+  const rem=()=>$('#wzRem').value;const oneMode=()=>$('#wzOne').checked;const oneDest=()=>$('#wzOnePath').value.trim();
+  let SHARES=[];
+  const rowDest=i=>{if(!rem())return ($(`.mapPath[data-i="${i}"]`).value||'').trim().replace(/\/+$/,'');const sh=$(`.mapShare[data-i="${i}"]`).value;if(!sh)return '';const sub=$(`.mapSub[data-i="${i}"]`).value.trim().replace(/^\/+|\/+$/g,'');return `${rem()}${sh}${sub?'/'+sub:''}`};
+  const items=()=>oneMode()?S.basket.map(b=>({...b})):S.basket.map(b=>({...b,dest:rowDest(ROWS.findIndex(r=>r.share===b.share))}));
+  // updRows(true) is for user edits: it also remembers the choices. The initial render and the share list load only redraw.
+  const updRows=persist=>{const local=!rem();$$('.mapRemote').forEach(e=>e.style.display=local?'none':'');$$('.mapLocal').forEach(e=>e.style.display=local?'':'none');
+    ROWS.forEach((b,i)=>{const d=rowDest(i);$(`.mapTo[data-i="${i}"]`).textContent=d?'→ '+d+'/…':local?'→ type a folder':'→ choose a share';$(`.mapStat[data-i="${i}"]`).textContent='';
+      if(persist)MAP[key(b)]={share:$(`.mapShare[data-i="${i}"]`).value,sub:$(`.mapSub[data-i="${i}"]`).value,path:$(`.mapPath[data-i="${i}"]`).value}});
+    if(persist){MAP._rem=rem();MAP._one=oneMode();MAP._onePath=oneDest();saveMap()}
+    $('#wzMap').style.opacity=oneMode()?'.45':'';$('#wzRemHelp').textContent=local?'type the full path of a mounted share or local folder per row':SHARES.length||!rem()?'':'no shares found on this connection'};
+  const fillRows=()=>{ROWS.forEach((b,i)=>{const m=MAP[key(b)]||{};const sel=$(`.mapShare[data-i="${i}"]`);const want=(m.share&&SHARES.includes(m.share))?m.share:(SHARES.includes(b.share)?b.share:'');
+      sel.innerHTML=`<option value="">(choose a share)</option>`+SHARES.map(x=>`<option ${x===want?'selected':''}>${esc(x)}</option>`).join('');
+      $(`.mapSub[data-i="${i}"]`).value=m.sub||'';$(`.mapPath[data-i="${i}"]`).value=m.path||''});updRows()};
+  const onEdit=()=>updRows(true);$$('.mapShare,.mapSub,.mapPath').forEach(e=>{e.onchange=onEdit;e.oninput=onEdit});
+  $('#wzOne').checked=!!MAP._one;$('#wzOnePath').value=MAP._onePath||'';$('#wzOne').onchange=onEdit;$('#wzOnePath').oninput=onEdit;
+  const loadShares=async()=>{SHARES=[];if(rem()){try{const d=await api('/api/remotes',{remote:rem()});SHARES=d.dirs}catch(e){}}fillRows()};
+  updRows();
+  try{const r=await api('/api/remotes');const srcRems=((S.info&&S.info.source&&S.info.source.remotes)||[]).map(x=>x.split(':')[0]+':');
+    // default connection: a NAS-style remote (SMB, SFTP, WebDAV, FTP) first, then any remote that is not the backup's own, then the first one
+    const types=r.types||{};const nasLike=['smb','sftp','webdav','ftp'].map(t=>r.remotes.find(x=>types[x]===t)).find(Boolean);
+    const pref=MAP._rem!=null?MAP._rem:(nasLike||r.remotes.find(x=>!srcRems.includes(x))||r.remotes[0]||'');
+    $('#wzRem').innerHTML=r.remotes.map(x=>`<option ${x===pref?'selected':''}>${esc(x)}</option>`).join('')+`<option value="" ${pref===''?'selected':''}>a mounted share / local path</option>`;
+    $('#wzRem').onchange=()=>{MAP._rem=rem();saveMap();loadShares()};await loadShares()}catch(e){$('#wzRem').innerHTML='<option value="">a mounted share / local path</option>';fillRows()}
+  const setCls=(el,c)=>{el.classList.remove('bad','ok');if(c)el.classList.add(c)};
+  const showCheck=(st,r)=>{st.textContent=r.inside_source?`✗ ${r.conflict||r.dest} is the backup itself, a folder inside it, or the folder around it`:r.error?'? '+r.error:!r.exists?'✓ new folder, it will be created':r.empty?'✓ empty folder':`! already has ${r.files} entries: files already there are skipped, nothing is deleted`;setCls(st,r.inside_source||r.error?'bad':'ok');return!(r.inside_source||r.error)};
+  const checkAll=async()=>{const out=$('#wzCheckOut');out.textContent='checking…';setCls(out,'');let bad=false,nonEmpty=0;
+    if(oneMode()){const d=oneDest();if(!d){out.textContent='Enter the folder under Advanced, or untick it.';setCls(out,'bad');return{bad:true,nonEmpty}}
+      try{const r=await api('/api/dest/check',{src:S.src,dest:d,shares:JSON.stringify([...new Set(S.basket.map(b=>b.share))])});if(!showCheck(out,r))bad=true;if(r.exists&&r.empty===false)nonEmpty++}catch(e){out.textContent='? '+e.message;bad=true}}
+    else for(let i=0;i<ROWS.length;i++){const d=rowDest(i);const st=$(`.mapStat[data-i="${i}"]`);if(!d){st.textContent='choose a target';setCls(st,'bad');bad=true;continue}
+      try{const r=await api('/api/dest/check',{src:S.src,dest:d,root:1});if(!showCheck(st,r))bad=true;if(r.exists&&r.empty===false)nonEmpty++}catch(e){st.textContent='? '+e.message;setCls(st,'bad');bad=true}}
+    try{const p=await api('/api/restore_plan',{src:S.src,items:JSON.stringify(items()),dest:oneMode()?oneDest():'',skip_meta:$('#rsMeta').checked?1:0});
+      p.mappings.forEach((m,i)=>{const el=$(`.mapTo[data-i="${i}"]`);if(el)el.innerHTML=m.sample_from?`${esc(m.sample_from)} → <b>${esc(m.sample_to)}</b> · ${m.files.toLocaleString()} files · ${human(m.bytes)}`:'(no files in this folder)'});
+      if(!oneMode()){out.textContent=bad?'Fix the marked rows.':`${p.files.toLocaleString()} files · ${human(p.bytes)}`;setCls(out,bad?'bad':'ok')}
+      $('#rsPlanOut').innerHTML=`<b>${p.files.toLocaleString()} files · ${human(p.bytes)}</b><br>${p.mappings.map(m=>`<span class="mono">${esc(m.share)} → ${esc(m.dest||'?')}${m.sample_to?`<br>&nbsp;&nbsp;e.g. ${esc(m.sample_from)} → ${esc(m.sample_to)}`:''}</span>`).join('<br>')}`}
+    catch(e){out.textContent='? '+e.message;setCls(out,'bad');bad=true}
+    return{bad,nonEmpty}};
+  $('#wzCheck').onclick=checkAll;
   $('#wdConnect').onclick=async()=>{const q={kind:'smb',name:$('#wdName').value.trim()||'nas',host:$('#wdHost').value.trim(),user:$('#wdUser').value.trim(),password:$('#wdPass').value};
     if(!q.host||!q.user){$('#wdConn').textContent='Fill in the NAS address and the user.';return}
     $('#wdConnect').disabled=true;$('#wdConn').textContent='Connecting…';
     try{const j=await post('/api/rclone/connect',q);const job=await new Promise(res=>{const t=async()=>{const x=await api('/api/job',{id:j.id});if(x.state==='running'){$('#wdConn').textContent=x.message||'';setTimeout(t,1000)}else res(x)};t()});
       if(job.state==='error'){$('#wdConn').textContent='Failed: '+job.error;$('#wdConnect').disabled=false;return}
-      localStorage.setItem('wzRem',job.result.remote);localStorage.setItem('rsMode','remote');if(job.result.shares&&job.result.shares.length&&!job.result.shares.includes(localStorage.getItem('wzShare')))localStorage.setItem('wzShare',job.result.shares[0]);
+      MAP._rem=job.result.remote;saveMap();
       $('#wdConn').textContent='Connected: '+job.result.remote+(job.result.shares?' · shares: '+job.result.shares.join(', '):'');setTimeout(tabRestore,800)}
     catch(e){$('#wdConn').textContent=e.message;$('#wdConnect').disabled=false}};
   const showSaved=async()=>{try{const js=await api('/api/jobs/saved');const un=js.filter(j=>j.state!=='done');if(!un.length){$('#rsSaved').innerHTML='';return}
-    $('#rsSaved').innerHTML=`<h4 style="font-size:12.5px;color:var(--muted);margin:6px 0">Earlier restores you can continue</h4><table>${un.map(j=>`<tr><td>${esc(j.state)}</td><td class="mono">${esc(j.dest)}</td><td class="num">${(j.done_files||0).toLocaleString()} / ${(j.total_files||0).toLocaleString()} files · ${human(j.done_bytes||0)} of ${human(j.total_bytes||0)}${j.errors?` · ${j.errors} errors`:''}</td><td>${new Date((j.updated||j.started)*1000).toLocaleString()}</td><td>${j.state==='running'?`<button class="small jc" data-i="${esc(j.id)}">Pause</button>`:`<button class="small jr" data-i="${esc(j.id)}">Continue</button>`}</td></tr>`).join('')}</table>`;
+    $('#rsSaved').innerHTML=`<h4 style="font-size:12.5px;color:var(--muted);margin:6px 0">Earlier restores you can continue</h4><table>${un.map(j=>`<tr><td>${esc(j.state)}</td><td class="mono">${esc((j.roots&&j.roots.length?j.roots:[j.dest]).join(', '))}</td><td class="num">${(j.done_files||0).toLocaleString()} / ${(j.total_files||0).toLocaleString()} files · ${human(j.done_bytes||0)} of ${human(j.total_bytes||0)}${j.errors?` · ${j.errors} errors`:''}</td><td>${new Date((j.updated||j.started)*1000).toLocaleString()}</td><td>${j.state==='running'?`<button class="small jc" data-i="${esc(j.id)}">Pause</button>`:`<button class="small jr" data-i="${esc(j.id)}">Continue</button>`}</td></tr>`).join('')}</table>`;
     $$('.jr').forEach(b=>b.onclick=async()=>{const j=await post('/api/restore/resume',{id:b.dataset.i});pollJob(j.id,$('#rsProg'),()=>showSaved(),true);showSaved()});
     $$('.jc').forEach(b=>b.onclick=async()=>{await api('/api/job/cancel',{id:b.dataset.i});setTimeout(showSaved,1500)})}catch(e){}};
   showSaved();
-  $('#rsPlan').onclick=async()=>{$('#rsPlanOut').textContent='counting…';const r=await api('/api/restore_plan',{src:S.src,items:JSON.stringify(S.basket),skip_meta:$('#rsMeta').checked?1:0});$('#rsPlanOut').innerHTML=`<b>${r.files.toLocaleString()} files · ${human(r.bytes)}</b> → <span class="mono">${esc(target())}</span><br><span class="mono">${r.sample.map(esc).join('<br>')}${r.files>20?'<br>…':''}</span>`};
-  $('#rsGo').onclick=async()=>{const dest=target();if(!dest){alert('Choose a target first');return}
-    const chk=await checkDest();if(chk&&chk.inside_source){alert(`${chk.conflict||dest} is the backup itself, a folder inside it, or the folder around it. Choose a new, empty folder.`);return}
-    if(chk&&chk.exists&&chk.empty===false&&!confirm(`The target already has ${chk.files} entries. Files already there are skipped and nothing is deleted. Continue?`))return;
-    try{const j=await post('/api/restore',{src:S.src,dest,items:S.basket,skip_meta:$('#rsMeta').checked});
+  $('#rsPlan').onclick=async()=>{$('#rsPlanOut').textContent='counting…';await checkAll()};
+  $('#rsGo').onclick=async()=>{const its=items();const dest=oneMode()?oneDest():'';
+    if(!oneMode()&&its.some(x=>!x.dest)){alert('Choose a target for every shared folder in step 4.');return}
+    const chk=await checkAll();if(chk.bad){alert('Fix the marked targets in step 4 first.');return}
+    if(chk.nonEmpty&&!confirm(`${chk.nonEmpty} target folder${chk.nonEmpty>1?'s':''} already ${chk.nonEmpty>1?'have':'has'} files. Files already there are skipped and nothing is deleted. Continue?`))return;
+    try{const j=await post('/api/restore',{src:S.src,dest,items:its,skip_meta:$('#rsMeta').checked});
       showSaved();
       pollJob(j.id,$('#rsProg'),job=>{showSaved();$('#rsProg').innerHTML+=`<p><b>${job.result&&job.result.paused?'Paused':'Done'}:</b> ${job.result?`${job.result.restored} restored · ${job.result.skipped} skipped · ${job.result.errors} errors · ${human(job.result.bytes)}`:esc(job.error||'')}</p>`;
         if(job.errors&&job.errors.length)$('#rsErrors').innerHTML=`<h4 style="font-size:12px;color:var(--muted)">Errors (${job.errors.length})</h4><div class="tablewrap"><table>${job.errors.slice(0,500).map(e=>`<tr><td class="mono">${esc(e.path)}</td><td>${esc(e.error)}</td></tr>`).join('')}</table></div>`},true)}
