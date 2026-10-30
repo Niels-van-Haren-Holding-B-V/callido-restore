@@ -73,6 +73,8 @@ jobs:
       - run: ./scripts/assemble_release.sh release
       - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
+          name: Callido Restore ${{ github.ref_name }}
+          body_path: .github/RELEASE_NOTES.md
           fail_on_unmatched_files: true
           files: |
             release/CallidoRestore-arm64.dmg

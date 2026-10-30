@@ -82,6 +82,12 @@ DONE (hbk-2): branch `hbk2/ui-design-main4` on main (replaces #29/#27/#21/#10 af
 ## T13 — App name + footer (see docs/HANDOVER.md, 2026-10-30 22:31)
 DONE (hbk-3): PR #25. name "Callido Restore" in one constant (window title, .app/.dmg, About, README), tagline, Synology trademark notice, footer with Callido raccoon logo + "Made by Callido · callido.nl · callido.dev" links opening in the default browser.
 
+## H5 — First release v0.1.0 (see docs/handovers/2026-10-30-2318-nas-triage.md)
+IN PROGRESS (hbk-2): release notes (`.github/RELEASE_NOTES.md`: both dmgs, Gatekeeper "Open Anyway" steps, Synology notice) and
+`body_path` in the publish job. Checked: `assemble_release.sh` attaches `CallidoRestore-arm64.dmg` + `CallidoRestore-amd64.dmg` with
+`SHA256SUMS`, app/dmg are named from `APP_NAME` ("Callido Restore"), `VERSION = "0.1.0"`. Tagging (`git tag v0.1.0 origin/main && git push origin v0.1.0`)
+is Niels's call once main is green.
+
 ## Do not
 * Do not change the on-disk layout of `~/.hbk-explorer/index/<src>/pool/*` without a migration; the full map build takes hours of downloads.
 * Do not commit anything from `~/.hbk-explorer` or user paths/remotes into the repo.
