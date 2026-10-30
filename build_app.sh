@@ -248,13 +248,26 @@ make_dmg() {
   done
   # The custom-icon flag does not survive -srcfolder: set it on the mounted volume, then compress.
   mnt=$(mktemp -d "${TMPDIR:-/tmp}/hbk-dmg-rw.XXXXXX")
-  if hdiutil attach -nobrowse -readwrite -noverify -mountpoint "$mnt" "$rw" >/dev/null; then
+  dev=$(hdiutil attach -nobrowse -readwrite -noverify -mountpoint "$mnt" "$rw" | awk 'NR==1 {print $1}')
+  if [ -n "$dev" ]; then
     if command -v SetFile >/dev/null 2>&1; then
       SetFile -a C "$mnt"; SetFile -a V "$mnt/.VolumeIcon.icns"
     else
       echo "warning: SetFile not found (Xcode command line tools); the disk image gets no custom volume icon" >&2
     fi
-    hdiutil detach "$mnt" >/dev/null || hdiutil detach -force "$mnt" >/dev/null || echo "warning: could not detach $mnt; the image is converted anyway" >&2
+    # The volume can still be busy for a moment after writing (seen on the Intel CI runner): sync, then retry the detach
+    # by device node; the image must be detached before hdiutil convert can read it.
+    sync
+    detached=
+    for try in 1 2 3 4 5 6; do
+      if hdiutil detach "$dev" >/dev/null 2>&1; then detached=1; break; fi
+      sleep 3
+    done
+    if [ -z "$detached" ]; then
+      hdiutil detach -force "$dev" >/dev/null 2>&1 || die "could not detach $dev ($mnt) after retries"
+    fi
+  else
+    die "could not attach $rw"
   fi
   rmdir "$mnt" 2>/dev/null || true
   hdiutil convert -quiet "$rw" -format UDZO -o "$image" || die "hdiutil convert failed"
