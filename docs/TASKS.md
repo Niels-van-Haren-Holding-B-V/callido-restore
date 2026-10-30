@@ -68,7 +68,7 @@ DONE in PR #7 (hbk-3, branch hbk3/desktop-window, stacked on #5): show static/in
 DONE (hbk-2): T12 branch `hbk2/ui-design-main` on top of T13 (replaces #10 after review), only `static/index.html`.
 
 ## T13 — App name + footer (see docs/HANDOVER.md, 2026-10-30 22:31)
-DONE in PR #9 (hbk-3, branch hbk3/app-name, stacked on #7 + #8): name "Callido Restore" in one constant (window title, .app/.dmg, About, README), tagline, Synology trademark notice, footer with Callido raccoon logo + "Made by Callido · callido.nl · callido.dev" links opening in the default browser.
+DONE in PR #19 (hbk-3, branch hbk3/app-name-main, on main; replaces #14/#9): name "Callido Restore" in one constant (window title, .app/.dmg, About, README), tagline, Synology trademark notice, footer with Callido raccoon logo + "Made by Callido · callido.nl · callido.dev" links opening in the default browser.
 
 ## Do not
 * Do not change the on-disk layout of `~/.hbk-explorer/index/<src>/pool/*` without a migration; the full map build takes hours of downloads.
