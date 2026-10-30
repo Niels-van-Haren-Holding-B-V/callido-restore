@@ -64,6 +64,12 @@ DONE (hbk-2): PR #8 (branch `hbk2/logo`, stacked on PR #5 → PR #2). Regenerate
 ## T11 — Desktop window (pywebview)
 DONE in PR #7 (hbk-3, branch hbk3/desktop-window, stacked on #5): show static/index.html in a native macOS window (pywebview), local server on 127.0.0.1 only, no webbrowser.open, server stops when the window closes, pywebview bundled via build_app.sh, smoke test.
 
+## T12 — UI design (see docs/HANDOVER.md, 2026-10-30 22:28)
+Unclaimed. Clean 2026 macOS look: system font, spacing, rounded corners, light + dark mode, logo colours as accent only, wizard-style one step at a time, "Advanced" for the rest, accessible.
+
+## T13 — App name + footer (see docs/HANDOVER.md, 2026-10-30 22:31)
+IN PROGRESS (hbk-3): name "Callido Restore" in one constant (window title, .app/.dmg, About, README), tagline, Synology trademark notice, footer with Callido raccoon logo + "Made by Callido · callido.nl · callido.dev" links opening in the default browser.
+
 ## Do not
 * Do not change the on-disk layout of `~/.hbk-explorer/index/<src>/pool/*` without a migration; the full map build takes hours of downloads.
 * Do not commit anything from `~/.hbk-explorer` or user paths/remotes into the repo.
