@@ -3,7 +3,7 @@
 Hyper Backup Explorer — browse a Synology Hyper Backup (.hbk) on a timeline.
 
 Works on a local .hbk folder (complete or partial) or on an rclone remote
-(e.g. gdrive:Synology/droopy_1.hbk); remote metadata files are fetched on
+(e.g. gdrive:Synology/backup_1.hbk); remote metadata files are fetched on
 demand into a local cache directory. Only the small metadata databases are
 needed to browse; the data pool is only touched when extracting a file.
 

@@ -13,32 +13,32 @@ from hbk_explorer import file_target, restore_roots
 
 
 class FileTargetTests(unittest.TestCase):
-    items = [{"share": "Niels Cloud Drive", "ver": 2333, "path": "", "is_dir": 1, "dest": "nas:Niels Cloud Drive"},
-             {"share": "NIKON D3400", "ver": 2333, "path": "2024/Trip", "is_dir": 1, "dest": "/Volumes/Photos/Trip"},
-             {"share": "homes", "ver": 2333, "path": "niels/notes.txt", "is_dir": 0, "dest": "nas:homes/niels"},
-             {"share": "Backups", "ver": 2333, "path": "", "is_dir": 1}]
+    items = [{"share": "Documents", "ver": 1234, "path": "", "is_dir": 1, "dest": "nas:Documents"},
+             {"share": "Photos", "ver": 1234, "path": "2024/Trip", "is_dir": 1, "dest": "/Volumes/Photos/Trip"},
+             {"share": "homes", "ver": 1234, "path": "alice/notes.txt", "is_dir": 0, "dest": "nas:homes/alice"},
+             {"share": "Backups", "ver": 1234, "path": "", "is_dir": 1}]
 
     def test_share_root_to_share_root(self):
-        f = {"share": "Niels Cloud Drive", "path": "Docs/a.txt", "item": 0}
-        self.assertEqual(file_target(f, self.items, ""), ("nas:Niels Cloud Drive", "Docs/a.txt"))
+        f = {"share": "Documents", "path": "Docs/a.txt", "item": 0}
+        self.assertEqual(file_target(f, self.items, ""), ("nas:Documents", "Docs/a.txt"))
 
     def test_subfolder_keeps_its_relative_path(self):                      # H13: dest is per shared folder, no wrapper, no flattening
-        f = {"share": "NIKON D3400", "path": "2024/Trip/DSC_0001.NEF", "item": 1}
+        f = {"share": "Photos", "path": "2024/Trip/DSC_0001.NEF", "item": 1}
         self.assertEqual(file_target(f, self.items, ""), ("/Volumes/Photos/Trip", "2024/Trip/DSC_0001.NEF"))
-        f = {"share": "NIKON D3400", "path": "2024/Trip/raw/DSC_0002.NEF", "item": 1}
+        f = {"share": "Photos", "path": "2024/Trip/raw/DSC_0002.NEF", "item": 1}
         self.assertEqual(file_target(f, self.items, ""), ("/Volumes/Photos/Trip", "2024/Trip/raw/DSC_0002.NEF"))
 
     def test_single_file_item(self):
-        f = {"share": "homes", "path": "niels/notes.txt", "item": 2}
-        self.assertEqual(file_target(f, self.items, ""), ("nas:homes/niels", "niels/notes.txt"))
+        f = {"share": "homes", "path": "alice/notes.txt", "item": 2}
+        self.assertEqual(file_target(f, self.items, ""), ("nas:homes/alice", "alice/notes.txt"))
 
     def test_item_without_dest_uses_common_dest(self):
         f = {"share": "Backups", "path": "x/y.bin", "item": 3}
         self.assertEqual(file_target(f, self.items, "nas:Restore/r1"), ("nas:Restore/r1", "Backups/x/y.bin"))
 
     def test_roots(self):
-        self.assertEqual(restore_roots(self.items, "nas:Restore/r1"), ["nas:Niels Cloud Drive", "/Volumes/Photos/Trip", "nas:homes/niels", "nas:Restore/r1"])
-        self.assertEqual(restore_roots(self.items[:3], ""), ["nas:Niels Cloud Drive", "/Volumes/Photos/Trip", "nas:homes/niels"])
+        self.assertEqual(restore_roots(self.items, "nas:Restore/r1"), ["nas:Documents", "/Volumes/Photos/Trip", "nas:homes/alice", "nas:Restore/r1"])
+        self.assertEqual(restore_roots(self.items[:3], ""), ["nas:Documents", "/Volumes/Photos/Trip", "nas:homes/alice"])
         self.assertEqual(restore_roots([{"share": "a", "path": "", "dest": "/x/"}, {"share": "b", "path": "", "dest": "/x"}], ""), ["/x"])
 
 
@@ -81,11 +81,11 @@ class _Fixture(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory(); t = self.tmp.name
         self.saved = (hbk_explorer.INDEX_DIR, hbk_explorer.CACHE_DIR, hbk_explorer.JOBS_DIR)
         hbk_explorer.INDEX_DIR = hbk_explorer.Path(t) / "index"; hbk_explorer.CACHE_DIR = hbk_explorer.Path(t) / "cache"; hbk_explorer.JOBS_DIR = hbk_explorer.Path(t) / "jobs"
-        self.src = hbk_explorer.Source("t8", "t8", os.path.join(t, "mirror", "droopy_1.hbk"), ["nas:Backups/droopy_1.hbk"])
+        self.src = hbk_explorer.Source("t8", "t8", os.path.join(t, "mirror", "backup_1.hbk"), ["nas:Backups/backup_1.hbk"])
         self.b = FakeBackup(self.src, FILES)
         self.dA = os.path.join(t, "ShareA"); self.dB = os.path.join(t, "Docs"); os.makedirs(self.dA); os.makedirs(self.dB)
-        self.items = [{"share": "A", "ver": 2333, "path": "", "is_dir": 1, "dest": self.dA},
-                      {"share": "B", "ver": 2333, "path": "docs", "is_dir": 1, "dest": self.dB}]
+        self.items = [{"share": "A", "ver": 1234, "path": "", "is_dir": 1, "dest": self.dA},
+                      {"share": "B", "ver": 1234, "path": "docs", "is_dir": 1, "dest": self.dB}]
     def tearDown(self):
         hbk_explorer.INDEX_DIR, hbk_explorer.CACHE_DIR, hbk_explorer.JOBS_DIR = self.saved; self.tmp.cleanup()
     def job(self, label="restore"):
@@ -126,7 +126,7 @@ class MappedRestoreTests(_Fixture):
 
     def test_mixed_mapped_and_common_dest(self):
         common = os.path.join(self.tmp.name, "rest"); os.makedirs(common)
-        items = [self.items[0], {"share": "B", "ver": 2333, "path": "", "is_dir": 1}]
+        items = [self.items[0], {"share": "B", "ver": 1234, "path": "", "is_dir": 1}]
         res = self.b.restore(items, common, self.job())
         self.assertEqual(res["restored"], 5)
         self.assertTrue(os.path.isfile(os.path.join(common, "B", "other", "v.txt")))         # one-folder layout keeps <share>/<path>
@@ -158,7 +158,7 @@ class RestoreApiTests(_Fixture):
         self.assertEqual(code, 400); self.assertIn("nas:Backups", out["error"])
 
     def test_unmapped_item_needs_common_dest(self):
-        code, out = self.post("/api/restore", {"src": "t8", "dest": "", "items": [{"share": "B", "ver": 2333, "path": "", "is_dir": 1}]})
+        code, out = self.post("/api/restore", {"src": "t8", "dest": "", "items": [{"share": "B", "ver": 1234, "path": "", "is_dir": 1}]})
         self.assertEqual(code, 400); self.assertIn("no destination for B", out["error"])
 
     def test_new_local_root_is_created_and_restore_runs(self):
@@ -183,7 +183,7 @@ class RestoreApiTests(_Fixture):
         self.assertEqual((out["mappings"][0]["files"], out["mappings"][0]["dest"]), (2, self.dA))
 
     def test_plan_mappings_one_row_per_share(self):
-        items = self.items + [{"share": "B", "ver": 2333, "path": "other", "is_dir": 1, "dest": self.dB}]
+        items = self.items + [{"share": "B", "ver": 1234, "path": "other", "is_dir": 1, "dest": self.dB}]
         out = self.get("/api/restore_plan?src=t8&dest=&items=" + json.dumps(items).replace(" ", "%20").replace('"', "%22"))
         self.assertEqual([m["share"] for m in out["mappings"]], ["A", "B"])
         self.assertEqual((out["mappings"][1]["paths"], out["mappings"][1]["files"]), (["docs", "other"], 3))

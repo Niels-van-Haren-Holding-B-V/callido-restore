@@ -21,9 +21,9 @@ class SourceFixture(unittest.TestCase):
         self.old = hbk_explorer.INDEX_DIR; self.old_cache = hbk_explorer.CACHE_DIR
         hbk_explorer.INDEX_DIR = os.path.join(self.tmp.name, "index"); hbk_explorer.CACHE_DIR = os.path.join(self.tmp.name, "cache")
         hbk_explorer.INDEX_DIR = hbk_explorer.Path(hbk_explorer.INDEX_DIR); hbk_explorer.CACHE_DIR = hbk_explorer.Path(hbk_explorer.CACHE_DIR)
-        self.local = os.path.join(self.tmp.name, "mirror", "droopy_1.hbk"); os.makedirs(os.path.join(self.local, "Config"))
-        self.extra = os.path.join(self.tmp.name, "vol", "droopy_1.hbk"); os.makedirs(self.extra)
-        self.src = hbk_explorer.Source("t7", "t7", self.local, ["nas:Backups/droopy_1.hbk", "gdrive:Synology/droopy_1.hbk"], [self.extra])
+        self.local = os.path.join(self.tmp.name, "mirror", "backup_1.hbk"); os.makedirs(os.path.join(self.local, "Config"))
+        self.extra = os.path.join(self.tmp.name, "vol", "backup_1.hbk"); os.makedirs(self.extra)
+        self.src = hbk_explorer.Source("t7", "t7", self.local, ["nas:Backups/backup_1.hbk", "gdrive:Synology/backup_1.hbk"], [self.extra])
     def tearDown(self):
         hbk_explorer.INDEX_DIR = self.old; hbk_explorer.CACHE_DIR = self.old_cache; self.tmp.cleanup()
 
@@ -35,46 +35,46 @@ class ContainsDestTests(SourceFixture):
         self.assertTrue(c(os.path.join(self.local, "Config")))                     # inside it
         self.assertTrue(c(os.path.join(self.extra, "Pool")))                       # inside an extra root
         self.assertTrue(c(self.local + "/"))                                       # trailing slash
-        self.assertFalse(c(os.path.join(self.tmp.name, "restore-2333")))
+        self.assertFalse(c(os.path.join(self.tmp.name, "restore-1234")))
         self.assertFalse(c(self.local + "-restore"))                               # sibling with a shared prefix
         self.assertFalse(c(self.local + "-copy"))
         self.assertFalse(c(os.path.dirname(self.local)))                           # a parent: nothing is written into the .hbk
 
     def test_local_written_roots(self):
         c = self.src.contains_dest
-        parent = os.path.dirname(self.local)                                       # .../mirror, which holds droopy_1.hbk
-        self.assertEqual(c(parent, ["droopy_1.hbk"]), os.path.join(parent, "droopy_1.hbk"))      # would write into the backup
+        parent = os.path.dirname(self.local)                                       # .../mirror, which holds backup_1.hbk
+        self.assertEqual(c(parent, ["backup_1.hbk"]), os.path.join(parent, "backup_1.hbk"))      # would write into the backup
         self.assertEqual(c(os.path.dirname(parent), ["mirror"]), os.path.join(self.tmp.name, "mirror"))   # the backup lies inside the written root
-        self.assertEqual(c(parent, ["homes", "NIKON D3400"]), "")                  # siblings of the backup are fine
+        self.assertEqual(c(parent, ["homes", "Photos"]), "")                  # siblings of the backup are fine
         self.assertEqual(c(os.path.join(self.tmp.name, "restore"), ["homes"]), "")
 
     def test_remote_given_as_local_folder(self):
-        folder = os.path.join(self.tmp.name, "usb", "droopy_1.hbk"); os.makedirs(folder)
+        folder = os.path.join(self.tmp.name, "usb", "backup_1.hbk"); os.makedirs(folder)
         src = hbk_explorer.Source("t7b", "t7b", os.path.join(self.tmp.name, "nonexistent-cache"), [folder])
         self.assertTrue(src.contains_dest(os.path.join(folder, "sub")))
         self.assertFalse(src.contains_dest(os.path.join(self.tmp.name, "usb", "restore")))
 
     def test_remote_dest_alone(self):
         c = self.src.contains_dest
-        self.assertTrue(c("nas:Backups/droopy_1.hbk"))
-        self.assertTrue(c("nas:Backups/droopy_1.hbk/Pool"))
-        self.assertTrue(c("gdrive:Synology/droopy_1.hbk/"))
+        self.assertTrue(c("nas:Backups/backup_1.hbk"))
+        self.assertTrue(c("nas:Backups/backup_1.hbk/Pool"))
+        self.assertTrue(c("gdrive:Synology/backup_1.hbk/"))
         self.assertFalse(c("nas:Backups"))                                         # parent of the backup: allowed on its own
         self.assertFalse(c("nas:"))                                                # the NAS root (original-shares mode)
-        self.assertFalse(c("nas:Restore/restore-2333"))
-        self.assertFalse(c("nas:Backups/droopy_1.hbk-restore"))
-        self.assertFalse(c("other:Backups/droopy_1.hbk"))                          # another remote, same path
+        self.assertFalse(c("nas:Restore/restore-1234"))
+        self.assertFalse(c("nas:Backups/backup_1.hbk-restore"))
+        self.assertFalse(c("other:Backups/backup_1.hbk"))                          # another remote, same path
         self.assertFalse(c("nas:share/folder"))
 
     def test_remote_written_roots(self):
         c = self.src.contains_dest
         # back into the original shares on the NAS that also holds the backup: only the share holding the backup is refused
-        self.assertEqual(c("nas:", ["homes", "NIKON D3400", "Niels Cloud Drive"]), "")
+        self.assertEqual(c("nas:", ["homes", "Photos", "Documents"]), "")
         self.assertEqual(c("nas:", ["homes", "Backups"]), "nas:Backups")
-        self.assertEqual(c("nas:Backups", ["droopy_1.hbk"]), "nas:Backups/droopy_1.hbk")
+        self.assertEqual(c("nas:Backups", ["backup_1.hbk"]), "nas:Backups/backup_1.hbk")
         self.assertEqual(c("nas:Backups/", ["homes"]), "")                         # next to the .hbk, not into it
-        self.assertEqual(c("nas:Restore/restore-2333", ["Backups"]), "")
-        self.assertEqual(c("gdrive:Synology", ["droopy_1.hbk"]), "gdrive:Synology/droopy_1.hbk")
+        self.assertEqual(c("nas:Restore/restore-1234", ["Backups"]), "")
+        self.assertEqual(c("gdrive:Synology", ["backup_1.hbk"]), "gdrive:Synology/backup_1.hbk")
         self.assertEqual(c("gdrive:", ["Synology"]), "gdrive:Synology")
 
 
@@ -98,7 +98,7 @@ class DestCheckApiTests(SourceFixture):
 
     def test_remote_new_folder(self):
         with mock.patch.object(hbk_explorer.subprocess, "run", fake_rclone(stderr="2026/10/30 23:00:00 ERROR : : error listing: directory not found\nFailed to lsjson: directory not found", rc=3)):
-            out = self.check(src="t7", dest="nas:Restore/restore-2333", shares=json.dumps(["homes"]))
+            out = self.check(src="t7", dest="nas:Restore/restore-1234", shares=json.dumps(["homes"]))
         self.assertEqual((out["inside_source"], out["exists"], out.get("error")), (False, False, None))
 
     def test_remote_unknown_remote_is_an_error_not_a_new_folder(self):
