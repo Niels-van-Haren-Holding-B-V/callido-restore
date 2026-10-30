@@ -912,7 +912,7 @@ def main():
         try:
             CONF_DIR.mkdir(parents=True, exist_ok=True)
             sys.stdout = sys.stderr = open(CONF_DIR / "app.log", "a", buffering=1)
-        except OSError: pass
+        except OSError as e: _log(f"warning: cannot write {CONF_DIR / 'app.log'} ({e}); logging to the console instead")
     _verify_frozen()
     load_sources()
     try: srv = ThreadingHTTPServer(("127.0.0.1", a.port), H)
