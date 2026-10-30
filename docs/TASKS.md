@@ -64,7 +64,7 @@ the settings UI.
 Serves the goal: quieter flags and parser tests so someone restoring their own files can trust what the app shows.
 
 ## T7 — NAS destination preparation wizard
-IN REVIEW (hbk-3): PR #32 replaced by branch `hbk3/nas-destination-main` (on #35, then main). "Prepare the NAS and connect" guide on the target step (shared folder, user + permissions, SMB, other protocols), inline SMB connect, "Check target" (new/empty/has files/inside the backup). One helper, `Source.contains_dest(dest, shares)`, checks the roots the restore writes (`dest/<share>`) against every local root and source remote, so a restore back into the original shares passes unless the backup lives in a restored share.
+DONE (hbk-3): merged as #41; follow-ups (SMB password over POST + stdin, dest check vs restore agreement) in PR `hbk3/t7-h11-fixes`. "Prepare the NAS and connect" guide on the target step (shared folder, user + permissions, SMB, other protocols), inline SMB connect, "Check target" (new/empty/has files/inside the backup). One helper, `Source.contains_dest(dest, shares)`, checks the roots the restore writes (`dest/<share>`) against every local root and source remote, so a restore back into the original shares passes unless the backup lives in a restored share.
 The restore target step lists an existing rclone remote, a share and a folder, or a local path. Add a wizard on that step that explains how to prepare the NAS, then connect the destination: an SMB share, a user and its permissions, or another protocol. The source wizard can already create an SMB remote; this wizard is for the restore destination. Acceptance: from Restore, a user with no destination remote yet can follow the steps to a target the restore job can write, and the text covers an SMB share, a user and its permissions, and another protocol. The destination is a new or empty folder, or the restore skips existing files. The wizard and the restore never overwrite or delete existing NAS data, and they refuse a destination inside the backup source.
 
 ## T8 — Never overwrite on restore
@@ -88,6 +88,18 @@ IN PROGRESS (hbk-2): release notes (`.github/RELEASE_NOTES.md`: both dmgs, Gatek
 `body_path` in the publish job. Checked: `assemble_release.sh` attaches `CallidoRestore-arm64.dmg` + `CallidoRestore-amd64.dmg` with
 `SHA256SUMS`, app/dmg are named from `APP_NAME` ("Callido Restore"), `VERSION = "0.1.0"`. Tagging (`git tag v0.1.0 origin/main && git push origin v0.1.0`)
 is Niels's call once main is green.
+
+## H8 — Per-folder destination mapping (Niels, 2026-10-30 23:29; see docs/handovers/2026-10-30-2318-nas-triage.md)
+IN REVIEW (hbk-3): PR #49 (branch `hbk3/dest-mapping4`, on main after #44/#45; replaces #46/#42/#40). Each local root gets its own `.hbk-restore-<job>` staging folder and `place_file`; remote roots are listed up front. Target step is a table "Folder from backup → Restore to", one row per
+shared folder in the selection, defaulting to the NAS share with the same name; selected subfolders keep their relative path under
+it (H13 rule), no version or source folder in between. "Check targets and preview" shows one sample path per row. Each item carries its `dest`
+(`/api/restore`, persisted in the job, kept across pause/resume); `file_target()` / `restore_roots()` in `hbk_explorer.py`.
+Advanced keeps "everything under one folder" (`<folder>/<share>/<path>`). Tests: `tests/test_restore_mapping.py`.
+
+## H13 — Folder tree selection (Niels, 2026-10-31 00:01; see docs/handovers/2026-10-30-2318-nas-triage.md)
+IN PROGRESS (hbk-3): after H8. The destination rule (per shared folder, subfolders keep their relative path) is already in H8;
+the tree with checkboxes (lazy children, indeterminate parents, size + file count before start, selection kept across pause/resume)
+comes as a separate PR stacked on H8.
 
 ## Do not
 * Do not change the on-disk layout of `~/.hbk-explorer/index/<src>/pool/*` without a migration; the full map build takes hours of downloads.

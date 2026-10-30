@@ -129,6 +129,61 @@ class RestoreLoopLocal(unittest.TestCase):
         self.assertEqual(sorted(os.listdir(self.dest)), ["share"])
 
 
+class RestoreLoopTwoLocalRoots(unittest.TestCase):
+    """H8 on the restore-loop path: two shares to two local roots. Each root gets its own staging folder (same filesystem for
+    place_file), files land at <root>/<path in share> with no wrapper folder, existing files are kept per root, and only this
+    job's leftover staging folders are removed, in every root."""
+    def setUp(self):
+        self.d = tempfile.mkdtemp(); self.addCleanup(shutil.rmtree, self.d, True)
+        self.ra = os.path.join(self.d, "ShareA"); self.rb = os.path.join(self.d, "Docs"); os.makedirs(self.ra); os.makedirs(self.rb)
+        p = mock.patch.object(hbk_explorer, "JOBS_DIR", Path(self.d) / "jobs"); p.start(); self.addCleanup(p.stop)
+        self.items = [{"share": "A", "ver": 1, "path": "", "is_dir": True, "dest": self.ra}, {"share": "B", "ver": 1, "path": "docs", "is_dir": True, "dest": self.rb}]
+        self.plan = [{"share": "A", "path": "x.txt", "off": -1, "size": 3, "mtime": 1700000000, "item": 0},
+                     {"share": "A", "path": "sub/y.txt", "off": -1, "size": 4, "mtime": 1700000001, "item": 0},
+                     {"share": "B", "path": "docs/z.txt", "off": -1, "size": 5, "mtime": 1700000002, "item": 1},
+                     {"share": "B", "path": "docs/deep/w.txt", "off": -1, "size": 6, "mtime": 1700000003, "item": 1}]
+
+    def run_restore(self, job_id="t2"):
+        b = _Backup.__new__(_Backup); b.src = mock.Mock(id="testsrc"); b._fake_pool = _FakePool(self.d)
+        b.restore_plan = lambda items, skip_meta=True: [dict(f) for f in self.plan]
+        job = {"id": job_id, "label": "restore", "started": 0.0}
+        return b.restore(self.items, "", job), job, b
+
+    def test_files_land_in_their_root_without_wrapper(self):
+        res, job, b = self.run_restore()
+        self.assertEqual((res["files"], res["restored"], res["skipped"], res["errors"]), (4, 4, 0, 0))
+        self.assertEqual(Path(self.ra, "x.txt").read_bytes(), b"xxx"); self.assertEqual(Path(self.ra, "sub", "y.txt").read_bytes(), b"yyyy")
+        self.assertEqual(Path(self.rb, "docs", "z.txt").read_bytes(), b"zzzzz"); self.assertEqual(Path(self.rb, "docs", "deep", "w.txt").read_bytes(), b"wwwwww")
+        self.assertEqual(int(os.stat(os.path.join(self.rb, "docs", "deep", "w.txt")).st_mtime), 1700000003)
+        self.assertFalse(os.path.exists(os.path.join(self.ra, "A"))); self.assertFalse(os.path.exists(os.path.join(self.rb, "B")))
+        self.assertEqual(sorted(os.listdir(self.ra)), ["sub", "x.txt"]); self.assertEqual(sorted(os.listdir(self.rb)), ["docs"])   # staging gone in both roots
+        staged = [c for c in b.pool.calls]; self.assertEqual(sorted(staged), ["w.txt", "x.txt", "y.txt", "z.txt"])
+
+    def test_existing_file_kept_per_root_and_own_leftovers_removed_everywhere(self):
+        old = os.path.join(self.rb, "docs", "z.txt"); os.makedirs(os.path.dirname(old)); Path(old).write_bytes(b"OLD"); os.utime(old, (1000, 1000))
+        for root in (self.ra, self.rb):
+            for name in (".hbk-restore-t2-left", ".hbk-restore-other-left"):
+                os.makedirs(os.path.join(root, name)); Path(root, name, "part").write_bytes(b"p")
+        res, job, b = self.run_restore()
+        self.assertEqual(Path(old).read_bytes(), b"OLD"); self.assertEqual(int(os.stat(old).st_mtime), 1000)
+        self.assertEqual((res["restored"], res["skipped"]), (4, 1)); self.assertEqual(sorted(b.pool.calls), ["w.txt", "x.txt", "y.txt"])
+        for root in (self.ra, self.rb):
+            self.assertFalse(os.path.exists(os.path.join(root, ".hbk-restore-t2-left")))
+            self.assertTrue(os.path.exists(os.path.join(root, ".hbk-restore-other-left", "part")))
+        self.assertEqual(sorted(os.listdir(self.ra)), [".hbk-restore-other-left", "sub", "x.txt"])
+
+    def test_staging_folder_sits_inside_each_root(self):
+        seen = {}
+        class Pool(_FakePool):
+            def extract(self2, off, out, **kw):
+                seen[os.path.basename(out)] = out; return super().extract(off, out, **kw)
+        b = _Backup.__new__(_Backup); b.src = mock.Mock(id="testsrc"); b._fake_pool = Pool(self.d)
+        b.restore_plan = lambda items, skip_meta=True: [dict(f) for f in self.plan]
+        b.restore(self.items, "", {"id": "t3", "label": "restore", "started": 0.0})
+        self.assertTrue(seen["x.txt"].startswith(os.path.join(self.ra, ".hbk-restore-t3-")), seen["x.txt"])
+        self.assertTrue(seen["z.txt"].startswith(os.path.join(self.rb, ".hbk-restore-t3-")), seen["z.txt"])
+
+
 class RestoreLoopRemote(unittest.TestCase):
     def setUp(self):
         self.d = tempfile.mkdtemp(); self.addCleanup(shutil.rmtree, self.d, True)

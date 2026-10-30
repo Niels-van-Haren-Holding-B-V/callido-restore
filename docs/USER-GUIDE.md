@@ -10,10 +10,13 @@
 4. Tabs: **Changes** (what that run added/changed), **File timeline**, **Browse folders**, **Search & flags** (suspicious files),
    **Compare versions**, **Restore wizard**.
 5. **Restore wizard**: pick the run → pick everything or folders (+ buttons) → build the pool map once (downloads ~200 KB per bucket;
-   progress bar; Stop keeps index files already downloaded, and running it again continues) → choose the target: back into the
-   original NAS shares, one folder on a NAS share, or a local path → Preview → Start. No NAS connection yet? Open “Prepare the NAS and
-   connect” on that step: it explains the shared folder, user and SMB settings and connects from there. “Check target” tells you whether
-   the folder is new, empty or already has files; a folder inside the backup itself is refused.
+   progress bar; Stop keeps index files already downloaded, and running it again continues) → choose where each selected folder
+   goes: a table with one row per folder, defaulting to the NAS share with the same name (the folder’s contents land there directly,
+   no version or source folder in between); pick another share or sub-folder per row, or choose “a mounted share / local path” as the
+   connection and type a path per row. “Advanced” can put everything under one folder as `<folder>/<share>/<path>` instead.
+   No NAS connection yet? Open “Prepare the NAS and connect” on that step: it explains the shared folder, user and SMB settings and
+   connects from there. “Check targets and preview” tells you per row whether the folder is new, empty or already has files, and shows
+   one sample file with its final path; a folder inside the backup itself (or around it) is refused → Start.
    The bar at the top shows running jobs. Pause/Resume from the wizard; after a crash or reboot the job is listed for resuming.
    Files already at the target are never overwritten or deleted. During a restore to a local folder, files are staged in a hidden
    `.hbk-restore-<job id>-…` folder inside the target and moved into place one by one; it is removed when the job ends or is resumed.
