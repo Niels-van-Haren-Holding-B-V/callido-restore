@@ -22,15 +22,15 @@ class FileTargetTests(unittest.TestCase):
         f = {"share": "Niels Cloud Drive", "path": "Docs/a.txt", "item": 0}
         self.assertEqual(file_target(f, self.items, ""), ("nas:Niels Cloud Drive", "Docs/a.txt"))
 
-    def test_subfolder_contents_without_wrapper(self):
+    def test_subfolder_keeps_its_relative_path(self):                      # H13: dest is per shared folder, no wrapper, no flattening
         f = {"share": "NIKON D3400", "path": "2024/Trip/DSC_0001.NEF", "item": 1}
-        self.assertEqual(file_target(f, self.items, ""), ("/Volumes/Photos/Trip", "DSC_0001.NEF"))
+        self.assertEqual(file_target(f, self.items, ""), ("/Volumes/Photos/Trip", "2024/Trip/DSC_0001.NEF"))
         f = {"share": "NIKON D3400", "path": "2024/Trip/raw/DSC_0002.NEF", "item": 1}
-        self.assertEqual(file_target(f, self.items, ""), ("/Volumes/Photos/Trip", "raw/DSC_0002.NEF"))
+        self.assertEqual(file_target(f, self.items, ""), ("/Volumes/Photos/Trip", "2024/Trip/raw/DSC_0002.NEF"))
 
     def test_single_file_item(self):
         f = {"share": "homes", "path": "niels/notes.txt", "item": 2}
-        self.assertEqual(file_target(f, self.items, ""), ("nas:homes/niels", "notes.txt"))
+        self.assertEqual(file_target(f, self.items, ""), ("nas:homes/niels", "niels/notes.txt"))
 
     def test_item_without_dest_uses_common_dest(self):
         f = {"share": "Backups", "path": "x/y.bin", "item": 3}
@@ -97,17 +97,17 @@ class MappedRestoreTests(_Fixture):
         res = self.b.restore(self.items, "", self.job())
         self.assertEqual((res["files"], res["restored"], res["skipped"], res["errors"]), (4, 4, 0, 0))
         self.assertEqual(sorted(self.b.pool.extracted), sorted([os.path.join(self.dA, "x.txt"), os.path.join(self.dA, "sub", "y.txt"),
-                                                                 os.path.join(self.dB, "z.txt"), os.path.join(self.dB, "deeper", "w.txt")]))
-        self.assertFalse(os.path.exists(os.path.join(self.dB, "docs")))                      # no wrapper folder
-        self.assertFalse(os.path.exists(os.path.join(self.dA, "A")))                         # no share folder
-        self.assertEqual(int(os.stat(os.path.join(self.dB, "deeper", "w.txt")).st_mtime), 1700000003)
+                                                                 os.path.join(self.dB, "docs", "z.txt"), os.path.join(self.dB, "docs", "deeper", "w.txt")]))
+        self.assertFalse(os.path.exists(os.path.join(self.dB, "other")))                     # only the selected subtree (H13)
+        self.assertFalse(os.path.exists(os.path.join(self.dA, "A")))                         # no share or version folder
+        self.assertEqual(int(os.stat(os.path.join(self.dB, "docs", "deeper", "w.txt")).st_mtime), 1700000003)
 
     def test_existing_file_is_skipped_per_root(self):
-        os.makedirs(os.path.join(self.dB, "deeper")); open(os.path.join(self.dB, "deeper", "w.txt"), "w").write("mine")
+        os.makedirs(os.path.join(self.dB, "docs", "deeper")); open(os.path.join(self.dB, "docs", "deeper", "w.txt"), "w").write("mine")
         res = self.b.restore(self.items, "", self.job())
         self.assertEqual((res["restored"], res["skipped"]), (4, 1))                      # "restored" counts handled files, skipped included
         self.assertEqual(len(self.b.pool.extracted), 3)
-        self.assertEqual(open(os.path.join(self.dB, "deeper", "w.txt")).read(), "mine")
+        self.assertEqual(open(os.path.join(self.dB, "docs", "deeper", "w.txt")).read(), "mine")
 
     def test_mapping_persisted_and_resumed(self):
         job = self.job(); job["cancel"] = True                                               # pause before the first file
@@ -120,7 +120,7 @@ class MappedRestoreTests(_Fixture):
         b2 = FakeBackup(self.src, FILES)
         res = b2.restore(saved["items"], saved["dest"], self.job("resumed"), saved.get("skip_meta", True), start_at=saved["next_index"])
         self.assertEqual(res["restored"], 4)
-        self.assertTrue(os.path.isfile(os.path.join(self.dB, "deeper", "w.txt")))
+        self.assertTrue(os.path.isfile(os.path.join(self.dB, "docs", "deeper", "w.txt")))
 
     def test_mixed_mapped_and_common_dest(self):
         common = os.path.join(self.tmp.name, "rest"); os.makedirs(common)
@@ -169,16 +169,22 @@ class RestoreApiTests(_Fixture):
             time.sleep(0.05)
         self.assertEqual(job["state"], "done", job)
         self.assertTrue(os.path.isfile(os.path.join(new, "sub", "y.txt")))
-        self.assertTrue(os.path.isfile(os.path.join(self.dB, "z.txt")))
+        self.assertTrue(os.path.isfile(os.path.join(self.dB, "docs", "z.txt")))
         saved = self.get("/api/jobs/saved")[0]
         self.assertEqual(saved["roots"], [new, self.dB])
 
     def test_plan_mappings_preview(self):
         out = self.get("/api/restore_plan?src=t8&dest=&items=" + json.dumps(self.items).replace(" ", "%20").replace('"', "%22"))
         self.assertEqual(out["files"], 4)
-        self.assertEqual(out["mappings"][1]["sample_to"], os.path.join(self.dB, "z.txt"))
+        self.assertEqual(out["mappings"][1]["sample_to"], os.path.join(self.dB, "docs", "z.txt"))
         self.assertEqual(out["mappings"][1]["sample_from"], "B/docs/z.txt")
         self.assertEqual((out["mappings"][0]["files"], out["mappings"][0]["dest"]), (2, self.dA))
+
+    def test_plan_mappings_one_row_per_share(self):
+        items = self.items + [{"share": "B", "ver": 2333, "path": "other", "is_dir": 1, "dest": self.dB}]
+        out = self.get("/api/restore_plan?src=t8&dest=&items=" + json.dumps(items).replace(" ", "%20").replace('"', "%22"))
+        self.assertEqual([m["share"] for m in out["mappings"]], ["A", "B"])
+        self.assertEqual((out["mappings"][1]["paths"], out["mappings"][1]["files"]), (["docs", "other"], 3))
 
 
 if __name__ == "__main__":

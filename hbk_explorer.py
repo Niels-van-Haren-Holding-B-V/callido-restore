@@ -112,17 +112,14 @@ def is_remote_path(p):
     return ":" in p and not p.startswith("/")
 
 def file_target(f, items, dest):
-    """(root, rel) for a planned file. An item with its own 'dest' (H8, per-folder mapping) receives the item's contents
-    directly: root = item dest, rel = the file's path below the item. Items without 'dest' go under the common dest as
-    <share>/<path> (one-folder mode)."""
+    """(root, rel) for a planned file. An item with a 'dest' (H8: one destination per top-level shared folder) keeps the
+    file's path inside the share: root = that dest, rel = the file's path, so a selected subfolder lands at the same
+    relative place under the share's destination and no version or share folder is added. Items without 'dest' go under
+    the common dest as <share>/<path> (one-folder mode)."""
     it = items[f["item"]] if f.get("item") is not None and f["item"] < len(items) else None
     d = (it or {}).get("dest")
     if not d: return dest, f"{f['share']}/{f['path']}"
-    base = it["path"].strip("/")
-    if not it.get("is_dir") or not base: rel = f["path"] if base == "" and it.get("is_dir") else os.path.basename(f["path"])
-    elif f["path"].startswith(base + "/"): rel = f["path"][len(base) + 1:]
-    else: rel = os.path.basename(f["path"])
-    return d.rstrip("/"), rel
+    return d.rstrip("/"), f["path"]
 
 def restore_roots(items, dest):
     """The distinct roots a restore writes into, in item order; the common dest only when an item has no 'dest'."""
@@ -720,16 +717,20 @@ class Backup:
         return files
 
     def plan_mappings(self, items, dest, skip_meta=True):
-        """Per item: where its files go, with one sample file (the first) so the user can check the final path (H8)."""
-        files = self.restore_plan(items, skip_meta); out = []
+        """Per shared folder: where its selected files go, with one sample file (the first) so the user can check the
+        final path (H8). Rows follow the order in which the shares first appear in items."""
+        files = self.restore_plan(items, skip_meta); out = []; rows = {}
         for idx, it in enumerate(items):
+            key = it["share"]
+            if key not in rows:
+                rows[key] = {"share": key, "dest": (it.get("dest") or dest or "").rstrip("/"), "paths": [], "files": 0, "bytes": 0, "sample_from": None, "sample_to": None}
+                out.append(rows[key])
+            m = rows[key]; m["paths"].append(it["path"])
             mine = [f for f in files if f.get("item") == idx]
-            m = {"share": it["share"], "path": it["path"], "dest": (it.get("dest") or dest or "").rstrip("/"), "files": len(mine), "bytes": sum(f["size"] for f in mine),
-                 "sample_from": None, "sample_to": None}
-            if mine:
+            m["files"] += len(mine); m["bytes"] += sum(f["size"] for f in mine)
+            if mine and m["sample_from"] is None:
                 root, rel = file_target(mine[0], items, dest)
                 m["sample_from"] = f"{mine[0]['share']}/{mine[0]['path']}"; m["sample_to"] = f"{root}/{rel}" if root else rel
-            out.append(m)
         return {"files": len(files), "bytes": sum(f["size"] for f in files), "mappings": out, "sample": [f"{f['share']}/{f['path']}" for f in files[:20]]}
     def restore(self, items, dest, job, skip_meta=True, start_at=0):
         """Restore the selected items. An item with its own 'dest' gets its contents there (H8: one target per folder);

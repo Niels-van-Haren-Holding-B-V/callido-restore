@@ -396,6 +396,7 @@ async function tabCompare(){const el=$('#tab-compare');const vs=S.info.versions.
     const sec=(t,rows,cols)=>`<h3 style="font-size:13px;margin:12px 0 4px">${t} (${rows.length.toLocaleString()})</h3>${table(rows.map(r=>({...r,share:d.share})),{cols})}`;
     $('#cpOut').innerHTML=sec('Added in v'+d.b,d.added,['path','size','mtime','ctime','mode','flags'])+sec('Modified',d.modified,['path','old_size','size','old_mtime','mtime','flags'])+sec('Removed (present in v'+d.a+' only)',d.removed,['path','size','mtime','mode','flags']);};}
 
+function shareRows(){const rows=[];S.basket.forEach(b=>{let r=rows.find(x=>x.share===b.share);if(!r){r={share:b.share,paths:[]};rows.push(r)}r.paths.push(b.path)});return rows}
 function addBasket(r){const it={share:r.share,ver:S.ver,path:r.path,is_dir:r.is_dir?1:0,name:r.name||r.path.split('/').pop()};if(S.basket.some(b=>b.share===it.share&&b.ver===it.ver&&b.path===it.path))return;S.basket.push(it);localStorage.setItem('basket',JSON.stringify(S.basket));renderFlow();if(S.tab==='restore')tabRestore();}
 async function tabRestore(){const el=$('#tab-restore');
   let pool={};try{pool=await api('/api/pool',{src:S.src})}catch(e){pool={error:e.message}}
@@ -413,9 +414,9 @@ async function tabRestore(){const el=$('#tab-restore');
      <details class="adv"><summary>Advanced</summary><div class="row"><label><input type="checkbox" id="rsMeta" checked> skip Synology metadata (@eaDir thumbnails, @SynoResource, .DS_Store)</label></div></details>`,S.basket.length>0)+
   step(3,'Prepare the backup for reading (one time)',`<p class="help" style="margin:0">Before files can be read without Hyper Backup, the app has to learn where every piece of every file is stored. This is done once and takes a while (it downloads about 7 GB of small index files, no file data). You can stop at any time: what is already downloaded is kept, and running it again continues from there. Later restores reuse it.</p>
      <div class="row"><div class="prog"><i style="width:${pct}%"></i></div><span>${pct}% · ${mapped.toLocaleString()} of ${total.toLocaleString()} blocks${idxFiles?` · ${idxLocal.toLocaleString()} of ${idxFiles.toLocaleString()} index files on disk`:''}</span><button class="small ${!mapOk&&firstOpen===3?'primary':''}" id="poolBuild">${mapOk?'Redo':idxLocal?'Continue':'Prepare now'}</button></div><div id="poolJob"></div>`,mapOk)+
-  step(4,'Where should the files go?',`<p class="help" style="margin:0">Each selected folder is restored into a folder of your choice on the NAS, usually the shared folder with the same name: the <b>contents</b> of the backup folder land there directly, with no version or source folder in between. Nothing at a target is ever overwritten or deleted; files keep their original modification times.</p>
+  step(4,'Where should the files go?',`<p class="help" style="margin:0">Each shared folder you selected from is restored into a folder of your choice on the NAS, usually the shared folder with the same name. Selected subfolders keep their place under it (<code>Niels Cloud Drive/Documents/2025</code> → <code>&lt;share&gt;/Documents/2025</code>), with no version or source folder in between. Nothing at a target is ever overwritten or deleted; files keep their original modification times.</p>
      <div class="row" style="margin:6px 0"><label>NAS connection <select id="wzRem"></select></label><span class="help" id="wzRemHelp"></span></div>
-     <table id="wzMap" style="margin:0 0 6px"><thead><tr><th>Folder from backup</th><th>Restore to</th><th></th></tr></thead><tbody>${S.basket.map((b,i)=>`<tr><td class="mono">${esc(b.share)}${b.path?'/'+esc(b.path):''}${b.is_dir?'':' <span class="muted">(file)</span>'}</td><td><span class="mapRemote"><select class="mapShare" data-i="${i}"><option value="">(loading…)</option></select> / <input class="mapSub" data-i="${i}" placeholder="(share root)" style="width:200px"></span><span class="mapLocal" style="display:none"><input class="mapPath" data-i="${i}" placeholder="/Volumes/share/folder" style="width:380px"></span><div class="mono muted mapTo" data-i="${i}"></div></td><td class="status mapStat" data-i="${i}"></td></tr>`).join('')||'<tr><td colspan="3" class="muted">Select folders in step 3 first.</td></tr>'}</tbody></table>
+     <table id="wzMap" style="margin:0 0 6px"><thead><tr><th>Folder from backup</th><th>Restore to</th><th></th></tr></thead><tbody>${shareRows().map((b,i)=>`<tr><td class="mono">${esc(b.share)}<div class="muted" style="font-size:11.5px">${b.paths.map(p=>p?esc(p):'(whole share)').join(' · ')}</div></td><td><span class="mapRemote"><select class="mapShare" data-i="${i}"><option value="">(loading…)</option></select> / <input class="mapSub" data-i="${i}" placeholder="(share root)" style="width:200px"></span><span class="mapLocal" style="display:none"><input class="mapPath" data-i="${i}" placeholder="/Volumes/share/folder" style="width:380px"></span><div class="mono muted mapTo" data-i="${i}"></div></td><td class="status mapStat" data-i="${i}"></td></tr>`).join('')||'<tr><td colspan="3" class="muted">Select folders in step 3 first.</td></tr>'}</tbody></table>
      <div class="row" style="margin:6px 0"><button class="small" id="wzCheck">Check targets and preview</button><span id="wzCheckOut" class="status"></span></div>
      <details class="adv" id="wzPrep"><summary>No NAS connection yet? Prepare the NAS and connect</summary>
        <ol class="help" style="margin:6px 0 8px 18px;padding:0">
@@ -437,22 +438,22 @@ async function tabRestore(){const el=$('#tab-restore');
   $('#rsAddAll').onclick=()=>{S.info.shares.filter(x=>x.name!=='@AppConfig').forEach(x=>{if(!S.basket.some(b=>b.share===x.name&&b.ver===S.ver&&b.path===''))S.basket.push({share:x.name,ver:S.ver,path:'',is_dir:1,name:'(share root)'})});localStorage.setItem('basket',JSON.stringify(S.basket));tabRestore()};
   $$('.rm').forEach(b=>b.onclick=()=>{S.basket.splice(+b.dataset.i,1);localStorage.setItem('basket',JSON.stringify(S.basket));tabRestore()});
   $('#poolBuild').onclick=async()=>{const j=await api('/api/pool/build',{src:S.src});pollJob(j.id,$('#poolJob'),()=>tabRestore(),false,'Stop');};
-  // H8: one target per selected folder. MAP (localStorage) remembers the choice per "share|path", plus the connection and the one-folder option.
-  const key=b=>`${b.share}|${b.path}`;let MAP={};try{MAP=JSON.parse(localStorage.getItem('wzMap')||'{}')}catch(e){}
+  // H8: one target per shared folder in the selection. MAP (localStorage) remembers the choice per share, plus the connection and the one-folder option.
+  const key=b=>b.share;const ROWS=shareRows();let MAP={};try{MAP=JSON.parse(localStorage.getItem('wzMap')||'{}')}catch(e){}
   const saveMap=()=>localStorage.setItem('wzMap',JSON.stringify(MAP));
   const rem=()=>$('#wzRem').value;const oneMode=()=>$('#wzOne').checked;const oneDest=()=>$('#wzOnePath').value.trim();
   let SHARES=[];
   const rowDest=i=>{if(!rem())return ($(`.mapPath[data-i="${i}"]`).value||'').trim().replace(/\/+$/,'');const sh=$(`.mapShare[data-i="${i}"]`).value;if(!sh)return '';const sub=$(`.mapSub[data-i="${i}"]`).value.trim().replace(/^\/+|\/+$/g,'');return `${rem()}${sh}${sub?'/'+sub:''}`};
-  const items=()=>oneMode()?S.basket.map(b=>({...b})):S.basket.map((b,i)=>({...b,dest:rowDest(i)}));
+  const items=()=>oneMode()?S.basket.map(b=>({...b})):S.basket.map(b=>({...b,dest:rowDest(ROWS.findIndex(r=>r.share===b.share))}));
   // updRows(true) is for user edits: it also remembers the choices. The initial render and the share list load only redraw.
   const updRows=persist=>{const local=!rem();$$('.mapRemote').forEach(e=>e.style.display=local?'none':'');$$('.mapLocal').forEach(e=>e.style.display=local?'':'none');
-    S.basket.forEach((b,i)=>{const d=rowDest(i);$(`.mapTo[data-i="${i}"]`).textContent=d?'→ '+d+'/…':local?'→ type a folder':'→ choose a share';$(`.mapStat[data-i="${i}"]`).textContent='';
+    ROWS.forEach((b,i)=>{const d=rowDest(i);$(`.mapTo[data-i="${i}"]`).textContent=d?'→ '+d+'/…':local?'→ type a folder':'→ choose a share';$(`.mapStat[data-i="${i}"]`).textContent='';
       if(persist)MAP[key(b)]={share:$(`.mapShare[data-i="${i}"]`).value,sub:$(`.mapSub[data-i="${i}"]`).value,path:$(`.mapPath[data-i="${i}"]`).value}});
     if(persist){MAP._rem=rem();MAP._one=oneMode();MAP._onePath=oneDest();saveMap()}
     $('#wzMap').style.opacity=oneMode()?'.45':'';$('#wzRemHelp').textContent=local?'type the full path of a mounted share or local folder per row':SHARES.length||!rem()?'':'no shares found on this connection'};
-  const fillRows=()=>{S.basket.forEach((b,i)=>{const m=MAP[key(b)]||{};const sel=$(`.mapShare[data-i="${i}"]`);const want=(m.share&&SHARES.includes(m.share))?m.share:(SHARES.includes(b.share)?b.share:'');
+  const fillRows=()=>{ROWS.forEach((b,i)=>{const m=MAP[key(b)]||{};const sel=$(`.mapShare[data-i="${i}"]`);const want=(m.share&&SHARES.includes(m.share))?m.share:(SHARES.includes(b.share)?b.share:'');
       sel.innerHTML=`<option value="">(choose a share)</option>`+SHARES.map(x=>`<option ${x===want?'selected':''}>${esc(x)}</option>`).join('');
-      $(`.mapSub[data-i="${i}"]`).value=m.sub!=null?m.sub:b.path;$(`.mapPath[data-i="${i}"]`).value=m.path||''});updRows()};
+      $(`.mapSub[data-i="${i}"]`).value=m.sub||'';$(`.mapPath[data-i="${i}"]`).value=m.path||''});updRows()};
   const onEdit=()=>updRows(true);$$('.mapShare,.mapSub,.mapPath').forEach(e=>{e.onchange=onEdit;e.oninput=onEdit});
   $('#wzOne').checked=!!MAP._one;$('#wzOnePath').value=MAP._onePath||'';$('#wzOne').onchange=onEdit;$('#wzOnePath').oninput=onEdit;
   const loadShares=async()=>{SHARES=[];if(rem()){try{const d=await api('/api/remotes',{remote:rem()});SHARES=d.dirs}catch(e){}}fillRows()};
@@ -468,12 +469,12 @@ async function tabRestore(){const el=$('#tab-restore');
   const checkAll=async()=>{const out=$('#wzCheckOut');out.textContent='checking…';setCls(out,'');let bad=false,nonEmpty=0;
     if(oneMode()){const d=oneDest();if(!d){out.textContent='Enter the folder under Advanced, or untick it.';setCls(out,'bad');return{bad:true,nonEmpty}}
       try{const r=await api('/api/dest/check',{src:S.src,dest:d,shares:JSON.stringify([...new Set(S.basket.map(b=>b.share))])});if(!showCheck(out,r))bad=true;if(r.exists&&r.empty===false)nonEmpty++}catch(e){out.textContent='? '+e.message;bad=true}}
-    else for(let i=0;i<S.basket.length;i++){const d=rowDest(i);const st=$(`.mapStat[data-i="${i}"]`);if(!d){st.textContent='choose a target';setCls(st,'bad');bad=true;continue}
+    else for(let i=0;i<ROWS.length;i++){const d=rowDest(i);const st=$(`.mapStat[data-i="${i}"]`);if(!d){st.textContent='choose a target';setCls(st,'bad');bad=true;continue}
       try{const r=await api('/api/dest/check',{src:S.src,dest:d,root:1});if(!showCheck(st,r))bad=true;if(r.exists&&r.empty===false)nonEmpty++}catch(e){st.textContent='? '+e.message;setCls(st,'bad');bad=true}}
     try{const p=await api('/api/restore_plan',{src:S.src,items:JSON.stringify(items()),dest:oneMode()?oneDest():'',skip_meta:$('#rsMeta').checked?1:0});
       p.mappings.forEach((m,i)=>{const el=$(`.mapTo[data-i="${i}"]`);if(el)el.innerHTML=m.sample_from?`${esc(m.sample_from)} → <b>${esc(m.sample_to)}</b> · ${m.files.toLocaleString()} files · ${human(m.bytes)}`:'(no files in this folder)'});
       if(!oneMode()){out.textContent=bad?'Fix the marked rows.':`${p.files.toLocaleString()} files · ${human(p.bytes)}`;setCls(out,bad?'bad':'ok')}
-      $('#rsPlanOut').innerHTML=`<b>${p.files.toLocaleString()} files · ${human(p.bytes)}</b><br>${p.mappings.map(m=>`<span class="mono">${esc(m.share)}${m.path?'/'+esc(m.path):''} → ${esc(m.dest||'?')}${m.sample_to?`<br>&nbsp;&nbsp;e.g. ${esc(m.sample_from)} → ${esc(m.sample_to)}`:''}</span>`).join('<br>')}`}
+      $('#rsPlanOut').innerHTML=`<b>${p.files.toLocaleString()} files · ${human(p.bytes)}</b><br>${p.mappings.map(m=>`<span class="mono">${esc(m.share)} → ${esc(m.dest||'?')}${m.sample_to?`<br>&nbsp;&nbsp;e.g. ${esc(m.sample_from)} → ${esc(m.sample_to)}`:''}</span>`).join('<br>')}`}
     catch(e){out.textContent='? '+e.message;setCls(out,'bad');bad=true}
     return{bad,nonEmpty}};
   $('#wzCheck').onclick=checkAll;
@@ -492,7 +493,7 @@ async function tabRestore(){const el=$('#tab-restore');
   showSaved();
   $('#rsPlan').onclick=async()=>{$('#rsPlanOut').textContent='counting…';await checkAll()};
   $('#rsGo').onclick=async()=>{const its=items();const dest=oneMode()?oneDest():'';
-    if(!oneMode()&&its.some(x=>!x.dest)){alert('Choose a target for every folder in step 4.');return}
+    if(!oneMode()&&its.some(x=>!x.dest)){alert('Choose a target for every shared folder in step 4.');return}
     const chk=await checkAll();if(chk.bad){alert('Fix the marked targets in step 4 first.');return}
     if(chk.nonEmpty&&!confirm(`${chk.nonEmpty} target folder${chk.nonEmpty>1?'s':''} already ${chk.nonEmpty>1?'have':'has'} files. Files already there are skipped and nothing is deleted. Continue?`))return;
     try{const j=await post('/api/restore',{src:S.src,dest,items:its,skip_meta:$('#rsMeta').checked});
