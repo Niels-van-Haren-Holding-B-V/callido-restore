@@ -1,6 +1,7 @@
 #!/bin/bash
 # Fail when a tracked file contains personal data (H18). Two pattern sources:
-#  * built-in generic patterns (local user paths, mounted volumes, private IPs, e-mail addresses);
+#  * built-in generic patterns (home folder paths, private IPs, e-mail addresses; /Volumes/<name> is a normal macOS path, so real
+#    volume names belong in the denylist);
 #  * a denylist of extended regexes, one per line, with the real names that must never appear: the PRIVATE_DENYLIST
 #    environment variable (a GitHub Actions secret in CI) or, if that is empty, the gitignored file .private-denylist in the
 #    repo, or ~/.hbk-explorer/private-denylist.
@@ -11,7 +12,6 @@ cd "$(dirname "$0")/.."
 
 builtin_patterns=(
   '/Users/[A-Za-z]'
-  '/Volumes/[A-Za-z]'
   '\b(10\.[0-9]{1,3}|192\.168|172\.(1[6-9]|2[0-9]|3[01]))\.[0-9]{1,3}\.[0-9]{1,3}\b'
   '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}'
 )

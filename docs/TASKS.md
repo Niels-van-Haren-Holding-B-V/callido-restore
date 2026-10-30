@@ -91,7 +91,7 @@ is the owner's call once main is green.
 
 ## H18 — No personal data in the repo (owner, 2026-10-31 00:35; rule in docs/HANDOVER.md)
 IN PROGRESS (hbk-2): scrub of docs, handovers and `tests/test_hbk_pool.py`; `scripts/check_private.sh` + CI job `private-check`
-(denylist from the `PRIVATE_DENYLIST` secret or a gitignored `.private-denylist`, plus built-in patterns for `/Users/`, `/Volumes/`,
+(denylist from the `PRIVATE_DENYLIST` secret or a gitignored `.private-denylist`, plus built-in patterns for `/Users/`,
 private IPs and e-mail addresses). hbk-3 scrubs `tests/test_dest_check.py`, `tests/test_restore_mapping.py`, `hbk_explorer.py` and
 `static/index.html` inside #49/#50. No history rewrite.
 
