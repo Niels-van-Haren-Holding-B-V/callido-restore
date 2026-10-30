@@ -9,6 +9,16 @@ permissions:
   contents: read
 
 jobs:
+  # H18: the repo is public; fail on real names, local paths, private IPs or e-mail addresses in tracked files.
+  # The denylist with the real names lives in the PRIVATE_DENYLIST repository secret (one extended regex per line).
+  private-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - run: ./scripts/check_private.sh
+        env:
+          PRIVATE_DENYLIST: ${{ secrets.PRIVATE_DENYLIST }}
+
   build:
     strategy:
       fail-fast: false

@@ -31,7 +31,7 @@ Acceptance: `/api/pool` reports the map; a sample of files from every share rest
 `build_poolmap` (v1); do not edit `hbk_anchor.py` / `hbk_poolmap2.py` without coordinating with hbk-1.
 
 ## T2 — End-to-end restore test to the NAS
-Wizard → version 2333 → <a small folder> → target `<remote>:<restore-test-folder>`.
+Wizard → version 1234 (the last clean run) → <a small folder> → target `<remote>:<restore-test-folder>`.
 Acceptance: files present with correct sizes and mtimes; pause/resume works; errors list empty. Then restore everything.
 Serves the goal: this is the end-to-end check that a chosen folder is restored onto a NAS (step 4).
 
@@ -87,8 +87,14 @@ DONE (hbk-3): PR #25. name "Callido Restore" in one constant (window title, .app
 IN PROGRESS (hbk-2): release notes (`.github/RELEASE_NOTES.md`: both dmgs, Gatekeeper "Open Anyway" steps, Synology notice) and
 `body_path` in the publish job. Checked: `assemble_release.sh` attaches `CallidoRestore-arm64.dmg` + `CallidoRestore-amd64.dmg` with
 `SHA256SUMS`, app/dmg are named from `APP_NAME` ("Callido Restore"), `VERSION = "0.1.0"`. Tagging (`git tag v0.1.0 origin/main && git push origin v0.1.0`)
-is Niels's call once main is green.
+is the owner's call once main is green.
+
+## H18 — No personal data in the repo (owner, 2026-10-31 00:35; rule in docs/HANDOVER.md)
+IN PROGRESS (hbk-2): scrub of docs, handovers and `tests/test_hbk_pool.py`; `scripts/check_private.sh` + CI job `private-check`
+(denylist from the `PRIVATE_DENYLIST` secret or a gitignored `.private-denylist`, plus built-in patterns for `/Users/`, `/Volumes/`,
+private IPs and e-mail addresses). hbk-3 scrubs `tests/test_dest_check.py`, `tests/test_restore_mapping.py`, `hbk_explorer.py` and
+`static/index.html` inside #49/#50. No history rewrite.
 
 ## Do not
 * Do not change the on-disk layout of `~/.hbk-explorer/index/<src>/pool/*` without a migration; the full map build takes hours of downloads.
-* Do not commit anything from `~/.hbk-explorer` or user paths/remotes into the repo.
+* Do not commit anything from `~/.hbk-explorer` or user paths/remotes into the repo, and no real share/folder/host names (H18 rule in docs/HANDOVER.md).

@@ -192,7 +192,7 @@ class VirtualFileIndexTests(unittest.TestCase):
             return ((set_no & 0xFFFF) << 16) | ((off >> 32) & 0xFFFF), off & 0xFFFFFFFF
         words = [0] * 14
         words[0], words[1] = ptr(set_a, list_off)
-        words[2] = 2333
+        words[2] = 1234
         words[3] = 0x402
         words[4] = 0x64
         words[6], words[7] = 0, 1700000000
@@ -219,7 +219,7 @@ class VirtualFileIndexTests(unittest.TestCase):
         self.assertEqual(entry["list_off"], list_off)
         self.assertEqual(entry["rec_off"], rec_off)
         self.assertNotEqual(rec_off, list_off - 12)
-        self.assertEqual(entry["version"], 2333)
+        self.assertEqual(entry["version"], 1234)
         self.assertEqual(entry["flags"], 0x402)
         self.assertEqual(entry["mtime"], 0x11111111)  # word 9 only
         self.assertNotEqual(entry["mtime"], 0x22222222)
