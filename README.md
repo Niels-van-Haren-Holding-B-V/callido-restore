@@ -37,6 +37,7 @@ Settings, caches and `app.log` live in `~/.hbk-explorer/`.
 Or from source: `python3 -m venv .venv && .venv/bin/pip install -r requirements.txt && .venv/bin/python hbk_explorer.py` (opens the app
 window; add `--browser` to use your browser instead).
 `rclone` is bundled in the app (MIT; `rclone-COPYING` and `THIRD-PARTY-NOTICES.txt` are inside the app under `Contents/Resources/Licenses/` and on the disk image). From source, install rclone with Homebrew.
+The logo is original artwork made for this project (see `assets/README.md`); the app is not affiliated with Synology.
 
 ## Docs
 `docs/USER-GUIDE.md`, `docs/FORMAT.md` (the reverse-engineered format), `docs/ARCHITECTURE.md`, `docs/HANDOVER.md`, `docs/TASKS.md`.

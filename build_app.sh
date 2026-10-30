@@ -247,8 +247,12 @@ make_dmg() {
   # The custom-icon flag does not survive -srcfolder: set it on the mounted volume, then compress.
   mnt=$(mktemp -d "${TMPDIR:-/tmp}/hbk-dmg-rw.XXXXXX")
   if hdiutil attach -nobrowse -readwrite -noverify -mountpoint "$mnt" "$rw" >/dev/null; then
-    if command -v SetFile >/dev/null 2>&1; then SetFile -a C "$mnt"; SetFile -a V "$mnt/.VolumeIcon.icns"; fi
-    hdiutil detach "$mnt" >/dev/null || hdiutil detach -force "$mnt" >/dev/null || true
+    if command -v SetFile >/dev/null 2>&1; then
+      SetFile -a C "$mnt"; SetFile -a V "$mnt/.VolumeIcon.icns"
+    else
+      echo "warning: SetFile not found (Xcode command line tools); the disk image gets no custom volume icon" >&2
+    fi
+    hdiutil detach "$mnt" >/dev/null || hdiutil detach -force "$mnt" >/dev/null || echo "warning: could not detach $mnt; the image is converted anyway" >&2
   fi
   rmdir "$mnt" 2>/dev/null || true
   hdiutil convert -quiet "$rw" -format UDZO -o "$image" || die "hdiutil convert failed"
