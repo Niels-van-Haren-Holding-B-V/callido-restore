@@ -5,12 +5,13 @@ cd "$(dirname "$0")"
 PY=${PYTHON:-python3}
 $PY -m venv .buildenv && . .buildenv/bin/activate
 pip install -q -r requirements.txt pyinstaller
+ARCH=${RCLONE_ARCH:-$([ "$(uname -m)" = "arm64" ] && echo arm64 || echo amd64)}
 if [ ! -f rclone ]; then
-  curl -sSL https://downloads.rclone.org/rclone-current-osx-arm64.zip -o /tmp/rclone.zip
+  curl -sSL "https://downloads.rclone.org/rclone-current-osx-${ARCH}.zip" -o /tmp/rclone.zip
   unzip -qo /tmp/rclone.zip -d /tmp/rclone_x && cp /tmp/rclone_x/rclone-*/rclone ./rclone && chmod +x rclone
 fi
 pyinstaller --noconfirm --windowed --name "Hyper Backup Desktop" --osx-bundle-identifier nl.vanharen.hyperbackupdesktop \
   --add-data "static:static" --add-binary "rclone:." --hidden-import lz4.block hbk_explorer.py
 rm -rf dist/dmg && mkdir -p dist/dmg && cp -R "dist/Hyper Backup Desktop.app" dist/dmg/ && ln -s /Applications dist/dmg/Applications
-hdiutil create -volname "Hyper Backup Desktop" -srcfolder dist/dmg -ov -format UDZO "dist/HyperBackupDesktop-arm64.dmg"
-echo "built dist/HyperBackupDesktop-arm64.dmg"
+hdiutil create -volname "Hyper Backup Desktop" -srcfolder dist/dmg -ov -format UDZO "dist/HyperBackupDesktop-${ARCH}.dmg"
+echo "built dist/HyperBackupDesktop-${ARCH}.dmg"

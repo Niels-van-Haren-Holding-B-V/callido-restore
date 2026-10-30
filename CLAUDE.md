@@ -11,4 +11,4 @@ Conventions
 * All rclone calls go through the `RCLONE` constant (bundled binary in the app, else PATH).
 * Format assumptions are documented in `hbk_pool.py` docstring and `docs/FORMAT.md`; if something in a backup does not match, extend the
   detection rather than special-casing a path.
-* Packaging: `./build_app.sh` (PyInstaller + hdiutil), CI in `.github/workflows/build.yml` (macos-14, Apple silicon).
+* Packaging: `./build_app.sh` (PyInstaller + hdiutil), CI in `.github/workflows/build.yml` (macos-15 arm64 + macos-15-intel).
