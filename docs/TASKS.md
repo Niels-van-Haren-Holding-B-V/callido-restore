@@ -68,7 +68,7 @@ DONE in PR #7 (hbk-3, branch hbk3/desktop-window, stacked on #5): show static/in
 Unclaimed. Clean 2026 macOS look: system font, spacing, rounded corners, light + dark mode, logo colours as accent only, wizard-style one step at a time, "Advanced" for the rest, accessible.
 
 ## T13 — App name + footer (see docs/HANDOVER.md, 2026-10-30 22:31)
-IN PROGRESS (hbk-3): name "Callido Restore" in one constant (window title, .app/.dmg, About, README), tagline, Synology trademark notice, footer with Callido raccoon logo + "Made by Callido · callido.nl · callido.dev" links opening in the default browser.
+DONE in PR #9 (hbk-3, branch hbk3/app-name, stacked on #7 + #8): name "Callido Restore" in one constant (window title, .app/.dmg, About, README), tagline, Synology trademark notice, footer with Callido raccoon logo + "Made by Callido · callido.nl · callido.dev" links opening in the default browser.
 
 ## Do not
 * Do not change the on-disk layout of `~/.hbk-explorer/index/<src>/pool/*` without a migration; the full map build takes hours of downloads.
