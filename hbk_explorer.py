@@ -752,7 +752,10 @@ class H(BaseHTTPRequestHandler):
                     line = "rclone not found"
                 return self._json({"version": VERSION, "rclone": line, "rclone_path": RCLONE, "config": str(CONF_DIR)})
             if u.path == "/api/quit":
-                threading.Timer(0.3, lambda: os._exit(0)).start(); return self._json({"ok": True})
+                def quit_():
+                    if os.name != "nt": subprocess.run(["pkill", "-P", str(os.getpid())], capture_output=True)   # stop rclone children too
+                    os._exit(0)
+                threading.Timer(0.3, quit_).start(); return self._json({"ok": True})
             if u.path == "/api/ls":   # directory picker helper
                 p = Path(os.path.expanduser(q.get("path") or "~"))
                 if not p.is_dir(): p = p.parent
@@ -896,12 +899,29 @@ def _log(msg):
 def _open_browser(port):
     try: webbrowser.open(f"http://127.0.0.1:{port}")
     except Exception: _log(f"could not open a browser; open http://127.0.0.1:{port}")
+def _already_running(port):
+    """True when a Hyper Backup Desktop instance already answers on this port (e.g. the app was opened twice)."""
+    try:
+        from urllib.request import urlopen
+        with urlopen(f"http://127.0.0.1:{port}/api/about", timeout=2) as r: return b'"version"' in r.read()
+    except Exception: return False
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument("--port", type=int, default=8765); ap.add_argument("--no-browser", action="store_true")
     a = ap.parse_args()
+    if getattr(sys, "frozen", False):      # .app bundle: no terminal, so keep a log file next to the settings
+        try:
+            CONF_DIR.mkdir(parents=True, exist_ok=True)
+            sys.stdout = sys.stderr = open(CONF_DIR / "app.log", "a", buffering=1)
+        except OSError: pass
     _verify_frozen()
     load_sources()
-    srv = ThreadingHTTPServer(("127.0.0.1", a.port), H)
+    try: srv = ThreadingHTTPServer(("127.0.0.1", a.port), H)
+    except OSError as e:
+        if _already_running(a.port):
+            _log(f"already running on port {a.port}; opening the browser")
+            if not a.no_browser: _open_browser(a.port)
+            return
+        raise SystemExit(f"cannot listen on 127.0.0.1:{a.port}: {e} (another program uses this port; try --port)")
     _log(f"Hyper Backup Desktop {VERSION} on http://127.0.0.1:{a.port}  (config: {CONF_DIR})")
     if not a.no_browser: threading.Timer(0.6, lambda: _open_browser(a.port)).start()
     try: srv.serve_forever()

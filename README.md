@@ -13,7 +13,9 @@ Built after a ransomware incident; the backup's own metadata databases are read 
 Requires no client-side encryption on the backup task (encrypted tasks are not supported yet).
 
 ## Install
-Download the `.dmg` from Releases, drag the app to Applications, open it (first start: right-click → Open, it is not notarized).
+Download the `.dmg` from Releases, drag the app to Applications and open it. The app is not notarized, so macOS blocks the first start:
+on macOS 15 and later click *Done*, then go to System Settings → Privacy & Security and click *Open Anyway*; on older macOS right-click the app → Open.
+Settings, caches and `app.log` live in `~/.hbk-explorer/`.
 Or from source: `python3 -m venv .venv && .venv/bin/pip install -r requirements.txt && .venv/bin/python hbk_explorer.py`.
 `rclone` is bundled in the app (MIT; `rclone-COPYING` and `THIRD-PARTY-NOTICES.txt` are inside the app under `Contents/Resources/Licenses/` and on the disk image). From source, install rclone with Homebrew.
 
