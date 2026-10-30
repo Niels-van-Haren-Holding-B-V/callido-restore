@@ -96,8 +96,10 @@ class MappedRestoreTests(_Fixture):
     def test_two_folders_two_destinations_exact_paths(self):
         res = self.b.restore(self.items, "", self.job())
         self.assertEqual((res["files"], res["restored"], res["skipped"], res["errors"]), (4, 4, 0, 0))
-        self.assertEqual(sorted(self.b.pool.extracted), sorted([os.path.join(self.dA, "x.txt"), os.path.join(self.dA, "sub", "y.txt"),
-                                                                 os.path.join(self.dB, "docs", "z.txt"), os.path.join(self.dB, "docs", "deeper", "w.txt")]))
+        for rel in [os.path.join(self.dA, "x.txt"), os.path.join(self.dA, "sub", "y.txt"), os.path.join(self.dB, "docs", "z.txt"), os.path.join(self.dB, "docs", "deeper", "w.txt")]:
+            self.assertTrue(os.path.isfile(rel), rel)
+        self.assertEqual(len(self.b.pool.extracted), 4)
+        self.assertTrue(all(".hbk-restore-" in x for x in self.b.pool.extracted))                    # extracted into the per-root staging folder
         self.assertFalse(os.path.exists(os.path.join(self.dB, "other")))                     # only the selected subtree (H13)
         self.assertFalse(os.path.exists(os.path.join(self.dA, "A")))                         # no share or version folder
         self.assertEqual(int(os.stat(os.path.join(self.dB, "docs", "deeper", "w.txt")).st_mtime), 1700000003)
