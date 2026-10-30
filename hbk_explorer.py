@@ -10,7 +10,7 @@ needed to browse; the data pool is only touched when extracting a file.
 Usage:  python3 hbk_explorer.py [--port 8765] [--browser | --no-window] [--smoke]
         (app window by default; --browser uses the system browser, --no-window runs only the server, --smoke is a build check)
 """
-import argparse, collections, fnmatch, json, os, re, sqlite3, subprocess, sys, threading, time, traceback, uuid, zlib
+import argparse, collections, fnmatch, json, os, re, shutil, sqlite3, subprocess, sys, tempfile, threading, time, traceback, uuid, zlib
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs, unquote
@@ -120,6 +120,7 @@ def place_file(tmp, out):
             return False
         except OSError:
             pass
+        # The placeholder is briefly visible as an empty file at out; it is this call's own and is replaced or removed below.
         try: fd = os.open(out, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
         except FileExistsError: return False
         os.close(fd)
@@ -726,7 +727,6 @@ class Backup:
                                       "errors": job.get("errors", [])[-200:], "total_files": job.get("total_files"), "total_bytes": job.get("total_bytes"),
                                       "done_bytes": job.get("done_bytes", 0), "state": state, "label": job["label"], "started": job["started"], "updated": time.time()}))
         remote_dest = ":" in dest and not dest.startswith("/")    # rclone remote, e.g. nas:GDriveRestore/restore
-        import shutil, tempfile
         if remote_dest:
             job["message"] = "listing destination"
             try: existing = list_destination(dest)
@@ -846,7 +846,6 @@ class Backup:
         off = r["off"]
         if r["is_dir"]: raise RuntimeError("directory")
         if off is None or off >= 0:
-            import tempfile
             tmpdir = tempfile.mkdtemp(prefix="hbk-"); out = os.path.join(tmpdir, "x")
             try:
                 self.pool.extract(off, out, size=r["size"], mtime=r["mtime"]); data = Path(out).read_bytes()
@@ -1008,7 +1007,6 @@ class H(BaseHTTPRequestHandler):
             if u.path == "/api/download":
                 c = b.conn(q["share"], int(q["ver"])); r = c.execute("select * from files where id = ?", (q["id"],)).fetchone(); c.close()
                 if not r: return self._json({"error": "no such file"}, 404)
-                import tempfile
                 tmpdir = tempfile.mkdtemp(prefix="hbk-"); out = os.path.join(tmpdir, r["name"])
                 b.pool.extract(r["off"], out, size=r["size"], mtime=r["mtime"])
                 data = Path(out).read_bytes(); os.unlink(out); os.rmdir(tmpdir)
