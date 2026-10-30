@@ -90,7 +90,7 @@ IN PROGRESS (hbk-2): release notes (`.github/RELEASE_NOTES.md`: both dmgs, Gatek
 is Niels's call once main is green.
 
 ## H8 — Per-folder destination mapping (Niels, 2026-10-30 23:29; see docs/handovers/2026-10-30-2318-nas-triage.md)
-IN REVIEW (hbk-3): PR #46 (branch rebased onto main after #44/#45; replaces #42/#40). Each local root gets its own `.hbk-restore-<job>` staging folder and `place_file`; remote roots are listed up front. Target step is a table "Folder from backup → Restore to", one row per
+IN REVIEW (hbk-3): PR #49 (branch `hbk3/dest-mapping4`, on main after #44/#45; replaces #46/#42/#40). Each local root gets its own `.hbk-restore-<job>` staging folder and `place_file`; remote roots are listed up front. Target step is a table "Folder from backup → Restore to", one row per
 shared folder in the selection, defaulting to the NAS share with the same name; selected subfolders keep their relative path under
 it (H13 rule), no version or source folder in between. "Check targets and preview" shows one sample path per row. Each item carries its `dest`
 (`/api/restore`, persisted in the job, kept across pause/resume); `file_target()` / `restore_roots()` in `hbk_explorer.py`.
