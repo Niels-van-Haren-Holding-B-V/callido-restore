@@ -109,7 +109,9 @@ details.adv{margin:8px 0 0}details.adv summary{cursor:pointer;color:var(--muted)
 details.adv summary::-webkit-details-marker{display:none}details.adv summary::before{content:"▸";font-size:11px;transition:transform .15s;display:inline-block}details.adv[open] summary::before{transform:rotate(90deg)}
 details.adv>*:not(summary){margin-top:8px}
 /* restore wizard steps */
-.basket li{display:flex;gap:8px;align-items:center;padding:4px 0}.basket{padding-left:0;list-style:none}
+.basket li{display:flex;gap:8px;align-items:center;padding:4px 0}
+.tree{max-height:420px;overflow:auto;border:1px solid var(--line,#e5e5ea);border-radius:8px;padding:6px 8px}
+.tn{display:flex;align-items:center;gap:6px;padding:2px 0;white-space:nowrap}.tn .tog{display:inline-block;width:14px;text-align:center;cursor:pointer;color:var(--muted);user-select:none}.tn .tog.leaf{cursor:default}.tn input{margin:0}.basket{padding-left:0;list-style:none}
 .step{position:relative;padding:14px 18px 14px 56px;border:1px solid var(--line);border-radius:var(--r);background:var(--panel);margin-bottom:10px}
 .step .n{position:absolute;left:16px;top:14px;width:28px;height:28px;border-radius:50%;display:grid;place-items:center;font-weight:600;font-size:13px;background:var(--chip);color:var(--muted)}
 .step.done .n{background:var(--ok);color:#fff}.step.on .n{background:var(--grad);color:#fff}
@@ -396,6 +398,26 @@ async function tabCompare(){const el=$('#tab-compare');const vs=S.info.versions.
     const sec=(t,rows,cols)=>`<h3 style="font-size:13px;margin:12px 0 4px">${t} (${rows.length.toLocaleString()})</h3>${table(rows.map(r=>({...r,share:d.share})),{cols})}`;
     $('#cpOut').innerHTML=sec('Added in v'+d.b,d.added,['path','size','mtime','ctime','mode','flags'])+sec('Modified',d.modified,['path','old_size','size','old_mtime','mtime','flags'])+sec('Removed (present in v'+d.a+' only)',d.removed,['path','size','mtime','mode','flags']);};}
 
+// H13: selection tree. The basket stays an inclusion list of {share, path, is_dir}; the tree shows it: a node is "on" when it or an
+// ancestor is in the basket, "partial" when something below it is. Unticking a node under a ticked ancestor replaces the ancestor by
+// its other children along the path (siblings are loaded on demand), so the restore plan and pause/resume need nothing new.
+let TREE={open:new Set(),kids:{}};const tkey=(s,p)=>s+'|'+p;
+function selState(share,path){const items=S.basket.filter(b=>b.share===share);if(items.some(b=>b.path===''||b.path===path||path.startsWith(b.path+'/')))return 'on';if(items.some(b=>path===''||b.path.startsWith(path+'/')))return 'partial';return 'off'}
+async function treeKids(share,path){const k=tkey(share,path);if(!TREE.kids[k]){const rows=await api('/api/children',{src:S.src,share,ver:S.ver,dir:path});TREE.kids[k]=rows.filter(r=>r.name!=='@eaDir').map(r=>({name:r.name,path:r.path,is_dir:r.is_dir?1:0,size:r.size,n:r.n}))}return TREE.kids[k]}   // @eaDir holds Synology thumbnails, skipped by the restore
+async function treeToggleSel(share,path,is_dir){const st=selState(share,path);
+  if(st==='on'){const cover=S.basket.find(b=>b.share===share&&(b.path===''||b.path===path||path.startsWith(b.path+'/')));S.basket=S.basket.filter(b=>b!==cover);
+    if(cover.path!==path){let cur=cover.path;const parts=path.split('/');for(let d=cur?cur.split('/').length:0;d<parts.length;d++){const next=parts.slice(0,d+1).join('/');(await treeKids(share,cur)).forEach(k=>{if(k.path!==next)S.basket.push({share,ver:S.ver,path:k.path,is_dir:k.is_dir,name:k.name})});cur=next}}}
+  else{S.basket=S.basket.filter(b=>!(b.share===share&&(path===''||b.path===path||b.path.startsWith(path+'/'))));S.basket.push({share,ver:S.ver,path,is_dir:is_dir?1:0,name:path.split('/').pop()||'(share root)'})}
+  localStorage.setItem('basket',JSON.stringify(S.basket))}
+function renderTree(){const el=$('#rsTree');if(!el||!S.info)return;const showFiles=localStorage.getItem('rsFiles')==='1';
+  const node=(share,path,name,is_dir,extra,depth)=>{const k=tkey(share,path);const open=is_dir&&TREE.open.has(k);const st=selState(share,path);const kids=(TREE.kids[k]||[]).filter(c=>c.is_dir||showFiles);
+    return `<div class="tn" style="padding-left:${depth*18}px"><span class="tog ${is_dir?'':'leaf'}" data-k="${esc(k)}">${is_dir?(open?'▾':'▸'):''}</span><input type="checkbox" class="tc" data-share="${esc(share)}" data-path="${esc(path)}" data-dir="${is_dir?1:0}" ${st==='on'?'checked':''} ${st==='partial'?'data-partial="1"':''}><span class="${is_dir?'':'muted'}">${esc(name)}</span><span class="muted" style="font-size:11.5px">${extra}</span></div>`+
+      (open?(kids.map(c=>node(share,c.path,c.name,c.is_dir,c.is_dir?`${(c.n||0).toLocaleString()} items`:human(c.size),depth+1)).join('')||`<div class="tn muted" style="padding-left:${(depth+1)*18+22}px">${(TREE.kids[k]||[]).length?'(only files; tick "show single files" under Advanced)':'(empty)'}</div>`):'')};
+  el.innerHTML=S.info.shares.filter(s=>s.name!=='@AppConfig').map(s=>{const m=(S.snaps&&S.snaps[s.name]&&S.snaps[s.name].meta)||{};return node(s.name,'',s.name,1,m.files?`${m.files.toLocaleString()} files${m.bytes?' · '+human(m.bytes):''}`:'',0)}).join('');
+  $$('#rsTree .tc').forEach(c=>{c.indeterminate=!!c.dataset.partial;c.onchange=async()=>{c.disabled=true;await treeToggleSel(c.dataset.share,c.dataset.path,+c.dataset.dir);tabRestore()}});
+  $$('#rsTree .tog:not(.leaf)').forEach(tg=>tg.onclick=async()=>{const k=tg.dataset.k;if(TREE.open.has(k))TREE.open.delete(k);else{const i=k.indexOf('|');tg.textContent='…';await treeKids(k.slice(0,i),k.slice(i+1));TREE.open.add(k)}renderTree()})}
+let sumTimer=null;function treeSummary(){const el=$('#rsSelSum');if(!el)return;if(!S.basket.length){el.textContent='Nothing selected yet.';return}el.textContent='counting…';clearTimeout(sumTimer);
+  sumTimer=setTimeout(async()=>{try{const r=await api('/api/restore_count',{src:S.src,items:JSON.stringify(S.basket),skip_meta:$('#rsMeta')&&$('#rsMeta').checked?1:0});el.textContent=`Selected: ${r.files.toLocaleString()} files · ${human(r.bytes)}`}catch(e){el.textContent='Selected: '+S.basket.length+' item(s)'}},300)}
 function shareRows(){const rows=[];S.basket.forEach(b=>{let r=rows.find(x=>x.share===b.share);if(!r){r={share:b.share,paths:[]};rows.push(r)}r.paths.push(b.path)});return rows}
 function addBasket(r){const it={share:r.share,ver:S.ver,path:r.path,is_dir:r.is_dir?1:0,name:r.name||r.path.split('/').pop()};if(S.basket.some(b=>b.share===it.share&&b.ver===it.ver&&b.path===it.path))return;S.basket.push(it);localStorage.setItem('basket',JSON.stringify(S.basket));renderFlow();if(S.tab==='restore')tabRestore();}
 async function tabRestore(){const el=$('#tab-restore');
@@ -409,9 +431,10 @@ async function tabRestore(){const el=$('#tab-restore');
   el.innerHTML=
   step(1,'Which backup run?',`<p style="margin:0">Selected: <b>run ${S.ver}</b> · ${dt(v.ts)} UTC · ${esc(v.status)}${S.ver===latest.id?' · <b>this is the latest run</b>':` · the latest is run ${latest.id} (${dd(latest.ts)})`}.</p>
      <p class="help">After an incident, pick the last run before it. Change the run by clicking a bar in the chart above.</p>${S.ver!==latest.id?`<div><button class="small" id="wzLatest">Use the latest run (${latest.id})</button></div>`:''}`,true)+
-  step(2,'What to restore?',`<div class="row"><button class="small ${!S.basket.length&&firstOpen===2?'primary':''}" id="rsAddAll">Everything from run ${S.ver}</button><span class="help">or pick folders and files under <b>Folders</b> or <b>Search</b> with the + buttons</span></div>
-     <ul class="basket" style="margin:4px 0">${S.basket.map((b,i)=>`<li><span class="flag">run ${b.ver}</span><b>${esc(b.share)}</b>/${esc(b.path||'')}${b.is_dir?' <span class="muted">(folder)</span>':''}<button class="small ghost rm" data-i="${i}">remove</button></li>`).join('')||'<li class="muted">Nothing selected yet.</li>'}</ul>
-     <details class="adv"><summary>Advanced</summary><div class="row"><label><input type="checkbox" id="rsMeta" checked> skip Synology metadata (@eaDir thumbnails, @SynoResource, .DS_Store)</label></div></details>`,S.basket.length>0)+
+  step(2,'What to restore?',`<div class="row"><button class="small ${!S.basket.length&&firstOpen===2?'primary':''}" id="rsAddAll">Everything from run ${S.ver}</button><button class="small ghost" id="rsClear" ${S.basket.length?'':'disabled'}>Clear selection</button><span class="help" id="rsSelSum">Nothing selected yet.</span></div>
+     <p class="help" style="margin:0">Tick the shared folders or subfolders to restore (▸ opens a folder). Ticking a folder takes everything under it; untick a subfolder to leave it out. Folders and files can also be added from <b>Folders</b> or <b>Search</b> with the + buttons.</p>
+     <div class="tree" id="rsTree"></div>
+     <details class="adv"><summary>Advanced</summary><div class="row"><label><input type="checkbox" id="rsMeta" checked> skip Synology metadata (@eaDir thumbnails, @SynoResource, .DS_Store)</label><label><input type="checkbox" id="rsFiles" ${localStorage.getItem('rsFiles')==='1'?'checked':''}> show single files in the tree</label></div></details>`,S.basket.length>0)+
   step(3,'Prepare the backup for reading (one time)',`<p class="help" style="margin:0">Before files can be read without Hyper Backup, the app has to learn where every piece of every file is stored. This is done once and takes a while (it downloads about 7 GB of small index files, no file data). You can stop at any time: what is already downloaded is kept, and running it again continues from there. Later restores reuse it.</p>
      <div class="row"><div class="prog"><i style="width:${pct}%"></i></div><span>${pct}% · ${mapped.toLocaleString()} of ${total.toLocaleString()} blocks${idxFiles?` · ${idxLocal.toLocaleString()} of ${idxFiles.toLocaleString()} index files on disk`:''}</span><button class="small ${!mapOk&&firstOpen===3?'primary':''}" id="poolBuild">${mapOk?'Redo':idxLocal?'Continue':'Prepare now'}</button></div><div id="poolJob"></div>`,mapOk)+
   step(4,'Where should the files go?',`<p class="help" style="margin:0">Each shared folder you selected from is restored into a folder of your choice on the NAS, usually the shared folder with the same name. Selected subfolders keep their place under it (<code>Documents/Invoices/2025</code> → <code>&lt;target&gt;/Invoices/2025</code>), with no version or source folder in between. Nothing at a target is ever overwritten or deleted; files keep their original modification times.</p>
@@ -436,7 +459,9 @@ async function tabRestore(){const el=$('#tab-restore');
   // wiring
   const wl=$('#wzLatest');if(wl)wl.onclick=()=>selectVersion(latest.id);
   $('#rsAddAll').onclick=()=>{S.info.shares.filter(x=>x.name!=='@AppConfig').forEach(x=>{if(!S.basket.some(b=>b.share===x.name&&b.ver===S.ver&&b.path===''))S.basket.push({share:x.name,ver:S.ver,path:'',is_dir:1,name:'(share root)'})});localStorage.setItem('basket',JSON.stringify(S.basket));tabRestore()};
-  $$('.rm').forEach(b=>b.onclick=()=>{S.basket.splice(+b.dataset.i,1);localStorage.setItem('basket',JSON.stringify(S.basket));tabRestore()});
+  $('#rsClear').onclick=()=>{S.basket=[];localStorage.setItem('basket','[]');tabRestore()};
+  $('#rsFiles').onchange=()=>{localStorage.setItem('rsFiles',$('#rsFiles').checked?'1':'0');renderTree()};
+  renderTree();treeSummary();
   $('#poolBuild').onclick=async()=>{const j=await api('/api/pool/build',{src:S.src});pollJob(j.id,$('#poolJob'),()=>tabRestore(),false,'Stop');};
   // H8: one target per shared folder in the selection. MAP (localStorage) remembers the choice per share, plus the connection and the one-folder option.
   const key=b=>b.share;const ROWS=shareRows();let MAP={};try{MAP=JSON.parse(localStorage.getItem('wzMap')||'{}')}catch(e){}

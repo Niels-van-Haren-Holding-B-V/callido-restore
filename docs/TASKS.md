@@ -31,7 +31,7 @@ Acceptance: `/api/pool` reports the map; a sample of files from every share rest
 `build_poolmap` (v1); do not edit `hbk_anchor.py` / `hbk_poolmap2.py` without coordinating with hbk-1.
 
 ## T2 — End-to-end restore test to the NAS
-Wizard → version 2333 → <a small folder> → target `<remote>:<restore-test-folder>`.
+Wizard → version 1234 (the last clean run) → <a small folder> → target `<remote>:<restore-test-folder>`.
 Acceptance: files present with correct sizes and mtimes; pause/resume works; errors list empty. Then restore everything.
 Serves the goal: this is the end-to-end check that a chosen folder is restored onto a NAS (step 4).
 
@@ -87,7 +87,13 @@ DONE (hbk-3): PR #25. name "Callido Restore" in one constant (window title, .app
 IN PROGRESS (hbk-2): release notes (`.github/RELEASE_NOTES.md`: both dmgs, Gatekeeper "Open Anyway" steps, Synology notice) and
 `body_path` in the publish job. Checked: `assemble_release.sh` attaches `CallidoRestore-arm64.dmg` + `CallidoRestore-amd64.dmg` with
 `SHA256SUMS`, app/dmg are named from `APP_NAME` ("Callido Restore"), `VERSION = "0.1.0"`. Tagging (`git tag v0.1.0 origin/main && git push origin v0.1.0`)
-is Niels's call once main is green.
+is the owner's call once main is green.
+
+## H18 — No personal data in the repo (owner, 2026-10-31 00:35; rule in docs/HANDOVER.md)
+IN PROGRESS (hbk-2): scrub of docs, handovers and `tests/test_hbk_pool.py`; `scripts/check_private.sh` + CI job `private-check`
+(denylist from the `PRIVATE_DENYLIST` secret or a gitignored `.private-denylist`, plus built-in patterns for `/Users/`,
+private IPs and e-mail addresses). hbk-3 scrubs `tests/test_dest_check.py`, `tests/test_restore_mapping.py`, `hbk_explorer.py` and
+`static/index.html` inside #49/#50. No history rewrite.
 
 ## H8 — Per-folder destination mapping (Niels, 2026-10-30 23:29; see docs/handovers/2026-10-30-2318-nas-triage.md)
 IN REVIEW (hbk-3): PR #49 (branch `hbk3/dest-mapping4`, on main after #44/#45; replaces #46/#42/#40). Each local root gets its own `.hbk-restore-<job>` staging folder and `place_file`; remote roots are listed up front. Target step is a table "Folder from backup → Restore to", one row per
@@ -97,9 +103,12 @@ it (H13 rule), no version or source folder in between. "Check targets and previe
 Advanced keeps "everything under one folder" (`<folder>/<share>/<path>`). Tests: `tests/test_restore_mapping.py`.
 
 ## H13 — Folder tree selection (Niels, 2026-10-31 00:01; see docs/handovers/2026-10-30-2318-nas-triage.md)
-IN PROGRESS (hbk-3): after H8. The destination rule (per shared folder, subfolders keep their relative path) is already in H8;
-the tree with checkboxes (lazy children, indeterminate parents, size + file count before start, selection kept across pause/resume)
-comes as a separate PR stacked on H8.
+IN REVIEW (hbk-3): PR #52 (branch `hbk3/tree-select3`, on main after #49); replaces #50/#48. Step 2 of the restore wizard is a tree with
+checkboxes: shared folders at the top, ▸ loads children on demand (`/api/children`), ticking a folder takes everything under it,
+unticking a subfolder under a ticked folder replaces that folder by its other children (so the basket stays an inclusion list and the
+restore plan, pause/resume and the H8 mapping need nothing new), parents with a partial selection show an indeterminate checkbox.
+"Selected: N files · size" is counted live in SQL (`/api/restore_count`, honours the metadata skip). Single files are shown with an
+Advanced switch. The destination rule (per shared folder, subfolders keep their relative path) is in H8.
 
 ## H17 — Exact folder selection, safe resume (Reviewer, 2026-10-31 00:34)
 IN REVIEW (hbk-3): branch `hbk3/h17` on main (after H8). `restore_plan` and `restore_count` select a folder by an exact,
@@ -109,4 +118,4 @@ there, source check again); a resume that fails keeps the job file. Neutral exam
 
 ## Do not
 * Do not change the on-disk layout of `~/.hbk-explorer/index/<src>/pool/*` without a migration; the full map build takes hours of downloads.
-* Do not commit anything from `~/.hbk-explorer` or user paths/remotes into the repo.
+* Do not commit anything from `~/.hbk-explorer` or user paths/remotes into the repo, and no real share/folder/host names (H18 rule in docs/HANDOVER.md).
