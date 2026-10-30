@@ -107,6 +107,32 @@ def human(n):
         n /= 1024
     return f"{n:.1f} PB"
 
+def dest_inside_source(dest, remote, local):
+    """True when a restore destination is the backup itself or lies inside it (its remote folder or its local copy/cache).
+    dest and remote are rclone paths like "nas:share/folder" or local paths; local is the source's local folder."""
+    def norm(p): return re.sub(r"/+$", "", p.replace("\\", "/")) if p else p
+    def inside(child, parent):
+        child, parent = norm(child), norm(parent)
+        return bool(parent) and (child == parent or child.startswith(parent + "/"))
+    if ":" in dest and not dest.startswith("/"):
+        return inside(dest, remote or "")
+    try: d = os.path.realpath(os.path.expanduser(dest))
+    except OSError: d = dest
+    for p in (local, remote if remote and remote.startswith("/") else None):
+        if not p: continue
+        try: p = os.path.realpath(os.path.expanduser(p))
+        except OSError: pass
+        if inside(d, p): return True
+    return False
+
+def list_destination(dest):
+    """Paths of every file already at a remote destination (recursive). Raises when the listing fails: an unknown
+    destination must never be treated as empty, because the restore never writes over what is there."""
+    r = subprocess.run([RCLONE, "lsjson", "-R", "--files-only", "--no-mimetype", dest], capture_output=True, text=True)
+    if r.returncode != 0:
+        raise RuntimeError(f"cannot list the destination {dest}: {r.stderr.strip()[-300:] or 'rclone failed'}; nothing was written")
+    return {e["Path"] for e in json.loads(r.stdout or "[]")}
+
 JOBS = {}
 def start_job(fn, label):
     jid = uuid.uuid4().hex[:10]
@@ -641,11 +667,13 @@ class Backup:
                 d = dict(r); d["share"] = it["share"]; d["ver"] = int(it["ver"]); files.append(d)
             c.close()
         return files
-    def restore(self, items, dest, job, overwrite=False, skip_meta=True, start_at=0):
+    def restore(self, items, dest, job, skip_meta=True, start_at=0):
+        """Restore the selected items under dest. Files that already exist at the destination are skipped, whatever their
+        size or date; nothing at the destination is ever written over or deleted (T8)."""
         JOBS_DIR.mkdir(parents=True, exist_ok=True)
         jf = JOBS_DIR / f"{job['id']}.json"
         def persist(state="running"):
-            jf.write_text(json.dumps({"id": job["id"], "src": self.src.id, "items": items, "dest": dest, "overwrite": overwrite, "skip_meta": skip_meta,
+            jf.write_text(json.dumps({"id": job["id"], "src": self.src.id, "items": items, "dest": dest, "skip_meta": skip_meta,
                                       "next_index": job.get("next_index", 0), "done_files": job.get("done_files", 0), "skipped": job.get("skipped", 0),
                                       "errors": job.get("errors", [])[-200:], "total_files": job.get("total_files"), "total_bytes": job.get("total_bytes"),
                                       "done_bytes": job.get("done_bytes", 0), "state": state, "label": job["label"], "started": job["started"], "updated": time.time()}))
@@ -653,11 +681,10 @@ class Backup:
         if remote_dest:
             import tempfile
             stage = tempfile.mkdtemp(prefix="hbk-stage-")
-            existing = set()
             job["message"] = "listing destination"
-            r = subprocess.run([RCLONE, "lsjson", "-R", "--files-only", "--no-mimetype", dest], capture_output=True, text=True)
-            if r.returncode == 0:
-                for e in json.loads(r.stdout or "[]"): existing.add((e["Path"], e["Size"]))
+            try: existing = list_destination(dest)
+            except Exception:
+                persist("error"); raise
         files = self.restore_plan(items, skip_meta)
         total_bytes = sum(f["size"] for f in files); done_bytes = 0
         job["total_files"] = len(files); job["total_bytes"] = total_bytes; job["done_files"] = 0; job["errors"] = []; job["skipped"] = 0
@@ -720,17 +747,18 @@ class Backup:
                 for attempt in range(3):
                   try:
                     if remote_dest:
-                        if not overwrite and (rel, f["size"]) in existing:
+                        if rel in existing:
                             job["skipped"] += 1; job["done_files"] += 1; break
                         out = os.path.join(stage, rel); os.makedirs(os.path.dirname(out), exist_ok=True)
                         pool.extract(f["off"], out, size=f["size"], mtime=f["mtime"], job=None, fh_cache=fh_cache)
-                        r = subprocess.run([RCLONE, "moveto", out, f"{dest}/{rel}", "--retries", "5", "--low-level-retries", "20", "--retries-sleep", "5s"], capture_output=True, text=True)
+                        # --ignore-existing: if the file appeared at the target since the listing, rclone leaves it alone
+                        r = subprocess.run([RCLONE, "moveto", out, f"{dest}/{rel}", "--ignore-existing", "--retries", "5", "--low-level-retries", "20", "--retries-sleep", "5s"], capture_output=True, text=True)
                         if r.returncode != 0: raise RuntimeError("upload failed: " + r.stderr.strip()[-200:])
+                        if os.path.exists(out):      # not moved: the target already had it
+                            os.unlink(out); job["skipped"] += 1; job["done_files"] += 1; break
                         job["done_files"] += 1; break
-                    if not overwrite and os.path.isfile(out):
-                        st = os.stat(out)
-                        if st.st_size == f["size"] and int(st.st_mtime) == f["mtime"]:
-                            job["skipped"] += 1; job["done_files"] += 1; break
+                    if os.path.lexists(out):         # anything already there is kept as is, whatever its size or date
+                        job["skipped"] += 1; job["done_files"] += 1; break
                     os.makedirs(os.path.dirname(out), exist_ok=True)
                     pool.extract(f["off"], out, size=f["size"], mtime=f["mtime"], job=None, fh_cache=fh_cache)
                     job["done_files"] += 1; break
@@ -938,15 +966,17 @@ class H(BaseHTTPRequestHandler):
                 s = add_source(body["name"], body["local"], body.get("remote"), body.get("extra")); return self._json(s.to_json())
             if u.path == "/api/restore":
                 b = backup_for(body["src"]); dest = os.path.expanduser(body["dest"].strip())
+                if dest_inside_source(dest, b.src.remote, b.src.local):
+                    return self._json({"error": f"the destination {dest} is inside the backup itself; restore into a new, empty folder elsewhere"}, 400)
                 if ":" in dest and not dest.startswith("/"):
                     r = subprocess.run([RCLONE, "mkdir", dest], capture_output=True, text=True)
                     if r.returncode != 0: return self._json({"error": f"cannot use remote destination {dest}: {r.stderr.strip()[-200:]}"}, 400)
                 elif not os.path.isdir(dest): return self._json({"error": f"destination folder does not exist: {dest}"}, 400)
-                return self._json(start_job(lambda job: b.restore(body["items"], dest, job, body.get("overwrite", False), body.get("skip_meta", True)), "restore"))
+                return self._json(start_job(lambda job: b.restore(body["items"], dest, job, body.get("skip_meta", True)), "restore"))
             if u.path == "/api/restore/resume":
                 d = json.loads((JOBS_DIR / f"{body['id']}.json").read_text()); b = backup_for(d["src"])
                 (JOBS_DIR / f"{body['id']}.json").unlink()
-                job = start_job(lambda job: b.restore(d["items"], d["dest"], job, d.get("overwrite", False), d.get("skip_meta", True), start_at=d.get("next_index", 0)), "restore (resumed)")
+                job = start_job(lambda job: b.restore(d["items"], d["dest"], job, d.get("skip_meta", True), start_at=d.get("next_index", 0)), "restore (resumed)")
                 return self._json(job)
             if u.path == "/api/sources/delete":
                 SOURCES.pop(body["id"], None); BACKUPS.pop(body["id"], None); save_sources(); return self._json({"ok": True})
