@@ -49,6 +49,16 @@ REC_MAGIC = 0xa93b0200
 SET_OF_WRITER = {0: 4, 1: 3, 2: 1, 3: 2}      # writer w's records live in file_chunk<set>.index
 WRITER_OF_SET = {v: k for k, v in SET_OF_WRITER.items()}
 
+def dump_json(path, obj):
+    """Write JSON atomically (tmp file + os.replace): a crash never leaves a half-written map that load_map would prefer."""
+    tmp = f"{path}.tmp"
+    with open(tmp, "w") as f: json.dump(obj, f)
+    os.replace(tmp, path)
+
+def load_json(path):
+    with open(path) as f: return json.load(f)
+
+
 def rev_sort_key(name):
     m = re.search(r"\.(\d+)$", name); return int(m.group(1)) if m else -1
 
@@ -129,7 +139,7 @@ class PoolMap:
         self.path = path; self.blocks = {}; self.block_pos = {}; self.buckets = {}; self.counts = {}; self.cum = {}
         if os.path.isfile(path): self.load()
     def load(self):
-        d = json.load(open(self.path))
+        d = load_json(self.path)
         self.blocks = {int(w): v for w, v in d["blocks"].items()}
         self.block_pos = {w: {b: i for i, b in enumerate(v)} for w, v in self.blocks.items()}
         self.counts = {int(k): v for k, v in d["counts"].items()}
@@ -138,7 +148,7 @@ class PoolMap:
         for b, (w, j) in self.buckets.items(): self.cum.setdefault(w, []).append((j, b))
         for w in self.cum: self.cum[w].sort()
     def save(self):
-        json.dump({"blocks": self.blocks, "counts": self.counts, "buckets": {k: list(v) for k, v in self.buckets.items()}}, open(self.path, "w"))
+        dump_json(self.path, {"blocks": self.blocks, "counts": self.counts, "buckets": {k: list(v) for k, v in self.buckets.items()}})
     def writer_of_id(self, g):
         blk = g // BLOCK
         for w, pos in self.block_pos.items():
@@ -243,7 +253,7 @@ def build_runs(source, outdir, log=print):
         best = max(range(4), key=lambda w: v[w]); tot = sum(v)
         if v[best] < 0.6 * tot: amb += 1
         blocks[b] = best
-    json.dump({"blocks": blocks, "stats": stats, "ambiguous": amb}, open(os.path.join(outdir, "blocks.json"), "w"))
+    dump_json(os.path.join(outdir, "blocks.json"), {"blocks": blocks, "stats": stats, "ambiguous": amb})
     log(f"blocks={len(blocks):,} ambiguous={amb} max_block={max(blocks) if blocks else -1}")
     return stats
 
@@ -286,7 +296,7 @@ def build_recsizes(source, snapshot_dbs, outdir, log=print):
             if old is not None and old != size: conflicts += 1
             sizes[s][ro] = size; n += 1
         con.close()
-    for s in sizes: json.dump(sizes[s], open(os.path.join(outdir, f"recsize_set{s}.json"), "w"))
+    for s in sizes: dump_json(os.path.join(outdir, f"recsize_set{s}.json"), sizes[s])
     log(f"record sizes: {sum(len(v) for v in sizes.values()):,} records from {n:,} rows, conflicts={conflicts}")
 
 # ----------------------------------------------------------------------------- reading chunks back
@@ -295,24 +305,28 @@ class PoolReader:
     def __init__(self, source, pool_dir, log=None):
         self.src, self.pool_dir = source, pool_dir
         self.vf = VirtualFileIndex(source); self.recs = ChunkRecords(source)
-        self.map = None; self.idx_cache = collections.OrderedDict(); self.names = None; self.v2 = False
+        self.map = None; self.idx_cache = collections.OrderedDict(); self.names = None; self.v1 = self.v2 = False; self.counts = {}
         self.load_map()
     # --- map
     def load_map(self):
-        p2 = os.path.join(self.pool_dir, "poolmap2.json")
-        if os.path.isfile(p2): return self.load_map2(p2)
-        p = os.path.join(self.pool_dir, "poolmap.json")
-        if not os.path.isfile(p): self.map = None; return False
-        d = json.load(open(p)); import bisect
+        """poolmap2.json (v2, per-record placements) is used first; poolmap.json (v1) stays loaded as the fallback for chunks a
+        partial v2 map (mapped_upto < total buckets) cannot serve. Returns True when any map is loaded."""
+        self.v1 = self.v2 = False; self.map = None
+        p = os.path.join(self.pool_dir, "poolmap.json"); p2 = os.path.join(self.pool_dir, "poolmap2.json")
+        if os.path.isfile(p): self.load_map1(p)
+        if os.path.isfile(p2): self.load_map2(p2)
+        return self.map is not None
+    def load_map1(self, p):
+        d = load_json(p)
         self.block_pos = {}
         for w, blocks in d["blocks"].items():
             for i, b in enumerate(blocks): self.block_pos[b] = (int(w), i)
         self.pieces = {int(w): v for w, v in d["pieces"].items()}
-        self.counts = {int(k): v for k, v in d["counts"].items()}
+        self.counts.update({int(k): v for k, v in d["counts"].items()})
         self.assigned = {w: [] for w in range(4)}
         for b, (w, s0) in d["buckets"].items(): self.assigned[w].append((s0, int(b)))
         for w in self.assigned: self.assigned[w].sort()
-        self.map = d; self.mapped_upto = d.get("mapped_upto", 0)
+        self.map = d; self.mapped_upto = d.get("mapped_upto", 0); self.v1 = True
         return True
     def status(self):
         listing = os.path.join(self.pool_dir, "listing.json")
@@ -320,7 +334,7 @@ class PoolReader:
               "recsizes": os.path.isfile(os.path.join(self.pool_dir, "recsize_set1.json")), "map": self.map is not None,
               "mapped_buckets": len(self.map["buckets"]) if self.map else 0, "total_buckets": 0, "indexes_local": 0, "index_files": 0}
         if st["listing"]:
-            l = json.load(open(listing)); idx = [e for e in l if e["t"] == "index"]
+            l = load_json(listing); idx = [e for e in l if e["t"] == "index"]
             st["total_buckets"] = len({e["b"] for e in idx})
             st["index_files"] = len(idx)
             n = 0
@@ -332,23 +346,24 @@ class PoolReader:
         if self.names is None:
             listing = os.path.join(self.pool_dir, "listing.json")
             self.names = {}
-            for e in json.load(open(listing)):
+            for e in load_json(listing):
                 k = (e["b"], e["t"])
                 if k not in self.names or e["rev"] > self.names[k][1]: self.names[k] = (e["name"], e["rev"])
         return f"Pool/0/{b // 2048}/{self.names[(b, kind)][0]}"
     def load_map2(self, p):
         """v2 map: per record placement segments + new-id ranges (storage order != id order)."""
-        import bisect
-        d = json.load(open(p)); self.v2 = True
-        self.counts = {int(k): v for k, v in d["counts"].items()}
+        d = load_json(p); self.v2 = True
+        self.counts.update({int(k): v for k, v in d["counts"].items()})
         self.place2 = {int(s): {int(k): v for k, v in m.items()} for s, m in d["placements"].items()}
-        self.rng2 = {}
+        self.rng2 = {}; self.recrng = {}        # recrng[set][rec_off] = the record's new-id ranges [(start, len)] in id order
         for s, lst in d["ranges"].items():
             lst = sorted(lst); self.rng2[int(s)] = ([x[0] for x in lst], [x[1] for x in lst], [x[2] for x in lst])
+            rr = self.recrng[int(s)] = {}
+            for a, L, ro in lst: rr.setdefault(ro, []).append((a, L))
+        self.guessed = {int(s): set(v) for s, v in d.get("guessed", {}).items()}     # records placed without tag evidence
         self.map = d; self.mapped_upto = d.get("mapped_upto", 0)
         return True
     def _rec_of_id(self, g):
-        import bisect
         for s, (st, ln, ro) in self.rng2.items():
             i = bisect.bisect_right(st, g) - 1
             if i >= 0 and g < st[i] + ln[i]: return s, ro[i]
@@ -363,9 +378,7 @@ class PoolReader:
     def locate2(self, set_no, rec_off, ids):
         """All chunk locations of a record (set, rec_off) with its id list, in file order."""
         out = []; own = self.place2.get(set_no, {}).get(rec_off)
-        # own new-id ranges of this record in id order
-        st, ln, ro = self.rng2.get(set_no, ([], [], []))
-        own_ranges = sorted((st[i], ln[i]) for i in range(len(st)) if ro[i] == rec_off)
+        own_ranges = self.recrng.get(set_no, {}).get(rec_off, [])     # this record's new-id ranges, id order
         for g in ids:
             k = 0; found = False
             for a, L in own_ranges:
@@ -374,20 +387,23 @@ class PoolReader:
             if found and own is not None: out.append(self._segs_lookup(set_no, rec_off, k)); continue
             owner = self._rec_of_id(g)
             if owner is None: raise KeyError(f"chunk id {g}: no record owns it")
-            s2, r2 = owner; st2, ln2, ro2 = self.rng2[s2]
-            k = 0
-            for i in range(len(st2)):
-                if ro2[i] != r2: continue
-                if st2[i] <= g < st2[i] + ln2[i]: k += g - st2[i]; break
-                k += ln2[i]
+            s2, r2 = owner; k = 0
+            for a, L in self.recrng[s2][r2]:
+                if a <= g < a + L: k += g - a; break
+                k += L
             out.append(self._segs_lookup(s2, r2, k))
         return out
     def locate(self, g):
-        import bisect
-        if getattr(self, "v2", False):
-            owner = self._rec_of_id(g)
-            if owner is None: raise KeyError(f"chunk id {g}: no record owns it")
-            return self.locate2(owner[0], owner[1], [g])[0]
+        if self.v2:
+            try:
+                owner = self._rec_of_id(g)
+                if owner is None: raise KeyError(f"chunk id {g}: no record owns it")
+                return self.locate2(owner[0], owner[1], [g])[0]
+            except KeyError:
+                if not self.v1: raise
+        return self.locate1(g)
+    def locate1(self, g):
+        if not self.v1: raise KeyError(f"chunk {g}: no v1 map loaded")
         bp = self.block_pos.get(g // BLOCK)
         if bp is None: raise KeyError(f"chunk {g}: unknown id block {g // BLOCK}")
         w, bi = bp; p = bi * BLOCK + g % BLOCK; pc = self.pieces[w]
@@ -410,8 +426,11 @@ class PoolReader:
     def plan(self, off):
         """off = off_virtual_file (>=0). Returns list of (bucket, entry) in file order."""
         e = self.vf.entry(off); rec = self.recs.record(e["set"], e["rec_off"])
-        if getattr(self, "v2", False): return self.locate2(e["set"], e["rec_off"], rec["ids"]), rec
-        return [self.locate(g) for g in rec["ids"]], rec
+        if self.v2:
+            try: return self.locate2(e["set"], e["rec_off"], rec["ids"]), rec
+            except KeyError:
+                if not self.v1: raise            # partial v2 map: fall back to the v1 map for this file
+        return [self.locate1(g) for g in rec["ids"]], rec
     def read_chunk(self, b, i, fh_cache, job=None):
         clen, off, ulen, h = self.entries(b, job)[i]
         fh = fh_cache.get(b)
@@ -463,9 +482,9 @@ def build_recmeta(source, snapshot_dbs, outdir, log=print):
     """Raw Hyper Backup <ver>.db files -> recmeta_set<s>.json: {rec_off: [size, tag16hex, tag_tail]}.
     tag = md5(concat of the 16-byte md5 of the file's first K chunks), tail = total ulen of those K chunks (K = min(n, 9))."""
     import sqlite3, mmap
-    vf = SlicedStream(source, "Config/virtual_file.index"); names = vf.names(); maps = {}
+    vf = SlicedStream(source, "Config/virtual_file.index"); names = vf.names(); maps = {}; fhs = []
     for k in sorted(names):
-        fh = open(vf.slice_path(k), "rb"); maps[k] = mmap.mmap(fh.fileno(), 0, access=mmap.ACCESS_READ)
+        fh = open(vf.slice_path(k), "rb"); fhs.append(fh); maps[k] = mmap.mmap(fh.fileno(), 0, access=mmap.ACCESS_READ)
     def entry(off):
         k, lo = divmod(off, SLICE); m = maps.get(k)
         if m is None: return None
@@ -489,6 +508,8 @@ def build_recmeta(source, snapshot_dbs, outdir, log=print):
                 if cur[1] is None and t16: cur[1] = t16; cur[2] = tail
             n += 1
         con.close()
-    for s in meta: json.dump(meta[s], open(os.path.join(outdir, f"recmeta_set{s}.json"), "w"))
+    for m in maps.values(): m.close()
+    for fh in fhs: fh.close()
+    for s in meta: dump_json(os.path.join(outdir, f"recmeta_set{s}.json"), meta[s])
     tagged = sum(1 for v in meta.values() for x in v.values() if x[1])
     log(f"record meta: {sum(len(v) for v in meta.values()):,} records ({tagged:,} with tag) from {n:,} rows")
