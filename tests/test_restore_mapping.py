@@ -57,6 +57,15 @@ class FakeBackup(hbk_explorer.Backup):
     pool = None                      # shadows the property; the real one needs a pool map
     def __init__(self, src, files):
         self.src = src; self.pool = FakePool(); self._files = files
+    def conn(self, share, ver):
+        """An in-memory 'files' table with the columns restore_count() reads, filled from self._files for that share."""
+        import sqlite3
+        c = sqlite3.connect(":memory:"); c.row_factory = sqlite3.Row
+        c.execute("create table files(path text, name text, dir text, size integer, mode integer, is_dir integer)")
+        for f in self._files:
+            if f["share"] != share: continue
+            c.execute("insert into files values(?,?,?,?,?,?)", (f["path"], f["path"].rsplit("/", 1)[-1], f["path"].rsplit("/", 1)[0] if "/" in f["path"] else "", f["size"], 0o100644, 0))
+        return c
     def restore_plan(self, items, skip_meta=True):
         out = []
         for idx, it in enumerate(items):
@@ -129,6 +138,21 @@ class MappedRestoreTests(_Fixture):
         self.assertEqual(res["restored"], 5)
         self.assertTrue(os.path.isfile(os.path.join(common, "B", "other", "v.txt")))         # one-folder layout keeps <share>/<path>
         self.assertTrue(os.path.isfile(os.path.join(self.dA, "x.txt")))
+
+
+class RestoreCountTests(_Fixture):
+    def test_counts_match_the_plan(self):                                  # H13: live "Selected: N files · size" without materialising rows
+        self.assertEqual(self.b.restore_count(self.items), {"files": 4, "bytes": 36})
+        self.assertEqual(self.b.restore_count([{"share": "B", "ver": 2333, "path": "", "is_dir": 1}]), {"files": 3, "bytes": 27})
+        self.assertEqual(self.b.restore_count([{"share": "B", "ver": 2333, "path": "docs/z.txt", "is_dir": 0}]), {"files": 1, "bytes": 9})
+        self.assertEqual(self.b.restore_count([]), {"files": 0, "bytes": 0})
+
+    def test_skip_meta_in_sql(self):
+        files = FILES + [{"share": "A", "path": "@eaDir/x.txt", "size": 5, "mtime": 0, "off": -9}, {"share": "A", "path": "a/@eaDir/SYNOPHOTO_THUMB.jpg", "size": 5, "mtime": 0, "off": -9},
+                         {"share": "A", "path": "doc.docx@SynoResource", "size": 5, "mtime": 0, "off": -9}, {"share": "A", "path": "sub/.DS_Store", "size": 5, "mtime": 0, "off": -9}]
+        b = FakeBackup(self.src, files); sel = [{"share": "A", "ver": 2333, "path": "", "is_dir": 1}]
+        self.assertEqual(b.restore_count(sel, skip_meta=True), {"files": 2, "bytes": 18})
+        self.assertEqual(b.restore_count(sel, skip_meta=False), {"files": 6, "bytes": 38})
 
 
 class RestoreApiTests(_Fixture):

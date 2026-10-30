@@ -9,7 +9,9 @@
    selected by default. Click the share chips to load snapshots (downloads a few MB each).
 4. Tabs: **Changes** (what that run added/changed), **File timeline**, **Browse folders**, **Search & flags** (suspicious files),
    **Compare versions**, **Restore wizard**.
-5. **Restore wizard**: pick the run → pick everything or folders (+ buttons) → build the pool map once (downloads ~200 KB per bucket;
+5. **Restore wizard**: pick the run → tick shared folders or subfolders in the tree (▸ opens a folder; untick a subfolder to leave it
+   out; the selected file count and size update as you go; folders and files can also be added with the + buttons under Folders or
+   Search) → build the pool map once (downloads ~200 KB per bucket;
    progress bar; Stop keeps index files already downloaded, and running it again continues) → choose where each selected folder
    goes: a table with one row per folder, defaulting to the NAS share with the same name (the folder’s contents land there directly,
    no version or source folder in between); pick another share or sub-folder per row, or choose “a mounted share / local path” as the
