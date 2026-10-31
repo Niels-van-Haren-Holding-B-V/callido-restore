@@ -16,6 +16,7 @@ Layout facts
   32-byte entries [u32 clen][u32 off][u32 ulen][md5 16][crc32 of first 28 bytes].
 """
 import struct, os, re, json, glob, hashlib, collections, bisect
+from callido_restore.sources import transfer
 def lz4_decompress_py(src, usize):
     """LZ4 block decode used when the lz4 package is not installed. `usize` is the caller's expected size; this fallback does not check it."""
     dst = bytearray(); i = 0; n = len(src)
@@ -226,7 +227,7 @@ def file_pool_chunks(path):
     return out
 
 # ----------------------------------------------------------------------------- offline analysis: record runs
-SLICE_WORKERS = 4
+SLICE_WORKERS = transfer.profile("index_slices").workers       # sources/transfer.py: one place for every transfer number
 
 def _fetch_slices(st, keys, sizes, total, s, report, cancelled):
     """Fetch a record set's slices SLICE_WORKERS at a time (the daemon keeps one connection, so parallel slices give several
