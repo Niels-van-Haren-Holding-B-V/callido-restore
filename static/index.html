@@ -265,7 +265,11 @@ const post=async(p,b)=>track(p,b,async()=>{const r=await fetch(p,{method:'POST',
 // its size and every block's checksum matched while reading (not a checksum of the whole file). "identical_copy": restored from an
 // identical copy's entries. "unverified": its place in the backup could not be confirmed. Shown only when the result has the counts.
 const CHECKED_HELP='Checked = the file’s place in the backup was confirmed by its size, and every block’s checksum matched while it was read. It is not a checksum of the whole file.';
-const plainReason=r=>({'placed without a size check':'Its location in the backup couldn’t be confirmed','partial copy':'Restored from a matching copy; not fully checked'})[r]||r||'Its location in the backup couldn’t be confirmed';
+// The reasons come from the restore job (callido_restore/restore); every known one gets plain words, an unknown one is shown as is.
+const REASONS={'placed without a size check':'Its location in the backup couldn’t be confirmed','partial copy':'Restored from a matching copy; not fully checked',
+  'reads chunks from a record that is placed without a size check':'Part of it comes from data whose location couldn’t be confirmed','located through the v1 map':'Found with the older, less precise map',
+  'the pool map gives no status':'The map has no check result for it'};
+const plainReason=r=>{if(!r)return 'Its location in the backup couldn’t be confirmed';if(REASONS[r])return REASONS[r];if(r.startsWith('status check failed:'))return 'The check itself failed: '+r.slice('status check failed:'.length).trim();return r};
 function verifyText(r){
   if(!r)return '';
   if(r.verified==null&&r.unverified==null&&r.identical_copy==null)return '';
