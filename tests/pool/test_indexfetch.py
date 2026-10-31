@@ -9,7 +9,7 @@ from pathlib import Path
 from unittest import mock
 
 import hbk_explorer
-import hbk_indexfetch as F
+from callido_restore.pool import indexfetch as F
 
 
 ONE_LINE = "2026/10/30 21:21:31 NOTICE:      1.055 MiB / 52.000 MiB, 2%, 500 KiB/s, ETA 1m43s (xfr#5/100, chk#12/2048)"
@@ -429,8 +429,8 @@ class BuildPoolWiringTests(unittest.TestCase):
             raise AssertionError("mapper ran")
         with mock.patch("hbk_pool.build_runs", lambda *_a, **_k: None), \
              mock.patch("hbk_pool.build_recsizes", lambda *_a, **_k: None), \
-             mock.patch("hbk_indexfetch.fetch_bucket_indexes", fetch), \
-             mock.patch("hbk_poolmap.build_poolmap", boom):
+             mock.patch("callido_restore.pool.indexfetch.fetch_bucket_indexes", fetch), \
+             mock.patch("callido_restore.pool.poolmap.build_poolmap", boom):
             job = {"cancel": False, "message": "", "progress": 0}
             result = self.backup.build_pool(job)
         self.assertTrue(result["stopped"])
@@ -456,9 +456,9 @@ class BuildPoolWiringTests(unittest.TestCase):
             raise AssertionError("mapper ran")
         with mock.patch("hbk_pool.build_runs", lambda *_a, **_k: None), \
              mock.patch("hbk_pool.build_recsizes", lambda *_a, **_k: None), \
-             mock.patch("hbk_indexfetch.run_rclone", run), \
-             mock.patch("hbk_indexfetch.time.sleep", lambda *_a, **_k: None), \
-             mock.patch("hbk_poolmap.build_poolmap", boom):
+             mock.patch("callido_restore.pool.indexfetch.run_rclone", run), \
+             mock.patch("callido_restore.pool.indexfetch.time.sleep", lambda *_a, **_k: None), \
+             mock.patch("callido_restore.pool.poolmap.build_poolmap", boom):
             with self.assertRaises(RuntimeError) as cm:
                 self.backup.build_pool({"cancel": False, "message": "", "progress": 0})
         self.assertIn("mapping was not started", str(cm.exception))
@@ -497,8 +497,8 @@ class BuildPoolWiringTests(unittest.TestCase):
             raise AssertionError("mapper ran")
         with mock.patch("hbk_pool.build_runs", lambda *_a, **_k: None), \
              mock.patch("hbk_pool.build_recsizes", lambda *_a, **_k: None), \
-             mock.patch("hbk_indexfetch.fetch_bucket_indexes", fetch), \
-             mock.patch("hbk_poolmap.build_poolmap", boom):
+             mock.patch("callido_restore.pool.indexfetch.fetch_bucket_indexes", fetch), \
+             mock.patch("callido_restore.pool.poolmap.build_poolmap", boom):
             with self.assertRaises(RuntimeError) as cm:
                 self.backup.build_pool({"cancel": False, "message": "", "progress": 0})
         self.assertIn("Pool/0/3", str(cm.exception))
