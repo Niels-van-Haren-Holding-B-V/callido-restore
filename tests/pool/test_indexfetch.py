@@ -433,6 +433,7 @@ class BuildPoolWiringTests(unittest.TestCase):
             raise AssertionError("mapper ran")
         with mock.patch("callido_restore.core.pool.build_runs", lambda *_a, **_k: None), \
              mock.patch("callido_restore.core.pool.build_recsizes", lambda *_a, **_k: None), \
+             mock.patch("callido_restore.core.pool.build_recmeta", lambda *_a, **_k: 0), \
              mock.patch("callido_restore.pool.indexfetch.fetch_bucket_indexes", fetch), \
              mock.patch("callido_restore.pool.poolmap.build_poolmap", boom):
             job = {"cancel": False, "message": "", "progress": 0}
@@ -483,6 +484,7 @@ class BuildPoolWiringTests(unittest.TestCase):
             raise AssertionError("mapper ran")
         with mock.patch("callido_restore.core.pool.build_runs", lambda *_a, **_k: None), \
              mock.patch("callido_restore.core.pool.build_recsizes", lambda *_a, **_k: None), \
+             mock.patch("callido_restore.core.pool.build_recmeta", lambda *_a, **_k: 0), \
              mock.patch("callido_restore.pool.indexfetch.run_rclone", run), \
              mock.patch("callido_restore.pool.indexfetch.time.sleep", lambda *_a, **_k: None), \
              mock.patch("callido_restore.pool.poolmap.build_poolmap", boom):
@@ -524,6 +526,7 @@ class BuildPoolWiringTests(unittest.TestCase):
             raise AssertionError("mapper ran")
         with mock.patch("callido_restore.core.pool.build_runs", lambda *_a, **_k: None), \
              mock.patch("callido_restore.core.pool.build_recsizes", lambda *_a, **_k: None), \
+             mock.patch("callido_restore.core.pool.build_recmeta", lambda *_a, **_k: 0), \
              mock.patch("callido_restore.pool.indexfetch.fetch_bucket_indexes", fetch), \
              mock.patch("callido_restore.pool.poolmap.build_poolmap", boom):
             with self.assertRaises(RuntimeError) as cm:
