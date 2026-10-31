@@ -2,8 +2,8 @@
 (1.3-5 s per Google Drive listing); a persistent ``rclone rcd`` daemon answers the same listing in 0.3 s. ``start()`` launches the
 daemon on a random 127.0.0.1 port with random credentials (no remote access, no other local process can drive it); every helper
 here uses it when it runs and otherwise falls back to the same ``rclone`` command line as before, so tests that mock
-``subprocess.run`` and a machine where the daemon fails to start keep working. Copies and config changes still run as separate
-rclone processes; the daemon shares the config file with them."""
+``subprocess.run`` and a machine where the daemon fails to start keep working. Downloads go through the daemon too (``copyfile``,
+an async job polled for bytes and speed); config changes still run as separate rclone processes, which share the config file."""
 import base64, json, os, secrets, socket, subprocess, threading, time, urllib.error, urllib.request
 from callido_restore import paths
 from callido_restore.paths import RCLONE
@@ -15,6 +15,16 @@ class RcloneError(RuntimeError):
 
 class DaemonGone(RcloneError):
     """The daemon is not running or stopped answering; helpers fall back to a plain rclone process."""
+
+
+class Cancelled(RcloneError):
+    """``copyfile`` was stopped through its ``cancelled()`` callback; the partial file may remain."""
+
+
+# Throttling for Google Drive (and harmless elsewhere), the same for the daemon and the one-process fallback: the daemon runs up to
+# four slice downloads at once (``core.pool.SLICE_WORKERS``), and without a transactions-per-second cap Drive answers with 403
+# userRateLimitExceeded; the pacer sleep and the low-level retries let rclone ride out the limits it still hits.
+THROTTLE = ["--tpslimit", "8", "--drive-pacer-min-sleep", "100ms", "--low-level-retries", "20"]
 
 
 class _Daemon:
@@ -39,7 +49,7 @@ class _Daemon:
             user, pw = secrets.token_hex(8), secrets.token_hex(16)
             try:
                 self.proc = subprocess.Popen([RCLONE, "rcd", "--rc-addr", f"127.0.0.1:{port}", "--rc-user", user, "--rc-pass", pw,
-                                              "--rc-serve=false", "--rc-web-gui=false", "--log-level", "ERROR"],
+                                              "--rc-serve=false", "--rc-web-gui=false", "--log-level", "ERROR", *THROTTLE],
                                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL)
             except OSError as e:
                 self.failed = str(e); self.proc = None; return False
@@ -229,15 +239,14 @@ RATE_LIMIT_WORDS = ("rateLimitExceeded", "userRateLimitExceeded", "429", "quota"
 
 def _fallback_copy(src, dst, timeout=None):
     """One ``rclone copyto`` process (the pre-daemon way): throttled, retried by rclone itself."""
-    _run(["copyto", src, str(dst), "--retries", "5", "--low-level-retries", "20", "--retries-sleep", "5s", "--tpslimit", "8",
-          "--drive-pacer-min-sleep", "100ms"], timeout=timeout)
+    _run(["copyto", src, str(dst), "--retries", "5", "--retries-sleep", "5s", *THROTTLE], timeout=timeout)
 
 
 def copyfile(src, dst, progress=None, cancelled=None, poll=0.5, timeout=None):
     """Download one remote file ``src`` ("remote:path/file") to the local path ``dst`` through the daemon when it runs
     (``operations/copyfile`` as an async job; ``core/stats`` of its group gives bytes, speed and rclone's retry state, reported
     through ``progress(bytes_done, speed_bytes_per_s, note)`` where note is '' or 'rate-limited, retrying'), otherwise as one
-    rclone process. ``cancelled()`` true stops the job. Raises RcloneError when rclone fails."""
+    rclone process. ``cancelled()`` true stops the job and raises Cancelled. Raises RcloneError when rclone fails."""
     dst = str(dst)
     if not DAEMON.available():
         return _fallback_copy(src, dst, timeout)
@@ -250,7 +259,7 @@ def copyfile(src, dst, progress=None, cancelled=None, poll=0.5, timeout=None):
     except DaemonGone:
         return _fallback_copy(src, dst, timeout)
     jobid = started.get("jobid")
-    t0 = time.time(); last_note = ""
+    t0 = time.time()
     try:
         while True:
             try: st = DAEMON.rc("job/status", jobid=jobid)
@@ -262,7 +271,7 @@ def copyfile(src, dst, progress=None, cancelled=None, poll=0.5, timeout=None):
             if cancelled is not None and cancelled():
                 try: DAEMON.rc("job/stop", jobid=jobid)
                 except RcloneError: pass
-                raise RcloneError("cancelled")
+                raise Cancelled("cancelled")
             if timeout and time.time() - t0 > timeout:
                 try: DAEMON.rc("job/stop", jobid=jobid)
                 except RcloneError: pass
@@ -270,11 +279,11 @@ def copyfile(src, dst, progress=None, cancelled=None, poll=0.5, timeout=None):
             if progress is not None:
                 try: stats = DAEMON.rc("core/stats", group=group)
                 except RcloneError: stats = {}
-                done = sum(int(t.get("bytes") or 0) for t in (stats.get("transferring") or [])) + int(stats.get("bytes") or 0)
+                done = int(stats.get("bytes") or 0)              # counts the in-flight bytes already; transferring[].bytes would double them
                 speed = float(stats.get("speed") or 0.0)
                 err = str(stats.get("lastError") or "")
                 note = "rate-limited, retrying" if (stats.get("retryError") or any(w in err for w in RATE_LIMIT_WORDS)) and err else ""
-                progress(done, speed, note); last_note = note
+                progress(done, speed, note)
             time.sleep(poll)
     finally:
         try: DAEMON.rc("core/stats-delete", group=group)

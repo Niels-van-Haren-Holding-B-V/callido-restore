@@ -123,6 +123,10 @@ and sends listings through its RC API (`ls`, `remotes`, `version`): 0.3 s instea
 fallback when the daemon is not running (tests, failed start). 30 s listing cache for UI renders (`cache=True`, `forget()` after a new
 connection). Copies, config changes and the index fetch still run as separate rclone processes; moving them to the daemon
 (`operations/copyfile` with `_async` + `job/status` for progress) is the next step.
+DONE (hbk-2, #79): downloads through the daemon (`copyfile`), four record-set slices at a time with live bytes. Follow-up from the
+triage note of 2026-10-31 09:17 (hbk-2, claimed 09:35): the daemon gets the same Drive throttling as the one-process fallback
+(`--tpslimit 8 --drive-pacer-min-sleep 100ms --low-level-retries 20`, `rclone.THROTTLE`), progress counts rclone's group bytes once
+(they already include the in-flight bytes), `rclone.Cancelled` instead of a string compare, tests.
 
 ## v0.2.0 — first-run fixes and UI responsiveness (Niels's DMG test, 2026-10-31)
 DONE: #59 (hbk-3: Google sign-in guidance, throttle-proof job waits, one-click pick of the detected backup, open-backup job with

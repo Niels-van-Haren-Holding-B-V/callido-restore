@@ -214,11 +214,11 @@ class Source:
                 try:
                     rclone.copyfile(f"{remote}/{rel}", tmp, progress=progress, cancelled=cancelled)
                     ok = tmp.is_file()
+                except rclone.Cancelled:
+                    if tmp.exists(): tmp.unlink()
+                    raise RuntimeError(f"fetch of {rel} cancelled")
                 except rclone.RcloneError as e:
                     ok = False; errs.append(f"{remote}: {str(e)[-160:]}")
-                    if str(e) == "cancelled":
-                        if tmp.exists(): tmp.unlink()
-                        raise RuntimeError(f"fetch of {rel} cancelled")
                 if ok:
                     tmp.rename(dest)
                     parent = str(Path(rel).parent).strip("/")
