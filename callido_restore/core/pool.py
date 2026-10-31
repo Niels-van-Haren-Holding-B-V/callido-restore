@@ -17,6 +17,9 @@ Layout facts
 """
 import struct, os, re, json, glob, hashlib, collections, bisect
 from callido_restore.sources import transfer
+def _read(path):
+    with open(path, "rb") as f: return f.read()
+
 def lz4_decompress_py(src, usize):
     """LZ4 block decode used when the lz4 package is not installed. `usize` is the caller's expected size; this fallback does not check it."""
     dst = bytearray(); i = 0; n = len(src)
@@ -126,7 +129,7 @@ def parse_record_stream(path_iter, on_record, cancelled=None, progress=None):
     """Sequentially parse a set's slices (list of local paths in order); calls on_record(stream_off, ids).
     ``cancelled``: optional callable checked every few thousand records; raises Cancelled when it returns true.
     ``progress``: optional callable given the fraction of bytes parsed, every few thousand records."""
-    data = b"".join(open(p, "rb").read() for p in path_iter)
+    data = b"".join(_read(p) for p in path_iter)
     n = len(data); p = 64; seen = 0
     while p + 8 <= n:
         seen += 1
@@ -177,7 +180,7 @@ class PoolMap:
         return b, j - jstart
 
 def bucket_index_entries(path):
-    d = open(path, "rb").read()
+    d = _read(path)
     return [struct.unpack_from(">III", d, p) + (d[p + 12:p + 28],) for p in range(64, len(d) - 31, 32)]
 
 def tag_parts(tag):
@@ -220,7 +223,7 @@ def find_file_start(entries_by_bucket, tag16_hex, tail):
     return next(iter_file_starts(entries_by_bucket, tag16_hex, tail), None)
 
 def file_pool_chunks(path):
-    d = open(path, "rb").read(); p = 0x140; out = []
+    d = _read(path); p = 0x140; out = []
     while p + 12 <= len(d):
         mg, clen, ulen, z = struct.unpack_from(">HIIH", d, p)
         if mg != 0xe5bb: raise ValueError(f"file_pool chunk magic {mg:#x} at {p}")
