@@ -108,11 +108,11 @@ class H(BaseHTTPRequestHandler):
             if u.path == "/api/rclone/ls":      # browse a remote (or local path when remote == "")
                 rem, path = q.get("remote", ""), q.get("path", "")
                 if rem:
-                    r = subprocess.run([RCLONE, "lsjson", "--no-mimetype", "--dirs-only", rem + path], capture_output=True, text=True)
+                    # one rclone call per click (a Drive listing takes about a second); folders and files are split on IsDir here
+                    r = subprocess.run([RCLONE, "lsjson", "--no-mimetype", "--max-depth", "1", rem + path], capture_output=True, text=True)
                     if r.returncode != 0: return self._json({"error": r.stderr.strip()[-300:]})
-                    dirs = sorted(e["Name"] for e in json.loads(r.stdout or "[]"))
-                    r2 = subprocess.run([RCLONE, "lsjson", "--no-mimetype", "--files-only", "--max-depth", "1", rem + path], capture_output=True, text=True)
-                    files = sorted(e["Name"] for e in json.loads(r2.stdout or "[]")) if r2.returncode == 0 else []
+                    ents = json.loads(r.stdout or "[]")
+                    dirs = sorted(e["Name"] for e in ents if e.get("IsDir")); files = sorted(e["Name"] for e in ents if not e.get("IsDir"))
                 else:
                     pp = Path(os.path.expanduser(path or "~"))
                     try: dirs = sorted(e.name for e in pp.iterdir() if e.is_dir() and not e.name.startswith(".")); files = sorted(e.name for e in pp.iterdir() if e.is_file())[:50]

@@ -482,7 +482,8 @@ async function tabRestore(){const el=$('#tab-restore');
       $(`.mapSub[data-i="${i}"]`).value=m.sub||'';$(`.mapPath[data-i="${i}"]`).value=m.path||''});updRows()};
   const onEdit=()=>updRows(true);$$('.mapShare,.mapSub,.mapPath').forEach(e=>{e.onchange=onEdit;e.oninput=onEdit});
   $('#wzOne').checked=!!MAP._one;$('#wzOnePath').value=MAP._onePath||'';$('#wzOne').onchange=onEdit;$('#wzOnePath').oninput=onEdit;
-  const loadShares=async()=>{SHARES=[];if(rem()){try{const d=await api('/api/remotes',{remote:rem()});SHARES=d.dirs}catch(e){}}fillRows()};
+  const loadShares=async()=>{SHARES=[];if(rem()){$('#wzRemHelp').innerHTML='<span class="spin"></span> Listing the shares…';$('#wzRem').disabled=true;$$('.mapShare').forEach(s=>s.disabled=true);
+      try{const d=await api('/api/remotes',{remote:rem()});SHARES=d.dirs}catch(e){}finally{$('#wzRem').disabled=false;$$('.mapShare').forEach(s=>s.disabled=false)}}fillRows()};
   updRows();
   try{const r=await api('/api/remotes');const srcRems=((S.info&&S.info.source&&S.info.source.remotes)||[]).map(x=>x.split(':')[0]+':');
     // default connection: a NAS-style remote (SMB, SFTP, WebDAV, FTP) first, then any remote that is not the backup's own, then the first one
@@ -492,7 +493,9 @@ async function tabRestore(){const el=$('#tab-restore');
     $('#wzRem').onchange=()=>{MAP._rem=rem();saveMap();loadShares()};await loadShares()}catch(e){$('#wzRem').innerHTML='<option value="">a mounted share / local path</option>';fillRows()}
   const setCls=(el,c)=>{el.classList.remove('bad','ok');if(c)el.classList.add(c)};
   const showCheck=(st,r)=>{st.textContent=r.inside_source?`✗ ${r.conflict||r.dest} is the backup itself, a folder inside it, or the folder around it`:r.error?'? '+r.error:!r.exists?'✓ new folder, it will be created':r.empty?'✓ empty folder':`! already has ${r.files} entries: files already there are skipped, nothing is deleted`;setCls(st,r.inside_source||r.error?'bad':'ok');return!(r.inside_source||r.error)};
-  const checkAll=async()=>{const out=$('#wzCheckOut');out.textContent='checking…';setCls(out,'');let bad=false,nonEmpty=0;
+  const checkAll=async()=>{const out=$('#wzCheckOut');if(out.dataset.busy)return{bad:true,nonEmpty:0};out.dataset.busy='1';$('#wzCheck').disabled=true;out.innerHTML='<span class="spin"></span> Checking the targets…';setCls(out,'');let bad=false,nonEmpty=0;
+    try{return await checkAllInner(out,bad,nonEmpty)}finally{delete out.dataset.busy;$('#wzCheck').disabled=false}};
+  const checkAllInner=async(out,bad,nonEmpty)=>{
     if(oneMode()){const d=oneDest();if(!d){out.textContent='Enter the folder under Advanced, or untick it.';setCls(out,'bad');return{bad:true,nonEmpty}}
       try{const r=await api('/api/dest/check',{src:S.src,dest:d,shares:JSON.stringify([...new Set(S.basket.map(b=>b.share))])});if(!showCheck(out,r))bad=true;if(r.exists&&r.empty===false)nonEmpty++}catch(e){out.textContent='? '+e.message;bad=true}}
     else for(let i=0;i<ROWS.length;i++){const d=rowDest(i);const st=$(`.mapStat[data-i="${i}"]`);if(!d){st.textContent='choose a target';setCls(st,'bad');bad=true;continue}
@@ -562,7 +565,9 @@ $('#addSrc').onclick=async()=>{WS.step=1;wsShow();$('#dlgSrc').showModal();try{c
 $$('input[name=wsk]').forEach(r=>r.onchange=()=>{WS.kind=r.value;$('#wsDrive').style.display=WS.kind==='drive'?'':'none';$('#wsSmb').style.display=WS.kind==='smb'?'':'none'});
 $('#nCancel').onclick=()=>{$('#wsNext').disabled=false;$('#dlgSrc').close()};$('#wsBack').onclick=()=>{$('#wsNext').disabled=false;WS.step--;wsShow()};
 const wsInto=d=>(WS.remote?(WS.path?WS.path.replace(/\/$/,'')+'/':''):(WS.path.replace(/\/$/,'')+'/'))+d;   // child folder d of the current path
-async function wsList(){const r=await api('/api/rclone/ls',{remote:WS.remote,path:WS.path});if(r.error){$('#wsList').innerHTML=`<p style="color:var(--bad)">${esc(r.error)}</p>`;return}
+async function wsList(){if(WS.busy)return;WS.busy=true;const lst=$('#wsList');lst.style.opacity='.45';lst.style.pointerEvents='none';$('#wsHint').innerHTML='<span class="spin"></span> Listing…';
+  let r;try{r=await api('/api/rclone/ls',{remote:WS.remote,path:WS.path})}catch(e){r={error:e.message}}finally{WS.busy=false;lst.style.opacity='';lst.style.pointerEvents=''}
+  if(r.error){$('#wsList').innerHTML=`<p style="color:var(--bad)">${esc(r.error)}</p>`;$('#wsHint').textContent='';return}
   WS.path=r.path;$('#wsPath').value=WS.path;$('#wsPathShow').textContent=(WS.remote||'')+WS.path;
   // Backups found in this folder get a one-click pick; the folder list below stays for navigating elsewhere.
   const found=r.looks_like_hbk?'':(r.hbk_dirs.length?`<div class="row" style="margin:0 0 8px;flex-wrap:wrap"><b>Backups found here:</b>${r.hbk_dirs.map(d=>`<button class="small primary wsPick" data-d="${esc(d)}">Use ${esc(d)}</button>`).join('')}</div>`:'');
@@ -570,7 +575,7 @@ async function wsList(){const r=await api('/api/rclone/ls',{remote:WS.remote,pat
   $$('.wsd').forEach(tr=>tr.onclick=()=>{WS.path=wsInto(tr.dataset.d);if(tr.dataset.d.endsWith('.hbk'))$('#wsNext').click();else wsList()});   // a backup row selects it and goes on
   $$('.wsPick').forEach(b=>b.onclick=()=>{WS.path=wsInto(b.dataset.d);$('#wsNext').click()});
   $('#wsHint').innerHTML=r.looks_like_hbk?'<b style="color:var(--ok)">This folder is a Hyper Backup (it has Config and Pool). Click Next.</b>':(r.hbk_dirs.length?'Click a backup above, or open a folder to look elsewhere.':'No Hyper Backup here: open the folder whose name ends in <code>.hbk</code> (it holds <code>Config</code> and <code>Pool</code>), or go up.')}
-$('#wsUp').onclick=()=>{const p=WS.path.replace(/\/$/,'');WS.path=p.includes('/')?p.slice(0,p.lastIndexOf('/')):(WS.remote?'':'/');wsList()};$('#wsGoPath').onclick=()=>{WS.path=$('#wsPath').value;wsList()};
+$('#wsUp').onclick=()=>{if(WS.busy)return;const p=WS.path.replace(/\/$/,'');WS.path=p.includes('/')?p.slice(0,p.lastIndexOf('/')):(WS.remote?'':'/');wsList()};$('#wsGoPath').onclick=()=>{if(WS.busy)return;WS.path=$('#wsPath').value;wsList()};
 $('#wsNext').onclick=async()=>{
   if(WS.step===1){const k=WS.kind;
     if(k==='existing'){WS.remote=$('#wsRem').value;if(!WS.remote){alert('No remote selected');return}WS.path=''}
@@ -585,7 +590,9 @@ $('#wsNext').onclick=async()=>{
         $('#wsConn').textContent='Connected: '+WS.remote+' — now pick the backup folder on it.'}catch(e){$('#wsConn').textContent=e.message;$('#wsNext').disabled=false;return}
       $('#wsNext').disabled=false}
     WS.step=2;wsShow();wsList();return}
-  if(WS.step===2){let r=await api('/api/rclone/ls',{remote:WS.remote,path:WS.path});
+  if(WS.step===2){if(WS.busy)return;$('#wsBusy').style.display='inline-flex';$('#wsBusyText').textContent='Checking the folder…';$('#wsNext').disabled=true;
+    let r;try{r=await api('/api/rclone/ls',{remote:WS.remote,path:WS.path})}catch(e){r={error:e.message}}finally{$('#wsBusy').style.display='none';$('#wsNext').disabled=false}
+    if(r.error){alert(r.error);return}
     // Standing in the folder above the backup: one backup found means that is the one; several means pick one first.
     if(!r.looks_like_hbk&&r.hbk_dirs.length===1){WS.path=wsInto(r.hbk_dirs[0]);r=await api('/api/rclone/ls',{remote:WS.remote,path:WS.path});if(r.error){alert(r.error);return}}
     else if(!r.looks_like_hbk&&r.hbk_dirs.length>1){await wsList();$('#wsHint').innerHTML='<b>Several backups found here: click the one to use.</b>';return}
