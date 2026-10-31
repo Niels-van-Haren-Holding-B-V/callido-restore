@@ -596,7 +596,7 @@ class Backup:
             for i, f in enumerate(files):
                 if i < start_at: done_bytes += f["size"]; continue
                 if job.get("cancel"):
-                    job["message"] = "paused"; persist("paused"); return result(paused=True, next_index=i, bytes=done_bytes)
+                    job["next_index"] = i; job["message"] = "paused"; persist("paused"); return result(paused=True, next_index=i, bytes=done_bytes)   # the file resumes where the result says
                 if i % 10 == 0:
                     for bk in [k for k, fut in pending.items() if fut.done()]: pending.pop(bk)
                     prefetch_from(i); evict()

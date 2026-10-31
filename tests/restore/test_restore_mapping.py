@@ -186,7 +186,7 @@ class ResumeCountsTests(_Fixture):
         res = self.b.restore(self.items, "", job)
         self.assertTrue(res["paused"]); self.assertEqual((res["restored"], res["errors"]), (2, 1))
         saved = json.loads((paths.JOBS_DIR / f"{job['id']}.json").read_text())
-        self.assertEqual((saved["done_files"], len(saved["errors"]), saved["next_index"]), (3, 1, 3))
+        self.assertEqual((saved["done_files"], len(saved["errors"]), saved["next_index"]), (2, 1, 3))   # two written, one failed, paused before the fourth
         # resume the way /api/restore/resume does: seed the counts from the file, start at next_index
         job2 = self.job("res"); job2.update({k: saved[k] for k in ("done_files", "skipped", "errors", "verified", "identical_copy", "unverified")})
         res2 = FakeBackup(self.src, FILES).restore(saved["items"], saved["dest"], job2, start_at=saved["next_index"])

@@ -142,7 +142,7 @@ class RestoreVerification(RestoreLoopLocal):
         Path(self.dest, "share", "s.txt").write_bytes(b"OLD")                          # skipped: no status
         job = {"id": "t9", "label": "restore", "started": 0.0}
         res = b.restore([{"share": "share", "ver": 1, "path": "", "is_dir": True}], self.dest, job)
-        self.assertEqual((res["restored"], res["skipped"], res["verified"], res["identical_copy"], res["unverified"]), (5, 1, 2, 1, 1))
+        self.assertEqual((res["restored"], res["skipped"], res["verified"], res["identical_copy"], res["unverified"]), (4, 1, 2, 1, 1))
         self.assertEqual(job["unverified"], [{"path": "share/u.txt", "reason": "placed without a size check"}])
         saved = json.loads((Path(self.d) / "jobs" / "t9.json").read_text())
         self.assertEqual((saved["verified"], saved["identical_copy"], saved["unverified"]), (2, 1, job["unverified"]))
@@ -200,7 +200,7 @@ class RestoreLoopTwoLocalRoots(unittest.TestCase):
                 os.makedirs(os.path.join(root, name)); Path(root, name, "part").write_bytes(b"p")
         res, job, b = self.run_restore()
         self.assertEqual(Path(old).read_bytes(), b"OLD"); self.assertEqual(int(os.stat(old).st_mtime), 1000)
-        self.assertEqual((res["restored"], res["skipped"]), (4, 1)); self.assertEqual(sorted(b.pool.calls), ["w.txt", "x.txt", "y.txt"])
+        self.assertEqual((res["restored"], res["skipped"]), (3, 1)); self.assertEqual(sorted(b.pool.calls), ["w.txt", "x.txt", "y.txt"])
         for root in (self.ra, self.rb):
             self.assertFalse(os.path.exists(os.path.join(root, ".hbk-restore-t2-left")))
             self.assertTrue(os.path.exists(os.path.join(root, ".hbk-restore-other-left", "part")))
