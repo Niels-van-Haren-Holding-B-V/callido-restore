@@ -252,7 +252,7 @@ $('#aboutClose').onclick=()=>$('#dlgAbout').close();
 $('#quit').onclick=async()=>{if(!confirm('Stop Callido Restore? Running restore jobs are saved and can be resumed later.'))return;try{await api('/api/quit')}catch(e){}document.body.innerHTML='<p style="padding:30px;font-family:sans-serif">Callido Restore has stopped. You can close this tab.</p>'};
 const dd=t=>t?new Date(t*1000).toISOString().slice(0,10):'';
 // ---------- flow bar (1 backup → 2 run → 3 files → 4 restore)
-function renderFlow(bump){const cur=!S.info?1:!S.ver?2:S.tab==='restore'?4:3;
+function renderFlow(bump){const cur=!S.info?1:!S.ver?2:S.tab==='restore'?4:3;if(bump)document.dispatchEvent(new Event('basketchange'));
   $$('#flow li').forEach(li=>{const n=+li.dataset.s;li.classList.toggle('done',n<cur||(n===3&&S.basket.length>0&&cur>=3));li.classList.toggle('on',n===cur)});
   if(typeof renderBasketBtn==='function'){renderBasketBtn(bump);if(bump)renderBasketPanel()}}
 $$('#flow li').forEach(li=>li.onclick=()=>{const n=+li.dataset.s;if(n===1)$('#overview').scrollIntoView({behavior:'smooth'});else if(n===2)$('#versions').scrollIntoView({behavior:'smooth'});else if(S.ver){showTab(n===4?'restore':'browse');$('#snap').scrollIntoView({behavior:'smooth'})}else $('#versions').scrollIntoView({behavior:'smooth'})});
@@ -366,10 +366,20 @@ function table(rows,opts={}){if(!rows.length)return '<p class="muted" style="pad
     case 'mtime':case 'ctime':case 'old_mtime':return `<td class="num">${dt(r[c])}</td>`;
     case 'mode':return `<td class="mono">${octal(r.mode)}${r.is_exec?' <span class="flag exec">x</span>':''}</td>`;
     case 'flags':return `<td>${flagsHtml(r.flags,r.status)}</td>`;
-    default:return `<td>${esc(r[c])}</td>`}}).join('')}${opts.basket?`<td><button class="small bk" data-i="${i}" title="Add to the restore list" aria-label="Add to the restore list">+</button></td>`:''}</tr>`});
+    default:return `<td>${esc(r[c])}</td>`}}).join('')}${opts.basket?`<td><button class="small bk" data-i="${i}">+</button></td>`:''}</tr>`});
   return h+'</tbody></table></div>'}
+// The "+" buttons are toggles that show the state: "+" (not selected), "✓ In restore" (this folder or file is in the selection,
+// click removes it), "✓ Included" (a parent folder is selected: untick it in the Restore tab tree) or "+ partly" (something below it is).
+function bkState(r){const items=S.basket.filter(b=>b.share===r.share);const p=r.path||'';
+  if(items.some(b=>b.path===p))return 'exact';if(items.some(b=>b.path===''||p.startsWith(b.path+'/')))return 'parent';if(r.is_dir&&items.some(b=>p===''||b.path.startsWith(p+'/')))return 'partial';return 'off'}
+function paintBk(b,r){const st=bkState(r);b.classList.toggle('primary',st==='exact');b.classList.toggle('ghost',st==='parent');
+  b.textContent=st==='exact'?'✓ In restore':st==='parent'?'✓ Included':st==='partial'?'+ partly':'+';
+  b.title=st==='exact'?'In the restore selection. Click to remove it.':st==='parent'?'Included through a selected parent folder. To leave it out, untick it in the tree under Restore.':st==='partial'?'Some of its subfolders are selected. Click to select the whole folder.':'Add to the restore selection'}
 function bindTable(root,rows,opts={}){root.querySelectorAll('tr.f').forEach(tr=>tr.onclick=e=>{if(e.target.classList.contains('bk'))return;const r=rows[+tr.dataset.i];if(opts.onRow)opts.onRow(r);else if(r.id)openDetail(r.share,r.ver||S.ver,r.id)});
-  root.querySelectorAll('.bk').forEach(b=>b.onclick=()=>addBasket(rows[+b.dataset.i]));}
+  const paintAll=()=>root.querySelectorAll('.bk').forEach(b=>paintBk(b,rows[+b.dataset.i]));paintAll();
+  root.querySelectorAll('.bk').forEach(b=>b.onclick=()=>{const r=rows[+b.dataset.i];const st=bkState(r);
+    if(st==='exact')removeBasket(r);else if(st==='parent')toast('This is included through a selected parent folder. To leave it out, untick it in the tree under Restore.',{kind:'warn',actions:[['Open Restore',()=>showTab('restore')]]});else addBasket(r);paintAll()});
+  if(!root._bkWatch){root._bkWatch=true;document.addEventListener('basketchange',paintAll)}}
 
 // ---------- tabs
 async function tabChanges(){const el=$('#tab-changes');if(needLoad(el))return;el.innerHTML='<p class="muted">Loading…</p>';
@@ -409,12 +419,15 @@ async function tabTimeline(){const el=$('#tab-timeline');if(needLoad(el))return;
 let BR={share:null,dir:''};
 async function tabBrowse(){const el=$('#tab-browse');if(needLoad(el))return;const shares=indexedShares();if(!shares.includes(BR.share)){BR.share=shares[0];BR.dir=''}
   el.innerHTML=`<div class="row" style="margin-bottom:8px"><label>Share <select id="brShare">${shares.map(s=>`<option value="${esc(s)}" ${s===BR.share?'selected':''}>${esc(shareLabel(s))}</option>`).join('')}</select></label><span class="crumbs" id="crumbs"></span><span style="flex:1"></span><button class="small" id="brBasket">+ Restore this folder</button></div><div id="brTable"></div>`;
-  $('#brShare').onchange=e=>{BR.share=e.target.value;BR.dir='';tabBrowse()};$('#brBasket').onclick=()=>addBasket({share:BR.share,path:BR.dir,is_dir:1,name:BR.dir.split('/').pop()||'(share root)'});
+  $('#brShare').onchange=e=>{BR.share=e.target.value;BR.dir='';tabBrowse()};const brItem=()=>({share:BR.share,path:BR.dir,is_dir:1,name:BR.dir.split('/').pop()||'(share root)'});
+  const paintBr=()=>{const b=$('#brBasket');if(!b)return;const st=bkState(brItem());b.classList.toggle('primary',st==='exact');b.textContent=st==='exact'?'✓ This folder is in the restore (click to remove)':st==='parent'?'✓ Included through a parent folder':st==='partial'?'+ Restore this whole folder (parts are selected)':'+ Restore this folder';b.title=st==='parent'?'To leave it out, untick it in the tree under Restore.':''};paintBr();
+  $('#brBasket').onclick=()=>{const it=brItem();const st=bkState(it);if(st==='exact')removeBasket(it);else if(st==='parent')toast('Included through a selected parent folder. To leave it out, untick it in the tree under Restore.',{kind:'warn',actions:[['Open Restore',()=>showTab('restore')]]});else addBasket(it);paintBr()};
+  if(!window._brWatch){window._brWatch=true;document.addEventListener('basketchange',()=>{if(S.tab==='browse')paintBr()})}
   const parts=BR.dir?BR.dir.split('/'):[];let c=`<a data-p="">${esc(BR.share)}</a>`;parts.forEach((p,i)=>c+=`<span>/</span><a data-p="${esc(parts.slice(0,i+1).join('/'))}">${esc(p)}</a>`);$('#crumbs').innerHTML=c;
   $$('#crumbs a').forEach(a=>a.onclick=()=>{BR.dir=a.dataset.p;tabBrowse()});
   const rows=await api('/api/children',{src:S.src,share:BR.share,ver:S.ver,dir:BR.dir});
   rows.forEach(r=>r.ver=S.ver);
-  $('#brTable').innerHTML=table(rows.map(r=>({...r,path:r.name})),{cols:['path','size','mtime','ctime','mode','flags'],basket:true});
+  $('#brTable').innerHTML=table(rows.map(r=>({...r,path:r.name})),{cols:['path','size','mtime','ctime','mode','flags'],basket:true});   // bindTable gets the real rows (full paths) for the toggles
   bindTable($('#brTable'),rows,{onRow:r=>{if(r.is_dir){BR.dir=r.path;tabBrowse()}else openDetail(r.share,S.ver,r.id)}});}
 
 const FLAGS=[['exec','executable without any extension'],['script','script / binary extension'],['hidden','dotfile'],['ransom','ransomware name'],['ssh','ssh keys'],['sensitive','shell history / system files'],['timestomp','mtime newer than ctime'],['double-ext','document.ext.exe'],['symlink','symlink'],['future','mtime in the future'],['changed','changed in this version']];
