@@ -446,12 +446,23 @@ class PoolReader:
             st["indexes_local"] = n; st["index_bytes_local"] = have
         return st
     def bucket_name(self, b, kind):
+        """Pool/0/<d>/<b % 2048>.<kind>.<rev> with the newest revision. From pool/listing.json when the preparation wrote one;
+        a bucket it does not know (no preparation: the chunk table needs none, or a stale listing) is looked up by listing
+        its directory once (Source.listdir: local roots, the app cache and the remote)."""
         if self.names is None:
-            listing = os.path.join(self.pool_dir, "listing.json")
-            self.names = {}
-            for e in load_json(listing):
-                k = (e["b"], e["t"])
-                if k not in self.names or e["rev"] > self.names[k][1]: self.names[k] = (e["name"], e["rev"])
+            listing = os.path.join(self.pool_dir, "listing.json"); self.names = {}; self._listed = set()
+            if os.path.isfile(listing):
+                for e in load_json(listing):
+                    k = (e["b"], e["t"])
+                    if k not in self.names or e["rev"] > self.names[k][1]: self.names[k] = (e["name"], e["rev"])
+        if (b, kind) not in self.names and b // 2048 not in self._listed:
+            d = b // 2048; self._listed.add(d)
+            for n, e in self.src.listdir(f"Pool/0/{d}").items():
+                m = re.match(r"^(\d+)\.(bucket|index)\.(\d+)$", n)
+                if m:
+                    k = (d * 2048 + int(m.group(1)), m.group(2)); rv = int(m.group(3))
+                    if k not in self.names or rv > self.names[k][1]: self.names[k] = (n, rv)
+        if (b, kind) not in self.names: raise KeyError((b, kind))
         return f"Pool/0/{b // 2048}/{self.names[(b, kind)][0]}"
     def load_map2(self, p):
         """v2 map: per record placement segments + new-id ranges (storage order != id order)."""

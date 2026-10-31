@@ -183,6 +183,15 @@ class ReaderMaps(unittest.TestCase):
         r.recs.record = lambda s, ro: {"ids": [5]}                               # beyond the table: not located by it
         self.assertRaises(KeyError, r.ci.loc, 5)
 
+    def test_bucket_names_without_a_listing(self):
+        # A backup with its own chunk table is never prepared, so there is no pool/listing.json: bucket file names come from
+        # listing the bucket's directory (newest revision), once per directory; an unknown bucket is a KeyError.
+        root = os.path.join(self.pool, "src"); d = os.path.join(root, "Pool", "0", "1"); os.makedirs(d)
+        for n in ("5.index.2", "5.index.7", "5.bucket.7", "6.index.3"): open(os.path.join(d, n), "wb").close()
+        r = pool.PoolReader(_Src(root), os.path.join(self.pool, "nolisting"))
+        self.assertEqual(r.bucket_name(2048 + 5, "index"), "Pool/0/1/5.index.7"); self.assertEqual(r.bucket_name(2048 + 5, "bucket"), "Pool/0/1/5.bucket.7")
+        self.assertEqual(r.bucket_name(2048 + 6, "index"), "Pool/0/1/6.index.3"); self.assertRaises(KeyError, r.bucket_name, 2048 + 9, "index")
+
     def test_dump_json_atomic(self):
         p = os.path.join(self.pool, "x.json"); pool.dump_json(p, [1]); self.assertEqual(pool.load_json(p), [1]); self.assertEqual(os.listdir(self.pool), ["x.json"])
 
