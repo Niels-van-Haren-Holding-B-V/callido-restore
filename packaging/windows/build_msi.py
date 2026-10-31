@@ -142,11 +142,11 @@ def version_file(app_name, version):
   ffi=FixedFileInfo(filevers={n}, prodvers={n}, mask=0x3f, flags=0x0, OS=0x40004, fileType=0x1, subtype=0x0, date=(0, 0)),
   kids=[
     StringFileInfo([StringTable('040904B0', [
-      StringStruct('CompanyName', 'Callido'),
+      StringStruct('CompanyName', 'Callido B.V.'),
       StringStruct('FileDescription', '{app_name}'),
       StringStruct('FileVersion', '{version}'),
       StringStruct('InternalName', '{app_name}'),
-      StringStruct('LegalCopyright', 'MIT License. Not affiliated with Synology.'),
+      StringStruct('LegalCopyright', 'Copyright (c) 2026 Callido B.V. MIT License. Not affiliated with Synology.'),
       StringStruct('OriginalFilename', '{app_name}.exe'),
       StringStruct('ProductName', '{app_name}'),
       StringStruct('ProductVersion', '{version}')])]),

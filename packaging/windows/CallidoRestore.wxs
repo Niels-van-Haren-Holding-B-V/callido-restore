@@ -16,13 +16,13 @@
      xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui"
      xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
   <Package Name="Callido Restore"
-           Manufacturer="Callido"
+           Manufacturer="Callido B.V."
            Version="$(var.Version)"
            UpgradeCode="FC1126F1-1B40-48ED-9E1B-F366AA822764"
            Scope="perMachine"
            Compressed="yes"
            Language="1033">
-    <SummaryInformation Description="Callido Restore: restore Synology Hyper Backup (.hbk) files" Manufacturer="Callido" />
+    <SummaryInformation Description="Callido Restore: restore Synology Hyper Backup (.hbk) files" Manufacturer="Callido B.V." />
 
     <MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed. Uninstall it first to install this older version." />
     <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
