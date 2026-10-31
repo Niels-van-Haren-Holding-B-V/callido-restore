@@ -114,8 +114,12 @@ def index_copy_cmd(rclone, remote, directory, dest):
         rclone, "copy", f"{remote}/Pool/0/{directory}", str(dest),
         "--include", "*.index.*",
         "--ignore-existing",
-        "--transfers", "16",
-        "--checkers", "16",
+        # Index files are small (about 170 KB) and Drive's per-file start latency is around a second, so the rate is bound
+        # by parallelism, not bandwidth. Measured on a real backup with the user's own key, index files only, 25 s each:
+        # 16 transfers 33 MB, 64 transfers 84 MB, 128 transfers 86 MB (Google's rate limit caps it there; the pacer backs
+        # off on a 403 by itself). 64 is the sweet spot.
+        "--transfers", "64",
+        "--checkers", "32",
         "--drive-pacer-min-sleep", "10ms",
         "--drive-pacer-burst", "200",
         "--retries", "5",

@@ -24,6 +24,13 @@ class Fallback(unittest.TestCase):
             with self.assertRaises(rc.RcloneError) as cm: rc.ls("nas:missing")
         self.assertIn("directory not found", str(cm.exception))
 
+    def test_remote_info_falls_back_to_config_dump(self):
+        dump = {"nas": {"type": "smb", "host": "nas"}, "gdrive": {"type": "drive", "client_id": "1-a.apps.googleusercontent.com", "token": "{}"}}
+        ok = subprocess.CompletedProcess([], 0, stdout=json.dumps(dump), stderr="")
+        with mock.patch.object(rc.DAEMON, "available", return_value=False), mock.patch.object(subprocess, "run", return_value=ok) as run:
+            self.assertEqual(rc.remote_info(), {"nas:": {"type": "smb", "own_key": False}, "gdrive:": {"type": "drive", "own_key": True}})
+        self.assertEqual(run.call_args[0][0][1:3], ["config", "dump"])
+
     def test_remotes_parses_listremotes_long(self):
         ok = subprocess.CompletedProcess([], 0, stdout="nas: smb\ngdrive: drive\n", stderr="")
         with mock.patch.object(subprocess, "run", return_value=ok):
@@ -178,6 +185,9 @@ class ViaDaemon(unittest.TestCase):
              mock.patch.object(rc.DAEMON, "rc", side_effect=fake_rc):
             self.assertEqual(rc.remotes(), [("nas:", "smb"), ("gdrive:", "drive")])
             self.assertEqual(rc.version(), "rclone v1.75.2")
+            types["gdrive"]["client_id"] = "1-a.apps.googleusercontent.com"; types["gdrive"]["client_secret"] = "s"; types["gdrive"]["token"] = "{}"
+            info = rc.remote_info()
+            self.assertEqual(info, {"nas:": {"type": "smb", "own_key": False}, "gdrive:": {"type": "drive", "own_key": True}})   # never the key or token itself
 
 
 @unittest.skipUnless(rc.RCLONE and shutil.which(rc.RCLONE), "needs an rclone binary")

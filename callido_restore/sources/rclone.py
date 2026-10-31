@@ -330,6 +330,25 @@ def remotes(cache=False):
     return res
 
 
+def remote_info(cache=False):
+    """{name_with_colon: {"type": ..., "own_key": bool}} of the configured remotes; own_key is true when the remote carries its
+    own OAuth client id (a Google key of the user's). Secrets and tokens are never returned."""
+    if cache: return _cached(("remote_info",), lambda: remote_info())
+    if DAEMON.available():
+        try:
+            out = {}
+            for n in DAEMON.rc("config/listremotes").get("remotes") or []:
+                try: cfg = DAEMON.rc("config/get", name=n) or {}
+                except DaemonGone: raise
+                except RcloneError: cfg = {}
+                out[n + ":"] = {"type": cfg.get("type", ""), "own_key": bool(cfg.get("client_id"))}
+            return out
+        except DaemonGone: pass
+    try: dump = json.loads(_run(["config", "dump"]) or "{}")
+    except ValueError: dump = {}
+    return {n + ":": {"type": (c or {}).get("type", ""), "own_key": bool((c or {}).get("client_id"))} for n, c in dump.items()}
+
+
 def version():
     """'rclone v1.75.2' (first line of ``rclone version``)."""
     if DAEMON.available():

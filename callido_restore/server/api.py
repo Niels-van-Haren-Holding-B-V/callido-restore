@@ -10,7 +10,7 @@ from callido_restore.paths import RCLONE, _bundled
 from callido_restore.restore.backup import Backup
 from callido_restore.restore.destination import restore_target_error
 from callido_restore.restore.jobs import JOBS, start_job
-from callido_restore.sources import rclone
+from callido_restore.sources import google, rclone
 from callido_restore.sources.source import SOURCES, add_source, save_sources
 
 def jdump(o): return json.dumps(o, ensure_ascii=False).encode("utf-8")
@@ -95,7 +95,9 @@ class H(BaseHTTPRequestHandler):
             if u.path == "/api/remotes":
                 try: pairs = rclone.remotes(cache=True)
                 except rclone.RcloneError: pairs = []
-                out = {"remotes": [n for n, _ in pairs], "types": dict(pairs), "dirs": []}
+                try: keys = {n: i["own_key"] for n, i in rclone.remote_info(cache=True).items()}
+                except rclone.RcloneError: keys = {}
+                out = {"remotes": [n for n, _ in pairs], "types": dict(pairs), "keys": keys, "dirs": []}
                 if q.get("remote"):
                     try: out["dirs"] = [e["Name"] for e in rclone.ls(q["remote"] + (q.get("path") or ""), dirs_only=True, cache=True)]
                     except rclone.RcloneError as e: out["error"] = str(e)[-200:]
@@ -208,6 +210,8 @@ class H(BaseHTTPRequestHandler):
                     return self._json({"error": f"“{name}” is a {existing} connection, not {want}. Pick that connection, or use a new name."}, 400)
                 if kind == "drive":
                     cid, csec = (body.get("client_id") or "").strip(), (body.get("client_secret") or "").strip()
+                    if cid and google.client_id_error(cid): return self._json({"error": google.client_id_error(cid)}, 400)
+                    if cid and not csec: return self._json({"error": "the client secret is missing"}, 400)
                     args = None
                 elif kind == "smb":
                     # the password is handed to rclone over stdin ("-"), so it never appears in a process list; the obscured
@@ -220,6 +224,10 @@ class H(BaseHTTPRequestHandler):
                     if kind == "drive":
                         # The sign-in runs through `rclone authorize` with the app's own landing page (static/oauth.html) instead of
                         # rclone's plain one; the token it prints goes into the remote with `config create`, which then asks nothing.
+                        if cid:                                             # a wrong pair would only show up as Google's error page mid-flow
+                            job["message"] = "Checking the key with Google…"
+                            err = google.client_check(cid, csec)
+                            if err: raise RuntimeError(err)
                         job["message"] = "Signing in… a browser window opens for the Google sign-in. When it says “Signed in”, close it and come back to this window."
                         import webbrowser
                         try: token = rclone.authorize_drive(cid, csec, on_url=lambda u: webbrowser.open(u), template=_bundled("static/oauth.html"))
