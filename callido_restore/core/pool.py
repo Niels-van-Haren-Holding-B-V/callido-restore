@@ -148,11 +148,20 @@ class VirtualFileIndex:
 class ChunkRecords:
     def __init__(self, source):
         self.src = source; self.streams = {s: SlicedStream(source, f"Config/file_chunk{s}.index") for s in (1, 2, 3, 4)}
-    def record(self, set_no, off):
-        hdr = self.streams[set_no].read(off, 12)
+    def record(self, set_no, off, list_off=None):
+        """The chunk list of a file record. ``list_off`` (virtual-file pointer A) points at the list itself, its 12-byte header
+        [u32 flags][u32 0xa93b0200][u32 len] just before it; pointer B (``off``) is that header for most files, but for some
+        (photos, seen on a real backup) a 28-byte attribute record (TLV 0xa93b0186) sits in between and B points at that
+        record's body, 24 bytes before the header. Pointer A is used when given; B with the attribute record is recognised."""
+        st = self.streams[set_no]
+        if list_off is not None: hdr_off = list_off - 12
+        else:
+            hdr_off = off
+            if struct.unpack(">III", st.read(off, 12))[1] != REC_MAGIC and struct.unpack(">III", st.read(off + 24, 12))[1] == REC_MAGIC: hdr_off = off + 24
+        hdr = st.read(hdr_off, 12)
         flags, magic, ln = struct.unpack(">III", hdr)
-        if magic != REC_MAGIC: raise ValueError(f"no record magic at set{set_no}+{off}: {hdr.hex()}")
-        body = self.streams[set_no].read(off + 12, ln)
+        if magic != REC_MAGIC: raise ValueError(f"no record magic at set{set_no}+{hdr_off}: {hdr.hex()}")
+        body = st.read(hdr_off + 12, ln)
         refs = struct.unpack(f">{ln // 8}Q", body)
         if (refs[-1] >> 32) != 0x74000000: raise ValueError("record trailer missing")
         ids = []
@@ -516,10 +525,10 @@ class PoolReader:
         if off < 0: return "verified", ""
         if self.ci.available():                  # located through the backup's own chunk table (md5 checked on read)
             try:
-                e = self.vf.entry(off); [self.ci.loc(g) for g in self.recs.record(e["set"], e["rec_off"])["ids"]]; return "verified", ""
+                e = self.vf.entry(off); [self.ci.loc(g) for g in self.recs.record(e["set"], e["rec_off"], e.get("list_off"))["ids"]]; return "verified", ""
             except (KeyError, FileNotFoundError): pass
         if not self.v2: return "unverified", "located through the v1 map"
-        e = self.vf.entry(off); s, ro = e["set"], e["rec_off"]; ids = self.recs.record(s, ro)["ids"]
+        e = self.vf.entry(off); s, ro = e["set"], e["rec_off"]; ids = self.recs.record(s, ro, e.get("list_off"))["ids"]
         seen = set(); st, why = self._rec_status(s, ro, len(ids), seen)
         if st == "unverified": return st, why
         bad = self._refs_status(s, ro, ids, seen)
@@ -602,7 +611,7 @@ class PoolReader:
     # --- files
     def plan(self, off):
         """off = off_virtual_file (>=0). Returns list of (bucket, entry) in file order."""
-        e = self.vf.entry(off); rec = self.recs.record(e["set"], e["rec_off"])
+        e = self.vf.entry(off); rec = self.recs.record(e["set"], e["rec_off"], e.get("list_off"))
         if self.ci.available():                  # the backup's own chunk table: exact, no map needed
             try: return [self.ci.loc(g) for g in rec["ids"]], rec
             except (KeyError, FileNotFoundError, RuntimeError): pass      # RuntimeError: a slice could not be fetched (Source.ensure)
