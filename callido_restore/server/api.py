@@ -40,6 +40,34 @@ def job_file(jid):
 
 BACKUPS = {}
 
+# The pool preparation is not optional (every restore needs the map), so it starts by itself: after the backup is opened and
+# after every share load, as soon as a raw snapshot is local, unless a map exists, a preparation runs, or the user paused it.
+AUTOPREPARE = os.environ.get("HBK_NO_AUTOPREPARE") != "1"
+POOL_LOCK = threading.Lock()                     # check-and-start of a preparation is atomic: open, share loads and Resume all race
+
+def pool_job(sid):
+    """The running preparation job of a source, or None."""
+    return next((j for j in JOBS.values() if j["state"] == "running" and j["label"] == "build pool map" and j.get("src") == sid), None)
+
+def start_pool_job(sid, b, max_bucket=None):
+    """The running preparation of the source, or a new one (lifting a pause). Never two for one source."""
+    with POOL_LOCK:
+        j = pool_job(sid)
+        if j: return j
+        b.set_pool_paused(False)
+        return start_job(lambda job: b.build_pool(job, max_bucket), "build pool map", src=sid)
+
+def maybe_autoprepare(sid):
+    """Start the preparation when it can run and has not finished; None when nothing was started (and why is not an error)."""
+    if not AUTOPREPARE or sid not in BACKUPS: return None
+    b = BACKUPS[sid]
+    with POOL_LOCK:
+        try:
+            if pool_job(sid) or b.pool_paused() or b.pool_status().get("complete") or not b.raw_snapshots(): return None
+        except Exception: return None
+        b.set_pool_paused(False)
+        return start_job(lambda job: b.build_pool(job, None), "build pool map", src=sid)
+
 def backup_for(sid, refresh=False, log=None):
     if sid not in SOURCES: raise KeyError(f"unknown source {sid}")
     if refresh: SOURCES[sid].forget_listings()                   # the ↻ button: read the backup's folders from the remote again
@@ -144,7 +172,8 @@ class H(BaseHTTPRequestHandler):
                     if sid not in SOURCES: return self._json({"error": f"unknown source {sid}"}, 404)
                     def run(job):
                         job["message"] = "Opening the backup…"
-                        backup_for(sid, refresh=refresh, log=lambda m: job.__setitem__("message", m)); return {"ok": True}
+                        backup_for(sid, refresh=refresh, log=lambda m: job.__setitem__("message", m))
+                        maybe_autoprepare(sid); return {"ok": True}
                     return self._json(start_job(run, "open backup"))
                 b = backup_for(q["src"], refresh=q.get("refresh") == "1"); return self._json(b.info)
             b = backup_for(q["src"])
@@ -159,6 +188,7 @@ class H(BaseHTTPRequestHandler):
                         job["message"] = f"{sh}: preparing"; job["progress"] = i / len(shares)
                         try: out.append({"share": sh, "ok": True, "path": b.build_index(sh, ver, job)})
                         except Exception as e: out.append({"share": sh, "ok": False, "error": str(e)})
+                    maybe_autoprepare(q["src"])                        # a raw snapshot is local now: the preparation can run
                     return out
                 return self._json(start_job(run, f"index v{ver} {share}"))
             if u.path == "/api/query": return self._json(b.query(q.get("share", "*"), int(q["ver"]), q))
@@ -166,10 +196,12 @@ class H(BaseHTTPRequestHandler):
             if u.path == "/api/histogram": return self._json(b.histogram(q.get("share", "*"), int(q["ver"]), q))
             if u.path == "/api/file": return self._json(b.file_detail(q["share"], int(q["ver"]), q["id"]))
             if u.path == "/api/diff": return self._json(b.diff(q["share"], int(q["a"]), int(q["b"])))
-            if u.path == "/api/pool": return self._json(b.pool_status())
-            if u.path == "/api/pool/build":
+            if u.path == "/api/pool/build":                       # an explicit start also lifts a pause
                 mb = int(q["max_bucket"]) if q.get("max_bucket") else None
-                return self._json(start_job(lambda job: b.build_pool(job, mb), "build pool map"))
+                return self._json(start_pool_job(q["src"], b, mb))
+            if u.path == "/api/pool":
+                st = b.pool_status(); j = pool_job(q["src"]); st["running"] = j["id"] if j else None
+                return self._json(st)
             if u.path == "/api/restore_count":
                 return self._json(b.restore_count(json.loads(q["items"]), q.get("skip_meta", "1") == "1"))
             if u.path == "/api/restore_plan":
@@ -200,6 +232,18 @@ class H(BaseHTTPRequestHandler):
         try:
             if u.path == "/api/sources":
                 s = add_source(body["name"], body["local"], body.get("remote"), body.get("extra")); return self._json(s.to_json())
+            if u.path in ("/api/pool/pause", "/api/pool/resume"):   # the user's pause survives share loads and restarts
+                sid = body.get("src")
+                if sid not in SOURCES: return self._json({"error": f"unknown source {sid}"}, 404)
+                b = backup_for(sid)
+                if u.path.endswith("pause"):
+                    b.set_pool_paused(True); j = pool_job(sid)
+                    if j: j["cancel"] = True
+                    return self._json({"paused": True, "cancelled": j["id"] if j else None})
+                b.set_pool_paused(False)
+                if b.pool_status().get("complete") and not pool_job(sid):   # nothing to resume: say so instead of a full rebuild
+                    st = b.pool_status(); st["running"] = None; return self._json(st)
+                return self._json(start_pool_job(sid, b))
             if u.path == "/api/rclone/connect":  # start an rclone config (opens the browser for Google); body carries the secrets
                 name = re.sub(r"[^A-Za-z0-9_-]", "", body.get("name") or "gdrive") or "gdrive"
                 kind = body.get("kind", "drive")
