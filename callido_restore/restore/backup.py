@@ -1,6 +1,7 @@
 """``Backup``: one opened .hbk (discovery of task/shares/versions, derived SQLite snapshot index, queries, pool access, restore).
 The restore methods are the engine behind the wizard; the query methods serve the explorer tabs."""
 import collections, json, os, re, shutil, sqlite3, subprocess, tempfile, threading, time
+from callido_restore.sources import transfer
 from pathlib import Path
 from callido_restore import paths
 from callido_restore.core.hbkmeta import DOC_EXT
@@ -499,7 +500,8 @@ class Backup:
                         if self.src.in_cache(path):
                             path.unlink(); dl_size[0] -= sz
                     except OSError: pass
-        ex = concurrent.futures.ThreadPoolExecutor(max_workers=4); pending = {}
+        prof = transfer.profile("restore")                     # sources/transfer.py: 8 bucket files in flight, 16 queued ahead
+        ex = concurrent.futures.ThreadPoolExecutor(max_workers=prof.workers); pending = {}
         def prefetch_from(i):
             seen = set()
             for f in files[i:i + 40]:
@@ -509,7 +511,7 @@ class Backup:
                 for bk, _ in locs:
                     if bk in seen or bk in pending: continue
                     seen.add(bk)
-                    if len(pending) < 12: pending[bk] = ex.submit(fetch, bk)
+                    if len(pending) < prof.prefetch: pending[bk] = ex.submit(fetch, bk)
         # Every file is extracted into a staging folder and then moved into place. Each local root gets its own folder inside
         # that root (same filesystem, so place_file can hard-link atomically); it is new (mkdtemp) and removed in the finally
         # below, nothing else under the root is touched. If the app is killed mid-restore the folder stays behind; it carries the

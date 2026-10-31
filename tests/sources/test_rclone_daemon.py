@@ -254,7 +254,7 @@ class CopyFile(unittest.TestCase):
         with mock.patch.object(rc.DAEMON, "available", return_value=False), mock.patch.object(subprocess, "run", return_value=ok) as run:
             rc.copyfile("nas:x/f", "/tmp/out")
         self.assertEqual(run.call_args[0][0][1:4], ["copyto", "nas:x/f", "/tmp/out"])
-        for flag in ("--tpslimit", "--drive-pacer-min-sleep", "--low-level-retries"): self.assertIn(flag, run.call_args[0][0])
+        for flag in ("--retries", "--drive-pacer-min-sleep", "--low-level-retries"): self.assertIn(flag, run.call_args[0][0])   # transfer.COMMON
 
     @unittest.skipUnless(rc.RCLONE and shutil.which(rc.RCLONE), "needs an rclone binary")
     def test_real_daemon_copies_a_local_file(self):
@@ -346,7 +346,7 @@ class StartFlags(unittest.TestCase):
             self.assertTrue(daemon.start(timeout=1))
         args = popen.call_args[0][0]
         self.assertEqual(args[:2], ["/fake/rclone", "rcd"])
-        for flag, value in (("--tpslimit", "8"), ("--drive-pacer-min-sleep", "100ms"), ("--low-level-retries", "20")):
+        for flag, value in (("--tpslimit", "16"), ("--drive-pacer-min-sleep", "10ms"), ("--low-level-retries", "20")):
             self.assertIn(flag, args); self.assertEqual(args[args.index(flag) + 1], value)
         self.assertEqual(rc.THROTTLE, args[-len(rc.THROTTLE):])
 

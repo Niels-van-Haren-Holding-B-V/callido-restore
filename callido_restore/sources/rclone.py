@@ -8,6 +8,7 @@ import base64, json, os, re, secrets, socket, subprocess, threading, time, urlli
 from callido_restore import paths
 from callido_restore.about import APP_NAME
 from callido_restore.paths import RCLONE
+from callido_restore.sources import transfer
 
 
 class RcloneError(RuntimeError):
@@ -22,10 +23,8 @@ class Cancelled(RcloneError):
     """``copyfile`` was stopped through its ``cancelled()`` callback; the partial file may remain."""
 
 
-# Throttling for Google Drive (and harmless elsewhere), the same for the daemon and the one-process fallback: the daemon runs up to
-# four slice downloads at once (``core.pool.SLICE_WORKERS``), and without a transactions-per-second cap Drive answers with 403
-# userRateLimitExceeded; the pacer sleep and the low-level retries let rclone ride out the limits it still hits.
-THROTTLE = ["--tpslimit", "8", "--drive-pacer-min-sleep", "100ms", "--low-level-retries", "20"]
+# Resilience and Drive pacing live in sources/transfer.py, one place for the daemon and every rclone process.
+THROTTLE = list(transfer.DAEMON)
 
 
 class _Daemon:
@@ -363,7 +362,7 @@ RATE_LIMIT_WORDS = ("rateLimitExceeded", "userRateLimitExceeded", "429", "quota"
 
 def _fallback_copy(src, dst, timeout=None):
     """One ``rclone copyto`` process (the pre-daemon way): throttled, retried by rclone itself."""
-    _run(["copyto", src, str(dst), "--retries", "5", "--retries-sleep", "5s", *THROTTLE], timeout=timeout)
+    _run(["copyto", src, str(dst), *transfer.COMMON], timeout=timeout)
 
 
 def copyfile(src, dst, progress=None, cancelled=None, poll=0.5, timeout=None):

@@ -10,6 +10,10 @@ Package `callido_restore/`, one folder per layer; a layer never imports a higher
 * `pool/` — the pool map: `poolmap.py` (v1, sequential, see `docs/FORMAT.md`), `poolmap2.py` (v2, tag-based), `anchor.py` (anchor
   scan with subprocess workers, `python -m callido_restore.pool.anchor --worker`; the frozen app uses one in-process worker, an
   in-app anchor scan will need a `--worker` dispatch in the entry point), `indexfetch.py` (resumable bucket-index download).
+* `sources/transfer.py` — the one place for how rclone moves data: shared resilience and Drive pacing (`COMMON`, `DAEMON`) and a
+  profile per kind of work (`index_files` 64 transfers, `index_slices` 8 workers, `restore` 8 workers + 16 prefetched); the measurements
+  behind the numbers are in its docstring. The daemon start, the copyto fallback, `pool/indexfetch.py`, `core/pool.py` and
+  `restore/backup.py` read from it; no transfer number lives anywhere else.
 * `sources/source.py` — `Source`: a local .hbk folder plus optional rclone remotes (first wins) and extra read-only roots; `ensure`
   downloads a missing file into `cache/<source>/` only, nothing in a source is ever modified; `contains_dest` refuses restore
   destinations inside the backup; the registry (`SOURCES`, `load_sources`, `add_source`).

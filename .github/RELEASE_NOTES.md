@@ -2,6 +2,8 @@
 
 ## What's new in 0.3.2
 
+- **Restores download 8 bucket files at a time instead of 4** (43 MB/s instead of 29 on a measured line), and the index-set slices of the preparation 8 instead of 4.
+- **One place for every transfer setting.** How many files move at once per kind of work (bucket indexes, index-set slices, restore) and the retries and Google Drive pacing shared by all of them now live in one module, with the measurements that chose them.
 - **The bucket-index download runs 64 transfers in parallel instead of 16.** Index files are small and Google's per-file start latency is around a second, so parallelism is what sets the speed: measured on a real backup with an own key, three times the throughput; beyond 64 Google's rate limit caps it.
 - **You can see that your Google key is in use.** Once a Drive connection has a key of its own, the overview and the preparation step say so ("Your own Google key is in use") instead of still offering the link; the key panel says the same and offers to replace it.
 - **The key is checked before the sign-in.** A client id that does not look like one is refused at once, and the pair is checked with Google before the browser opens, with a clear message when Google does not know it.
