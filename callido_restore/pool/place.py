@@ -288,18 +288,49 @@ def resolve_and_place_v3(writers, anchors, index, log=print, max_bucket=None):
             if ob is None: flags["guessed"].add((w, ri))
             return
         riB = nxt_anchor.get((w, ri)); bB, eB = anchor[(w, riB)] if riB else (None, None)
-        between = [x for x in range(ri + 1, riB) if phys[w][x] > 0 and (w, x) not in anchor] if riB else []
-        if riB is None or tpos[bB] <= tpos[b] or between: R["spill-deferred-to-gap"] += 1; return
         if ob is None: R["spill-unsized"] += 1; return
-        need_c = rem - eB; need_b = ob - index.seg_bytes(segs) - index.prefix(bB)[eB]
+        if riB is None or tpos[bB] <= tpos[b]:
+            # the writer's last spilling record (or its next anchor lies behind): no tail pin, so the interior and the partial
+            # tail bucket are searched together, like a copy of an untagged original (exact count and bytes, unique only)
+            between = [x for x in range(ri + 1, len(W[w])) if phys[w][x] > 0] if riB is None else []
+            if between: R["spill-tail-with-between"] += 1; return
+            cands = [(x, counts[x], index.total(x)) for x in window(b, None) if rev.get(x, 0) <= rev.get(b, 0) + 2][:MAX_CANDIDATES // 2]
+            sol, tail_e, nsol, over = _claim_search(cands, rem, ob - index.seg_bytes(segs), index=index, tail=True)
+            if sol is None: R["spill-tail-no-solution"] += 1; return
+            if nsol > 1 or over: R["spill-ambiguous"] += 1; return
+            for x in sol: claimed[x] = w
+            for k, x in enumerate(sorted(sol, key=tpos.get)): segs.append((x, 0, tail_e if (k == len(sol) - 1 and tail_e is not None) else counts[x]))
+            placements[w][ri] = segs; R["placed-spill-tail"] += 1; R["claimed"] += len(sol); return
+        between = [x for x in range(ri + 1, riB) if phys[w][x] > 0 and (w, x) not in anchor]
+        obs = [own_bytes(w, x) for x in between]
+        if any(o is None for o in obs) and any(W[w][x].size is not None for x in between):
+            if not final: deferred.append((w, ri, b, e)); return
+            R["spill-between-unresolved"] += 1; return
+        if any(o is None for o in obs): R["spill-deferred-to-gap"] += 1; return        # untagged records between: the gap pass (count-only) handles them
+        # the records between (tagged but never anchored: their first chunks straddle a bucket boundary, or are dedup
+        # references) are laid out with the spill; their sizes join the exact count-and-bytes match and verify each of them
+        need_c = rem + sum(phys[w][x] for x in between) - eB; need_b = ob - index.seg_bytes(segs) + sum(obs) - index.prefix(bB)[eB]
         if need_c < 0 or need_b < 0: R["spill-negative"] += 1; return
         sol, nsol, over = search(b, bB, need_c, need_b)
         if sol is None: R["spill-no-solution"] += 1; return
         if nsol > 1 or over: R["spill-ambiguous"] += 1; return
+        path = [(x, counts[x]) for x in sorted(sol, key=tpos.get)] + ([(bB, eB)] if eB else [])
+        layout = {}; cur = list(segs); n_left = 0; i = 0; ce = 0; ok = True
+        for x in [ri] + between:                                   # consecutive along the claimed buckets
+            m = phys[w][x] if x != ri else rem; sg = cur if x == ri else []
+            while m > 0 and i < len(path):
+                cb, room_end = path[i]; t = min(m, room_end - ce)
+                if t > 0: sg.append((cb, ce, t)); m -= t; ce += t
+                if ce >= room_end: i += 1; ce = 0
+            if m: ok = False; break
+            layout[x] = sg
+        if not ok: R["spill-layout-mismatch"] += 1; return
+        for x in between:
+            if index.seg_bytes(layout[x]) != own_bytes(w, x): ok = False; break
+        if not ok: R["spill-between-size-mismatch"] += 1; return
         for x in sol: claimed[x] = w
-        for x in sorted(sol, key=tpos.get): segs.append((x, 0, counts[x]))
-        if eB: segs.append((bB, 0, eB))
-        placements[w][ri] = segs; R["placed-spill"] += 1; R["claimed"] += len(sol)
+        for x, sg in layout.items(): placements[w][x] = sg
+        R["placed-spill"] += 1; R["placed-with-spill"] += len(between); R["claimed"] += len(sol)
     order = sorted(((tpos[b], e), w, ri) for (w, ri), (b, e) in anchor.items())
     for (t, e), w, ri in order: place_anchored(w, ri, torder[t], e)
     # ---- D. gaps: records between two placed anchored records of a writer (untagged, tagged with dedup heads, or

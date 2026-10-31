@@ -65,6 +65,30 @@ class Placer(unittest.TestCase):
         self.assertNotIn(0, pl[0]); self.assertEqual(R["spill-ambiguous"], 1); self.assertEqual(owner, {0: 0, 4: 0})
         pool.tmp.cleanup(); pool2.tmp.cleanup()
 
+    def test_last_spilling_record_of_a_writer_is_placed_by_a_tail_search(self):
+        # E1: the newest big file: head in bucket 0 (2 of 4 entries), interior bucket 1 or 2 (same count, different bytes), tail = the
+        # first entry of bucket 3; nothing anchored after it, so the tail is found by the search (exact count and bytes, partial last bucket)
+        pool = Pool({0: (2, [10, 20, 30, 40]), 1: (2, [100, 100]), 2: (2, [100, 110]), 3: (2, [5, 6, 7])})
+        C = _rec(0, 100, 5, size=30 + 40 + 100 + 110 + 5, tag="c")
+        owner, pl, R, flags = self.run_placer(pool, {0: [C], 1: [], 2: [], 3: []}, {(0, 0): [(0, 2, 2)]})
+        self.assertEqual(pl[0][0], [(0, 2, 2), (2, 0, 2), (3, 0, 1)]); self.assertEqual(R["placed-spill-tail"], 1); self.assertEqual(owner, {0: 0, 2: 0, 3: 0})
+        self.assertEqual(flags["guessed"], set()); self.assertEqual(R["verified"], 1)
+        pool.tmp.cleanup()
+
+    def test_spill_lays_out_the_unanchored_records_between_it_and_the_next_anchor(self):
+        # E4: C spills from bucket 0 into bucket 1; S (tagged, never anchored: its first chunks straddle the 1/2 boundary) follows C;
+        # D is anchored at bucket 2 entry 1. C, S and D are all placed and S is verified by its size.
+        pool = Pool({0: (2, [10, 20, 30, 40]), 1: (2, [100, 110, 50]), 2: (2, [60, 5, 6])})
+        C = _rec(0, 100, 4, size=30 + 40 + 100 + 110, tag="c"); S = _rec(1, 104, 2, size=50 + 60, tag="s"); D = _rec(2, 106, 2, size=11, tag="d")
+        owner, pl, R, flags = self.run_placer(pool, {0: [C, S, D], 1: [], 2: [], 3: []}, {(0, 0): [(0, 2, 2)], (0, 2): [(2, 1, 2)]})
+        self.assertEqual(pl[0][0], [(0, 2, 2), (1, 0, 2)]); self.assertEqual(pl[0][1], [(1, 2, 1), (2, 0, 1)]); self.assertEqual(pl[0][2], [(2, 1, 2)])
+        self.assertEqual((R["placed-spill"], R["placed-with-spill"]), (1, 1)); self.assertEqual(flags["guessed"], set()); self.assertEqual(R["verified"], 3)
+        # with a wrong size for S nothing of the group is placed
+        S.size = 111
+        owner, pl, R, flags = self.run_placer(pool, {0: [C, S, D], 1: [], 2: [], 3: []}, {(0, 0): [(0, 2, 2)], (0, 2): [(2, 1, 2)]})
+        self.assertNotIn(0, pl[0]); self.assertNotIn(1, pl[0]); self.assertGreaterEqual(R["spill-no-solution"] + R["spill-between-size-mismatch"], 1)
+        pool.tmp.cleanup()
+
     def test_gap_records_between_anchors_are_laid_out_and_verified(self):
         # bucket 0: A (1 chunk) then an untagged record U (2 chunks) then a record H whose head is a dedup reference to A's chunk
         # (so it has a tag but was never scanned), then B anchored; sizes: U unknown (guessed), H = own 70 + referenced 10
