@@ -193,6 +193,22 @@ class ReaderMaps(unittest.TestCase):
         self.assertEqual(r.bucket_name(2048 + 5, "index"), "Pool/0/1/5.index.7"); self.assertEqual(r.bucket_name(2048 + 5, "bucket"), "Pool/0/1/5.bucket.7")
         self.assertEqual(r.bucket_name(2048 + 6, "index"), "Pool/0/1/6.index.3"); self.assertRaises(KeyError, r.bucket_name, 2048 + 9, "index")
 
+    def test_bucket_names_are_thread_safe(self):
+        # Restore asks from 8 prefetch threads and the extractor at once; a slow listing must not make the others give up.
+        import threading, time
+        root = os.path.join(self.pool, "src"); d = os.path.join(root, "Pool", "0", "0"); os.makedirs(d)
+        for i in range(8): open(os.path.join(d, f"{i}.index.2"), "wb").close()
+        class Slow(_Src):
+            def listdir(self, rel): time.sleep(0.2); return super().listdir(rel)
+        r = pool.PoolReader(Slow(root), os.path.join(self.pool, "nolisting")); got = {}; errs = []
+        def ask(i):
+            try: got[i] = r.bucket_name(i, "index")
+            except Exception as e: errs.append(e)
+        ts = [threading.Thread(target=ask, args=(i,)) for i in range(8)]
+        for t in ts: t.start()
+        for t in ts: t.join()
+        self.assertEqual(errs, []); self.assertEqual(got, {i: f"Pool/0/0/{i}.index.2" for i in range(8)})
+
     def test_dump_json_atomic(self):
         p = os.path.join(self.pool, "x.json"); pool.dump_json(p, [1]); self.assertEqual(pool.load_json(p), [1]); self.assertEqual(os.listdir(self.pool), ["x.json"])
 

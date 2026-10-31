@@ -48,12 +48,30 @@ each writer (set 4→writer 0, set 3→1, set 1→2, set 2→3) takes a block wh
 md5 is of the decompressed chunk. Chunks of a file are consecutive in the writer's own bucket sequence; a bucket is closed
 at ~52 MB and gets its id in **fill-completion order** across all writers (so bucket ids interleave between writers).
 
-## Chunk id → bucket (the hard part)
-Nothing in the backup stores it. `callido_restore/pool/poolmap.py` reconstructs it:
-1. parse all records; a writer's *new* chunks are the runs that continue its allocation frontier (`g == frontier+1` or a new block);
-   everything else is a dedup reference. This yields block ownership and, per writer, the ordered "pieces" of stored chunks.
-2. file sizes come from the snapshot databases (record → size).
-3. walk bucket ids in order; for each bucket try each writer: its next positions map to the bucket's entries; whenever a file's last
-   chunk is reached, `sum(ulen)` must equal the file size. A writer with an exact match wins; a bucket with several candidates and
-   no evidence is branched on (backtracking).
-Result: `poolmap.json` = `bucket → (writer, first stored position)` + piece tables.
+## Chunk id → bucket: `Pool/chunk_index`
+The backup's own table (format first documented by
+[woutervanranst/synology-hyperbackup-reverse-engineering](https://github.com/woutervanranst/synology-hyperbackup-reverse-engineering),
+README §2; confirmed and extended on a real backup). Sliced like the other indexes: `Pool/chunk_index/<n>.idx.<rev>`, 8 MiB
+slices of one stream, the newest revision per slice, a 64-byte header once (magic `7053a86e`, record stride 29 at `0x10`).
+A chunk reference `r` in a file record is the byte offset of a **29-byte record** here: `g = (r − 64) / 29`.
+
+| byte | kind 0: a stored chunk | kind 1: a copy that stored nothing |
+|---|---|---|
+| 0 | `0x00` | `0x01` |
+| 1–8 | u32 BE bucket id, u32 BE byte offset of the chunk's 32-byte entry in that bucket's `.index` (`64 + 32 · entry`) | u64 BE byte offset of the record it shares (follow it) |
+| 9–23 | zero | zero |
+| 24 | refcount | refcount |
+| 25–28 | fingerprint | fingerprint |
+
+Measured on the real backup (867 slices, 6.8 GB, 250 M records): 1.15 M kind-0 records agree with placements found by size
+checks (0 disagreements); a 111-chunk copy's kind-1 records lead to its source's entries (111/111 same md5). Unused or purged
+ids: not checked yet. `callido_restore/core/pool.py` `ChunkIndex` reads it (slices fetched on demand into the app cache, an
+LRU of 32 slices in memory); `PoolReader.plan()` uses it first.
+
+### When a backup has no `Pool/chunk_index`: the inferred map
+`callido_restore/pool/` reconstructs the table from what else the backup holds (TASKS.md T1, docs/handovers): tagged
+records are anchored in the bucket indexes (`version_list.tag` = md5 of the first K ≤ 9 chunk md5s + their length), bucket
+ownership and stream offsets follow from the anchors, large files are laid out along the writers' bucket-id turn (quads in
+the initial backup), copies alias their stored record, leftover chunks of deleted files are skipped by exact bytes, and every
+placement with a known size is checked against it (`pool/place.py`). Result: `poolmap2.json`. On the real backup it located
+86 % of the bytes; everything it placed agrees with the table.

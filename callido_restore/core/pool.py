@@ -10,12 +10,15 @@ Layout facts
      [0..1] ptr A (u16 set | u48 offset) -> start of chunk list   [12..13] ptr B = A-12 -> record start
 * record (file_chunk<set>.index stream, 8 MiB slices): [u32 flags][u32 0xa93b0200][u32 len][len bytes]
   body = refs (u64 each) + trailer [0x74000000][crc32 of refs].  ref = 64 + 29*g, g = global chunk id.
+* Pool/chunk_index (sliced, 64-byte header): ref r -> 29-byte record at r. Kind 0 [0x00][u32 bucket][u32 64+32*entry]
+  [15 zero][u8 refcount][u32 fp]: the chunk's location. Kind 1 [0x01][u64 offset of another record]: a copy, follow it.
+  (Format: woutervanranst/synology-hyperbackup-reverse-engineering; kind 1 measured on a real backup. docs/FORMAT.md.)
 * chunk ids are handed out in blocks of 2260 from one shared counter; each of the 4 writers (sets) takes a
   block when it needs ids and appends its chunks to its own current bucket. bucket id = fill-completion order.
 * bucket: Pool/0/<id//2048>/<id%2048>.bucket.<rev> raw concatenated LZ4 blocks; .index = 64-byte header +
   32-byte entries [u32 clen][u32 off][u32 ulen][md5 16][crc32 of first 28 bytes].
 """
-import struct, os, re, json, glob, hashlib, collections, bisect
+import struct, os, re, json, glob, hashlib, collections, bisect, threading
 from callido_restore.sources import transfer
 def lz4_decompress_py(src, usize):
     """LZ4 block decode used when the lz4 package is not installed. `usize` is the caller's expected size; this fallback does not check it."""
@@ -103,16 +106,18 @@ class ChunkIndex:
     REC = 29; HEADER = 64; LRU = 32
     def __init__(self, source):
         self.s = SlicedStream(source, "Pool/chunk_index"); self._cache = collections.OrderedDict()
+        self._lock = threading.Lock()                # restore prefetch threads and the extractor read it concurrently
     def available(self):
         try: return bool(self.s.names())
         except Exception: return False
     def _slice(self, k, job=None):
-        d = self._cache.get(k)
-        if d is None:
-            with open(self.s.slice_path(k, job), "rb") as f: d = f.read()
+        with self._lock:
+            d = self._cache.get(k)
+            if d is not None: self._cache.move_to_end(k); return d
+        with open(self.s.slice_path(k, job), "rb") as f: d = f.read()   # outside the lock: a download may take seconds
+        with self._lock:
             self._cache[k] = d
             if len(self._cache) > self.LRU: self._cache.popitem(last=False)
-        else: self._cache.move_to_end(k)
         return d
     def loc(self, g, job=None, depth=0):
         """(bucket, entry) of chunk id g; KeyError when the record is missing or not a chunk entry. A record whose first byte is
@@ -401,7 +406,7 @@ class PoolReader:
     def __init__(self, source, pool_dir, log=None):
         self.src, self.pool_dir = source, pool_dir
         self.vf = VirtualFileIndex(source); self.recs = ChunkRecords(source); self.ci = ChunkIndex(source)
-        self.map = None; self.idx_cache = collections.OrderedDict(); self.names = None; self.v1 = self.v2 = False; self.counts = {}; self.guessed = {}; self.aliased = {}
+        self.map = None; self.idx_cache = collections.OrderedDict(); self.names = None; self.v1 = self.v2 = False; self.counts = {}; self.guessed = {}; self.aliased = {}; self._names_lock = threading.Lock()
         self.load_map()
     # --- map
     def load_map(self):
@@ -455,21 +460,24 @@ class PoolReader:
         """Pool/0/<d>/<b % 2048>.<kind>.<rev> with the newest revision. From pool/listing.json when the preparation wrote one;
         a bucket it does not know (no preparation: the chunk table needs none, or a stale listing) is looked up by listing
         its directory once (Source.listdir: local roots, the app cache and the remote)."""
-        if self.names is None:
-            listing = os.path.join(self.pool_dir, "listing.json"); self.names = {}; self._listed = set()
-            if os.path.isfile(listing):
-                for e in load_json(listing):
-                    k = (e["b"], e["t"])
-                    if k not in self.names or e["rev"] > self.names[k][1]: self.names[k] = (e["name"], e["rev"])
-        if (b, kind) not in self.names and b // 2048 not in self._listed:
-            d = b // 2048; self._listed.add(d)
-            for n, e in self.src.listdir(f"Pool/0/{d}").items():
-                m = re.match(r"^(\d+)\.(bucket|index)\.(\d+)$", n)
-                if m:
-                    k = (d * 2048 + int(m.group(1)), m.group(2)); rv = int(m.group(3))
-                    if k not in self.names or rv > self.names[k][1]: self.names[k] = (n, rv)
-        if (b, kind) not in self.names: raise KeyError((b, kind))
-        return f"Pool/0/{b // 2048}/{self.names[(b, kind)][0]}"
+        with self._names_lock:                       # prefetch threads and the extractor ask concurrently
+            if self.names is None:
+                listing = os.path.join(self.pool_dir, "listing.json"); names = {}
+                if os.path.isfile(listing):
+                    for e in load_json(listing):
+                        k = (e["b"], e["t"])
+                        if k not in names or e["rev"] > names[k][1]: names[k] = (e["name"], e["rev"])
+                self.names = names; self._listed = set()
+            if (b, kind) not in self.names and b // 2048 not in self._listed:
+                d = b // 2048
+                for n, e in self.src.listdir(f"Pool/0/{d}").items():
+                    m = re.match(r"^(\d+)\.(bucket|index)\.(\d+)$", n)
+                    if m:
+                        k = (d * 2048 + int(m.group(1)), m.group(2)); rv = int(m.group(3))
+                        if k not in self.names or rv > self.names[k][1]: self.names[k] = (n, rv)
+                self._listed.add(d)                  # only after the names are in
+            if (b, kind) not in self.names: raise KeyError((b, kind))
+            return f"Pool/0/{b // 2048}/{self.names[(b, kind)][0]}"
     def load_map2(self, p):
         """v2 map: per record placement segments + new-id ranges (storage order != id order)."""
         d = load_json(p); self.v2 = True
@@ -597,7 +605,7 @@ class PoolReader:
         e = self.vf.entry(off); rec = self.recs.record(e["set"], e["rec_off"])
         if self.ci.available():                  # the backup's own chunk table: exact, no map needed
             try: return [self.ci.loc(g) for g in rec["ids"]], rec
-            except (KeyError, FileNotFoundError): pass
+            except (KeyError, FileNotFoundError, RuntimeError): pass      # RuntimeError: a slice could not be fetched (Source.ensure)
         if self.v2:
             try: return self.locate2(e["set"], e["rec_off"], rec["ids"]), rec
             except KeyError:
