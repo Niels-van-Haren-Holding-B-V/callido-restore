@@ -95,7 +95,7 @@ the tests, `hbk_explorer.py` and `static/index.html` in #49/#52. Open for the ow
 (one extended regex per line); until then CI runs only the built-in patterns. Run `scripts/check_private.sh` locally before pushing.
 
 ## H17 — Exact folder selection, safe resume (Reviewer, 2026-10-31 00:34)
-IN REVIEW (hbk-3): branch `hbk3/h17` on main (after H8). `restore_plan` and `restore_count` select a folder by an exact,
+DONE (hbk-3): #53. `restore_plan` and `restore_count` select a folder by an exact,
 case-sensitive prefix (`substr(path, 1, n) = 'dir/'`) instead of `LIKE 'dir/%'` (case-insensitive, `_`/`%` wildcards). One
 `restore_target_error()` validates targets for `/api/restore` (creates roots) and `/api/restore/resume` (roots must still be
 there, source check again); a resume that fails keeps the job file. Neutral example names in the files H8 owns (H18 rule).
@@ -114,6 +114,13 @@ IN PROGRESS (hbk-2): step 1 = `callido_restore/core/pool.py` (was `hbk_pool.py`;
 PR each from fresh origin/main, pure moves, zero behaviour change, green on unit + both DMG builds: (2) `pool/` (`hbk_poolmap*.py`,
 `hbk_anchor.py` incl. its worker entry, `hbk_indexfetch.py`); (3) `restore/` + `sources/` out of `hbk_explorer.py`; (4) `server/` +
 `app/` with the entry point, build_app.sh / PyInstaller, README; (5) remove the root shims. No other code PRs in the meantime.
+
+## H19 — Search prefix filter (Reviewer, 2026-10-31 00:59)
+DONE (hbk-3): #53. `Backup._where` selects a folder prefix with exact `substr`; test in `tests/test_query_where.py`.
+
+## H20 — Resume follow-ups (Reviewer, 2026-10-31 01:12)
+DONE (hbk-3): `/api/restore/resume` accepts only a job id (`^[0-9a-f-]{8,64}$`, `job_file()`), 404 for a missing job, one `dest`
+variable; TASKS.md H17/H19 marked done. Test: `test_resume_id_is_validated`.
 
 ## Do not
 * Do not change the on-disk layout of `~/.hbk-explorer/index/<src>/pool/*` without a migration; the full map build takes hours of downloads.

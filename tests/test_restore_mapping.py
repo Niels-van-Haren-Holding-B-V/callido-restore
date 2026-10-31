@@ -98,7 +98,7 @@ class _Fixture(unittest.TestCase):
     def tearDown(self):
         hbk_explorer.INDEX_DIR, hbk_explorer.CACHE_DIR, hbk_explorer.JOBS_DIR = self.saved; self.tmp.cleanup()
     def job(self, label="restore"):
-        return {"id": "j" + label[:3], "label": label, "started": time.time(), "state": "running"}
+        return {"id": "ab" + label[:3].encode().hex(), "label": label, "started": time.time(), "state": "running"}   # hex, like uuid4().hex[:10]
 
 
 class MappedRestoreTests(_Fixture):
@@ -124,7 +124,7 @@ class MappedRestoreTests(_Fixture):
         job = self.job(); job["cancel"] = True                                               # pause before the first file
         res = self.b.restore(self.items, "", job)
         self.assertTrue(res["paused"]); self.assertEqual(res["next_index"], 0)
-        saved = json.loads((hbk_explorer.JOBS_DIR / "jres.json").read_text())
+        saved = json.loads((hbk_explorer.JOBS_DIR / ("ab" + b"res".hex() + ".json")).read_text())
         self.assertEqual(saved["state"], "paused"); self.assertEqual([it["dest"] for it in saved["items"]], [self.dA, self.dB])
         self.assertEqual(saved["roots"], [self.dA, self.dB])
         # resume the way /api/restore/resume does: items (with their dest) and next_index from the job file
@@ -217,21 +217,33 @@ class RestoreApiTests(_Fixture):
     def test_resume_keeps_the_job_file_when_a_root_is_missing_or_unsafe(self):
         job = self.job("keep"); job["cancel"] = True
         self.b.restore(self.items, "", job)                                    # pauses at once and writes the job file
-        jf = hbk_explorer.JOBS_DIR / "jkee.json"; self.assertTrue(jf.is_file())
+        jid = "ab" + b"kee".hex(); jf = hbk_explorer.JOBS_DIR / f"{jid}.json"; self.assertTrue(jf.is_file())
         shutil.rmtree(self.dB)                                                 # the share is "unmounted"
-        code, out = self.post("/api/restore/resume", {"id": "jkee"})
+        code, out = self.post("/api/restore/resume", {"id": jid})
         self.assertEqual(code, 400); self.assertIn("not there any more", out["error"]); self.assertTrue(jf.is_file())
         d = json.loads(jf.read_text()); d["items"][1]["dest"] = os.path.join(self.src.local, "Pool"); jf.write_text(json.dumps(d))
-        code, out = self.post("/api/restore/resume", {"id": "jkee"})
+        code, out = self.post("/api/restore/resume", {"id": jid})
         self.assertEqual(code, 400); self.assertIn("Pool", out["error"]); self.assertTrue(jf.is_file())
         os.makedirs(self.dB); d["items"][1]["dest"] = self.dB; jf.write_text(json.dumps(d))
-        code, j = self.post("/api/restore/resume", {"id": "jkee"})
+        code, j = self.post("/api/restore/resume", {"id": jid})
         self.assertEqual(code, 200); self.assertFalse(jf.is_file())            # consumed only once the resume really starts
         for _ in range(100):
             x = self.get(f"/api/job?id={j['id']}")
             if x["state"] != "running": break
             time.sleep(0.05)
         self.assertEqual(x["state"], "done", x)
+
+    def test_resume_id_is_validated(self):                                  # H20: the id names a file under JOBS_DIR, never a path
+        outside = hbk_explorer.JOBS_DIR.parent / "outside.json"; hbk_explorer.JOBS_DIR.mkdir(parents=True, exist_ok=True); outside.write_text("{}")
+        for bad in ("../outside", "../outside.json", "/etc/passwd", "a/b", "", "x" * 70, "JKEE1234"):
+            code, out = self.post("/api/restore/resume", {"id": bad})
+            self.assertEqual(code, 400, bad); self.assertEqual(out["error"], "not a job id")
+        code, out = self.post("/api/restore/resume", {})
+        self.assertEqual(code, 400)
+        code, out = self.post("/api/restore/resume", {"id": "0123456789"})
+        self.assertEqual(code, 404); self.assertEqual(out["error"], "no such saved job")
+        self.assertTrue(outside.is_file())
+        self.assertIsNone(hbk_explorer.job_file("../x")); self.assertEqual(hbk_explorer.job_file("deadbeef00").name, "deadbeef00.json")
 
     def test_plan_mappings_preview(self):
         out = self.get("/api/restore_plan?src=t8&dest=&items=" + json.dumps(self.items).replace(" ", "%20").replace('"', "%22"))
