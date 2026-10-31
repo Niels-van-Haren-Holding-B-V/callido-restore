@@ -91,7 +91,7 @@ is the owner's call once main is green.
 
 ## H18 — No personal data in the repo (owner, 2026-10-31 00:35; rule in docs/HANDOVER.md)
 DONE (hbk-2): #51 (docs, handovers, `tests/test_hbk_pool.py`, `scripts/check_private.sh`, CI job `private-check`); hbk-3 scrubbed
-the tests, `hbk_explorer.py` and `static/index.html` in #49/#52. Open for the owner: add the `PRIVATE_DENYLIST` repository secret
+the tests, `hbk_explorer.py` (now `callido_restore/`) and `static/index.html` in #49/#52. Open for the owner: add the `PRIVATE_DENYLIST` repository secret
 (one extended regex per line); until then CI runs only the built-in patterns. Run `scripts/check_private.sh` locally before pushing.
 
 ## H17 — Exact folder selection, safe resume (Reviewer, 2026-10-31 00:34)
