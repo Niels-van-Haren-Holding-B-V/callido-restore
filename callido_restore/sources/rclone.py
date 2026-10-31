@@ -71,6 +71,25 @@ DAEMON = _Daemon()
 start = DAEMON.start
 stop = DAEMON.stop
 
+# Short-lived cache for listings the UI re-requests on every render (connections, NAS shares, wizard folders). Only listings
+# the user asked for again within CACHE_TTL seconds come from here; anything that changes a remote calls forget().
+CACHE_TTL = 30.0
+_cache = {}; _cache_lock = threading.Lock()
+
+def _cached(key, compute, ttl=None):
+    now = time.time()
+    with _cache_lock:
+        hit = _cache.get(key)
+        if hit and hit[0] > now: return hit[1]
+    value = compute()
+    with _cache_lock: _cache[key] = (now + (CACHE_TTL if ttl is None else ttl), value)
+    return value
+
+def forget(prefix=None):
+    """Drop cached listings (all, or those whose path starts with ``prefix``) after a connection was added or a remote changed."""
+    with _cache_lock:
+        for k in [k for k in _cache if prefix is None or (isinstance(k, tuple) and str(k[1]).startswith(prefix))]: _cache.pop(k, None)
+
 
 def start_in_background():
     """Start the daemon without blocking the caller (the app does this right after its server is up)."""
@@ -92,8 +111,12 @@ def _run(args, timeout=None, **kw):
     return r.stdout
 
 
-def ls(path, dirs_only=False, files_only=False, recurse=False, max_depth=None, no_modtime=False, timeout=None):
-    """Entries of ``path`` as ``rclone lsjson`` returns them (dicts with Path, Name, Size, IsDir, ModTime). Raises RcloneError."""
+def ls(path, dirs_only=False, files_only=False, recurse=False, max_depth=None, no_modtime=False, timeout=None, cache=False):
+    """Entries of ``path`` as ``rclone lsjson`` returns them (dicts with Path, Name, Size, IsDir, ModTime). Raises RcloneError.
+    ``cache=True`` serves a repeat of the same listing within CACHE_TTL seconds without asking rclone (UI renders only)."""
+    if cache:
+        key = ("ls", path, dirs_only, files_only, recurse, max_depth, no_modtime)
+        return _cached(key, lambda: ls(path, dirs_only, files_only, recurse, max_depth, no_modtime, timeout))
     if DAEMON.running:
         fs, remote = split_path(path)
         opt = {"noMimeType": True, "dirsOnly": bool(dirs_only), "filesOnly": bool(files_only), "recurse": bool(recurse), "noModTime": bool(no_modtime)}
@@ -109,8 +132,9 @@ def ls(path, dirs_only=False, files_only=False, recurse=False, max_depth=None, n
     return json.loads(_run(args + [path], timeout=timeout) or "[]")
 
 
-def remotes():
-    """[(name_with_colon, type)] of the configured remotes."""
+def remotes(cache=False):
+    """[(name_with_colon, type)] of the configured remotes. ``cache=True``: a repeat within CACHE_TTL seconds is free."""
+    if cache: return _cached(("remotes",), lambda: remotes())
     if DAEMON.running:
         names = DAEMON.rc("config/listremotes").get("remotes") or []
         dump = DAEMON.rc("config/dump")
