@@ -143,7 +143,9 @@ class VirtualFileIndex:
         f = struct.unpack(">14I", self.s.read(off, 56))
         ptr_a = ((f[0] & 0xffff) << 32 | f[1], f[0] >> 16)
         ptr_b = ((f[12] & 0xffff) << 32 | f[13], f[12] >> 16)
-        return {"set": f[12] >> 16, "rec_off": ptr_b[0], "list_off": ptr_a[0], "version": f[2], "flags": f[3], "mtime": f[9], "crc": f[11], "raw": f}
+        # pointer A names the chunk list itself; it is only usable when it is in the same set as pointer B
+        return {"set": f[12] >> 16, "rec_off": ptr_b[0], "list_off": ptr_a[0] if ptr_a[1] == ptr_b[1] else None, "set_a": ptr_a[1],
+                "version": f[2], "flags": f[3], "mtime": f[9], "crc": f[11], "raw": f}
 
 class ChunkRecords:
     def __init__(self, source):
@@ -535,7 +537,7 @@ class PoolReader:
         if bad: return bad
         if st == "identical_copy":                                           # the copy is read through its source's entries: the source's
             src = self.aliased[s][ro]                                        # own references count too (H32.2), worst of both wins
-            bad = self._refs_status(src[0], src[1], self.recs.record(src[0], src[1])["ids"], seen)
+            bad = self._refs_status(src[0], src[1], self.recs.record(src[0], src[1])["ids"], seen)   # a record offset from the map: pointer B only (the attribute record is recognised)
             if bad: return bad
         return st, why
     def _refs_status(self, s, ro, ids, seen):

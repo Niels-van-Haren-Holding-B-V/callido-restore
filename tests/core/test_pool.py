@@ -217,7 +217,7 @@ class VirtualFileIndexTests(unittest.TestCase):
             (d / "0.idx.9").write_bytes(data)
             entry = cpool.VirtualFileIndex(_LocalSource(root)).entry(64)
         self.assertEqual(entry["set"], 4)          # word 12, not word 0
-        self.assertEqual(entry["list_off"], list_off)
+        self.assertEqual(entry["set_a"], 1)
         self.assertEqual(entry["rec_off"], rec_off)
         self.assertNotEqual(rec_off, list_off - 12)
         self.assertEqual(entry["version"], 1234)
@@ -226,6 +226,8 @@ class VirtualFileIndexTests(unittest.TestCase):
         self.assertNotEqual(entry["mtime"], 0x22222222)
         self.assertEqual(entry["crc"], 0xAABBCCDD)
         self.assertEqual(entry["raw"][4], 0x64)
+        self.assertIsNone(entry["list_off"])                     # pointer A is in another set than B: not used for the list
+        self.assertEqual(((entry["raw"][0] & 0xFFFF) << 32) | entry["raw"][1], list_off)    # (its offset still parses)
         self.assertEqual(entry["raw"][10], 0x22222222)
 
     def test_entry_may_straddle_slices(self):
