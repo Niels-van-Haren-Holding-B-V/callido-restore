@@ -381,7 +381,9 @@ class Backup:
         st = self.pool.status(); st["lz4"] = True
         try: import lz4  # noqa
         except Exception: st["lz4"] = False
-        st["complete"] = self.pool_prepared()           # a run of this mapper version finished (partial maps are its honest result)
+        # Ready for restores: the backup carries its own chunk table (Pool/chunk_index locates every chunk exactly, no map is
+        # needed), or a preparation of this mapper version finished (the inferred map, for backups without the table).
+        st["complete"] = bool(st.get("chunk_index")) or self.pool_prepared()
         st["paused"] = self.pool_paused()
         return st
     # --- preparation state the UI and the auto-start read (persisted next to the pool files): finished by which mapper version,
@@ -412,6 +414,11 @@ class Backup:
         from callido_restore.pool import poolmap, indexfetch
         from callido_restore.core import pool
         pool_dir = self.src.index_dir / "pool"; pool_dir.mkdir(parents=True, exist_ok=True)
+        if self.pool.ci.available():
+            # Pool/chunk_index answers "where is chunk g" for every chunk; a restore fetches only the table slices and the
+            # bucket indexes it touches. Nothing to prepare (the inferred map is the fallback for backups without the table).
+            job["message"] = "nothing to prepare: the backup has its own chunk table"; job["progress"] = 1.0
+            return {"chunk_index": True, "mapped": 0, "upto": 0}
         try: self._prepared_file().unlink()                        # a run in progress is not a finished one
         except OSError: pass
         log = lambda m: job.__setitem__("message", str(m))
