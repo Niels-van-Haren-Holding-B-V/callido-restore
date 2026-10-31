@@ -1,5 +1,12 @@
 **Callido Restore** restores files from a Synology Hyper Backup (`.hbk`) without Hyper Backup or a working NAS. It reads the backup's own metadata, shows every backup run on a timeline, and restores the folders you pick to a NAS share or a local folder. Files already at the destination are never overwritten or deleted, and the backup source is only read.
 
+## What's new in 0.3.2
+
+- **The bucket-index download runs 64 transfers in parallel instead of 16.** Index files are small and Google's per-file start latency is around a second, so parallelism is what sets the speed: measured on a real backup with an own key, three times the throughput; beyond 64 Google's rate limit caps it.
+- **You can see that your Google key is in use.** Once a Drive connection has a key of its own, the overview and the preparation step say so ("Your own Google key is in use") instead of still offering the link; the key panel says the same and offers to replace it.
+- **The key is checked before the sign-in.** A client id that does not look like one is refused at once, and the pair is checked with Google before the browser opens, with a clear message when Google does not know it.
+- After the sign-in the page updates itself and the confirmation stays visible longer.
+
 ## What's new in 0.3.1
 
 - **The Google key is one click away.** The overview and the preparation step show "Downloads slow? Give your Google Drive connection a key of your own". It opens straight on your existing connection with the key panel unfolded, the button reads "Sign in again with this key", and the dialog closes when the sign-in is done. Nothing is added or re-downloaded: the connection keeps its name, and all index files and listings stay.

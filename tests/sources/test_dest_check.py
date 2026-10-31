@@ -178,11 +178,13 @@ class DestCheckApiTests(SourceFixture):
             calls.append(args)
             if args[1] == "config": return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
             return subprocess.CompletedProcess(args, 0, stdout=json.dumps([{"Name": "Synology"}]), stderr="")
-        body = json.dumps({"kind": "drive", "name": "gdrive", "client_id": "123.apps.googleusercontent.com", "client_secret": "GOCSPX-x"}).encode()
+        body = json.dumps({"kind": "drive", "name": "gdrive", "client_id": "123-abc.apps.googleusercontent.com", "client_secret": "GOCSPX-x"}).encode()
         base = f"http://127.0.0.1:{self.srv.server_address[1]}/api/rclone/connect"
         from callido_restore.sources import rclone
+        from callido_restore.sources import google
         with mock.patch.object(subprocess, "run", run), mock.patch.object(rclone, "forget") as forget, mock.patch.object(rclone, "fscache_clear") as clear, \
-             mock.patch.object(rclone, "authorize_drive", return_value='{"access_token":"t"}') as auth, mock.patch.object(rclone, "remotes", return_value=[("nas:", "smb")]):
+             mock.patch.object(rclone, "authorize_drive", return_value='{"access_token":"t"}') as auth, mock.patch.object(rclone, "remotes", return_value=[("nas:", "smb")]), \
+             mock.patch.object(google, "client_check", return_value="") as check:
             with urlopen(Request(base, data=body, headers={"Content-Type": "application/json"})) as r: job = json.loads(r.read())
             for _ in range(50):
                 with urlopen(f"http://127.0.0.1:{self.srv.server_address[1]}/api/job?id={job['id']}") as r: j = json.loads(r.read())
@@ -191,20 +193,22 @@ class DestCheckApiTests(SourceFixture):
         self.assertEqual(j["state"], "done", j); self.assertEqual(j["result"], {"remote": "gdrive:", "shares": ["Synology"]})
         create = [c for c in calls if c[1] == "config"][0]
         self.assertEqual(create[1:5], ["config", "create", "gdrive", "drive"])
-        self.assertIn("client_id=123.apps.googleusercontent.com", create); self.assertIn("client_secret=GOCSPX-x", create)
+        self.assertIn("client_id=123-abc.apps.googleusercontent.com", create); self.assertIn("client_secret=GOCSPX-x", create)
+        check.assert_called_once_with("123-abc.apps.googleusercontent.com", "GOCSPX-x")                  # the pair is checked with Google before the browser opens
         self.assertIn('token={"access_token":"t"}', create); self.assertIn("--non-interactive", create)      # the token from the sign-in, no questions
-        self.assertEqual(auth.call_args[0][:2], ("123.apps.googleusercontent.com", "GOCSPX-x"))
+        self.assertEqual(auth.call_args[0][:2], ("123-abc.apps.googleusercontent.com", "GOCSPX-x"))
         self.assertTrue(str(auth.call_args[1]["template"]).endswith("static/oauth.html"))
         forget.assert_called_once(); clear.assert_called_once()
 
-    def _connect(self, body, remotes):
-        from callido_restore.sources import rclone
+    def _connect(self, body, remotes, check=""):
+        from callido_restore.sources import rclone, google
         calls = []
         def run(args, **kw):
             calls.append(args); return subprocess.CompletedProcess(args, 0, stdout="" if args[1] == "config" else json.dumps([{"Name": "Synology"}]), stderr="")
         base = f"http://127.0.0.1:{self.srv.server_address[1]}/api/rclone/connect"
         with mock.patch.object(subprocess, "run", run), mock.patch.object(rclone, "forget"), mock.patch.object(rclone, "fscache_clear"), \
-             mock.patch.object(rclone, "authorize_drive", return_value='{"access_token":"t"}'), mock.patch.object(rclone, "remotes", return_value=remotes):
+             mock.patch.object(rclone, "authorize_drive", return_value='{"access_token":"t"}'), mock.patch.object(rclone, "remotes", return_value=remotes), \
+             mock.patch.object(google, "client_check", return_value=check):
             try:
                 with urlopen(Request(base, data=json.dumps(body).encode(), headers={"Content-Type": "application/json"})) as r: job = json.loads(r.read())
             except HTTPError as e:
@@ -217,14 +221,31 @@ class DestCheckApiTests(SourceFixture):
 
     def test_rekeying_an_existing_drive_remote_updates_it(self):
         """A known Drive remote gets `config update` (its other options survive), not a fresh section."""
-        code, j, calls = self._connect({"kind": "drive", "name": "gdrive", "client_id": "1.apps.googleusercontent.com", "client_secret": "s"}, [("gdrive:", "drive"), ("nas:", "smb")])
+        code, j, calls = self._connect({"kind": "drive", "name": "gdrive", "client_id": "1-a.apps.googleusercontent.com", "client_secret": "s"}, [("gdrive:", "drive"), ("nas:", "smb")])
         self.assertEqual((code, j["state"]), (200, "done"), j)
         cfg = [c for c in calls if c[1] == "config"][0]
-        self.assertEqual(cfg[1:4], ["config", "update", "gdrive"]); self.assertIn("client_id=1.apps.googleusercontent.com", cfg); self.assertIn("--non-interactive", cfg)
+        self.assertEqual(cfg[1:4], ["config", "update", "gdrive"]); self.assertIn("client_id=1-a.apps.googleusercontent.com", cfg); self.assertIn("--non-interactive", cfg)
+
+    def test_a_malformed_client_id_is_refused_before_anything_runs(self):
+        code, j, calls = self._connect({"kind": "drive", "name": "gdrive", "client_id": "GOCSPX-oops", "client_secret": "s"}, [("gdrive:", "drive")])
+        self.assertEqual(code, 400); self.assertIn("apps.googleusercontent.com", j["error"]); self.assertEqual(calls, [])
+
+    def test_a_pair_google_does_not_know_fails_the_job_before_the_browser(self):
+        from callido_restore.sources import rclone
+        with mock.patch.object(rclone, "authorize_drive") as auth:
+            code, j, calls = self._connect({"kind": "drive", "name": "gdrive", "client_id": "1-a.apps.googleusercontent.com", "client_secret": "wrong"}, [("gdrive:", "drive")], check="Google does not know this client id and secret together")
+        self.assertEqual((code, j["state"]), (200, "error")); self.assertIn("does not know", j["error"]); auth.assert_not_called()
+
+    def test_remotes_endpoint_tells_which_connections_have_their_own_key(self):
+        from callido_restore.sources import rclone
+        with mock.patch.object(rclone, "remotes", return_value=[("gdrive:", "drive"), ("nas:", "smb")]), \
+             mock.patch.object(rclone, "remote_info", return_value={"gdrive:": {"type": "drive", "own_key": True}, "nas:": {"type": "smb", "own_key": False}}):
+            with urlopen(f"http://127.0.0.1:{self.srv.server_address[1]}/api/remotes") as r: out = json.loads(r.read())
+        self.assertEqual(out["types"], {"gdrive:": "drive", "nas:": "smb"}); self.assertEqual(out["keys"], {"gdrive:": True, "nas:": False})
 
     def test_a_non_drive_remote_is_never_turned_into_drive(self):
         """The SMB restore target (or any other remote) under the selected name is refused before anything runs."""
-        code, j, calls = self._connect({"kind": "drive", "name": "nas", "client_id": "1.apps.googleusercontent.com", "client_secret": "s"}, [("nas:", "smb")])
+        code, j, calls = self._connect({"kind": "drive", "name": "nas", "client_id": "1-a.apps.googleusercontent.com", "client_secret": "s"}, [("nas:", "smb")])
         self.assertEqual(code, 400); self.assertIn("smb connection", j["error"]); self.assertEqual(calls, [])
 
     def test_an_smb_share_never_replaces_a_drive_remote(self):
