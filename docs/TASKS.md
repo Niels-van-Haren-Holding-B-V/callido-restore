@@ -90,25 +90,9 @@ IN PROGRESS (hbk-2): release notes (`.github/RELEASE_NOTES.md`: both dmgs, Gatek
 is the owner's call once main is green.
 
 ## H18 — No personal data in the repo (owner, 2026-10-31 00:35; rule in docs/HANDOVER.md)
-IN PROGRESS (hbk-2): scrub of docs, handovers and `tests/test_hbk_pool.py`; `scripts/check_private.sh` + CI job `private-check`
-(denylist from the `PRIVATE_DENYLIST` secret or a gitignored `.private-denylist`, plus built-in patterns for `/Users/`,
-private IPs and e-mail addresses). hbk-3 scrubs `tests/test_dest_check.py`, `tests/test_restore_mapping.py`, `hbk_explorer.py` and
-`static/index.html` inside #49/#50. No history rewrite.
-
-## H8 — Per-folder destination mapping (Niels, 2026-10-30 23:29; see docs/handovers/2026-10-30-2318-nas-triage.md)
-IN REVIEW (hbk-3): PR #49 (branch `hbk3/dest-mapping4`, on main after #44/#45; replaces #46/#42/#40). Each local root gets its own `.hbk-restore-<job>` staging folder and `place_file`; remote roots are listed up front. Target step is a table "Folder from backup → Restore to", one row per
-shared folder in the selection, defaulting to the NAS share with the same name; selected subfolders keep their relative path under
-it (H13 rule), no version or source folder in between. "Check targets and preview" shows one sample path per row. Each item carries its `dest`
-(`/api/restore`, persisted in the job, kept across pause/resume); `file_target()` / `restore_roots()` in `hbk_explorer.py`.
-Advanced keeps "everything under one folder" (`<folder>/<share>/<path>`). Tests: `tests/test_restore_mapping.py`.
-
-## H13 — Folder tree selection (Niels, 2026-10-31 00:01; see docs/handovers/2026-10-30-2318-nas-triage.md)
-IN REVIEW (hbk-3): PR #52 (branch `hbk3/tree-select3`, on main after #49); replaces #50/#48. Step 2 of the restore wizard is a tree with
-checkboxes: shared folders at the top, ▸ loads children on demand (`/api/children`), ticking a folder takes everything under it,
-unticking a subfolder under a ticked folder replaces that folder by its other children (so the basket stays an inclusion list and the
-restore plan, pause/resume and the H8 mapping need nothing new), parents with a partial selection show an indeterminate checkbox.
-"Selected: N files · size" is counted live in SQL (`/api/restore_count`, honours the metadata skip). Single files are shown with an
-Advanced switch. The destination rule (per shared folder, subfolders keep their relative path) is in H8.
+DONE (hbk-2): #51 (docs, handovers, `tests/test_hbk_pool.py`, `scripts/check_private.sh`, CI job `private-check`); hbk-3 scrubbed
+the tests, `hbk_explorer.py` and `static/index.html` in #49/#52. Open for the owner: add the `PRIVATE_DENYLIST` repository secret
+(one extended regex per line); until then CI runs only the built-in patterns. Run `scripts/check_private.sh` locally before pushing.
 
 ## H17 — Exact folder selection, safe resume (Reviewer, 2026-10-31 00:34)
 IN REVIEW (hbk-3): branch `hbk3/h17` on main (after H8). `restore_plan` and `restore_count` select a folder by an exact,
