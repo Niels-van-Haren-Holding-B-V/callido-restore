@@ -72,6 +72,12 @@ class AnchorFirst(unittest.TestCase):
             res, upto = poolmap.build_poolmap_anchor(Src(), out, log=lambda m: None)
         self.assertEqual((res, upto), ({0: 1, 2: 0}, 3)); self.assertEqual(calls[0]["mapped_upto"], 3)     # v3 ran over all 3 buckets: complete, one unowned
         self.assertTrue(calls[0]["complete"]); self.assertIs(calls[0]["flags"], flags); self.assertEqual(calls[0]["report"], {"placed": 3})
+        with mock.patch.object(poolmap2, "build_writers", return_value="W"), \
+             mock.patch.object(anchor, "scan_anchors", return_value=("A", {0: 5, 1: 5, 2: 5})), \
+             mock.patch.object(place, "resolve_and_place_v3", return_value=({0: 1, 1: 2}, "P", {}, flags)), \
+             mock.patch.object(anchor, "export_map", side_effect=lambda *a, **k: calls.append(k)):
+            poolmap.build_poolmap_anchor(Src(), out, log=lambda m: None, max_bucket=1)
+        self.assertFalse(calls[-1]["complete"]); self.assertEqual(calls[-1]["mapped_upto"], 2)         # limited to the first buckets: not complete
         self.assertEqual(scan.call_args[0][:2], (scan.call_args[0][0], out)); placer.assert_called_once()
         index = placer.call_args[0][2]
         self.assertEqual((index.counts, index.revs, index.ubytes), ({0: 5, 1: 5, 2: 5}, {0: 2}, {0: 1234}))   # totals from anchors.json

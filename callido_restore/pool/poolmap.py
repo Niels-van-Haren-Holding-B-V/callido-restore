@@ -315,7 +315,8 @@ def build_poolmap_anchor(source, outdir, log=print, max_bucket=None):
             if e.get("t") == "index" and e.get("name") and e.get("rev", 0) >= names.get(e["b"], ("", -1))[1]: names[e["b"]] = (e["name"], e["rev"])
         index = place.Index(counts, anchor.bucket_revs(listing), lambda b: str(source.ensure(f"Pool/0/{b // 2048}/{names[b][0]}")),
                             ubytes=anchor.load_bucket_totals(outdir), lru=1500)          # the scan just saved them
-        owner, placements, report, flags = place.resolve_and_place_v3(writers, anchors, index, log=log, max_bucket=max_bucket); complete = True
+        owner, placements, report, flags = place.resolve_and_place_v3(writers, anchors, index, log=log, max_bucket=max_bucket)
+        complete = max_bucket is None            # a run limited to the first buckets is a test map, not a complete one
     buckets = sorted(b for b in counts if max_bucket is None or b <= max_bucket)
     # v3 ran over every bucket: the map is complete even when buckets stay without an owner (they hold files it could not
     # locate; a rerun gives the same result, only more loaded snapshots add tags). v2: partial when not every bucket got an owner.
