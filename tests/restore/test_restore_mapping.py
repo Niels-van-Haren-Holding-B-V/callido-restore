@@ -207,6 +207,19 @@ class ResumeCountsTests(_Fixture):
         res = b2.restore(saved["items"], saved["dest"], job2, start_at=saved["next_index"])
         self.assertEqual(res["errors"], 251); self.assertEqual(len(job2["errors"]), 201)
 
+    def test_unverified_total_survives_the_capped_list(self):                # H32.1: the same for the unverified list (UNVERIFIED_MAX entries)
+        from callido_restore.restore import backup as B
+        job = self.job("unv"); job["cancel"] = True
+        self.b.restore(self.items, "", job)
+        saved = json.loads((paths.JOBS_DIR / f"{job['id']}.json").read_text())
+        saved["unverified"] = [{"path": f"A/u{i}", "reason": "placed without a size check"} for i in range(B.UNVERIFIED_MAX)]; saved["unverified_total"] = B.UNVERIFIED_MAX + 50; saved["next_index"] = 1
+        job2 = self.job("re3"); job2.update({k: saved[k] for k in ("done_files", "skipped", "errors", "errors_total", "verified", "identical_copy", "unverified", "unverified_total")})
+        class Pool(FakePool):                                                   # a pool-stored file (off >= 0) is the one whose placement gets checked
+            def verification(self2, off): return ("unverified", "placed without a size check") if off == 3 else ("verified", "")
+        b2 = FakeBackup(self.src, [dict(f, off=3) if f["path"] == "docs/z.txt" else f for f in FILES]); b2.pool = Pool()
+        res = b2.restore(saved["items"], saved["dest"], job2, start_at=saved["next_index"])
+        self.assertEqual(res["unverified"], B.UNVERIFIED_MAX + 51); self.assertEqual(len(job2["unverified"]), B.UNVERIFIED_MAX)
+
 
 class RestoreApiTests(_Fixture):
     def setUp(self):

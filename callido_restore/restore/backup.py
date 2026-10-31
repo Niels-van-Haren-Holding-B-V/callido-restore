@@ -508,7 +508,7 @@ class Backup:
             jf.write_text(json.dumps({"id": job["id"], "src": self.src.id, "items": items, "dest": dest, "roots": roots, "skip_meta": skip_meta,
                                       "next_index": job.get("next_index", 0), "done_files": job.get("done_files", 0), "skipped": job.get("skipped", 0),
                                       "errors": job.get("errors", [])[-200:], "errors_total": job.get("errors_total", len(job.get("errors", []))), "total_files": job.get("total_files"), "total_bytes": job.get("total_bytes"),
-                                      "verified": job.get("verified", 0), "identical_copy": job.get("identical_copy", 0), "unverified": job.get("unverified", [])[:UNVERIFIED_MAX],
+                                      "verified": job.get("verified", 0), "identical_copy": job.get("identical_copy", 0), "unverified": job.get("unverified", [])[:UNVERIFIED_MAX], "unverified_total": job.get("unverified_total", len(job.get("unverified", []))),
                                       "done_bytes": job.get("done_bytes", 0), "state": state, "label": job["label"], "started": job["started"], "updated": time.time()}))
         roots = restore_roots(items, dest)                       # every folder written into, local paths or rclone remotes
         existing = {}                                            # remote root -> files already there (never written over)
@@ -525,6 +525,7 @@ class Backup:
         for k, zero in (("done_files", 0), ("errors", []), ("skipped", 0), ("verified", 0), ("identical_copy", 0), ("unverified", [])):
             if not start_at or k not in job: job[k] = zero if not isinstance(zero, list) else list(zero)
         if not start_at or "errors_total" not in job: job["errors_total"] = len(job["errors"])        # a seed without the counter: the list is all we know
+        if not start_at or "unverified_total" not in job: job["unverified_total"] = len(job["unverified"])
         # verified / identical_copy / unverified: per restored file, how its placement was established
         pool = self.pool; fh_cache = {}
         def restored(f):
@@ -539,10 +540,12 @@ class Backup:
                 except Exception as e: st, why = "unverified", f"status check failed: {e}"
             if st == "verified": job["verified"] += 1
             elif st == "identical_copy": job["identical_copy"] += 1
-            elif len(job["unverified"]) < UNVERIFIED_MAX: job["unverified"].append({"path": f"{f['share']}/{f['path']}", "reason": why})
+            else:
+                job["unverified_total"] += 1                                              # counted always; listed up to the cap
+                if len(job["unverified"]) < UNVERIFIED_MAX: job["unverified"].append({"path": f"{f['share']}/{f['path']}", "reason": why})
         def result(**extra):
             return {**extra, "restored": job["done_files"] - job["skipped"], "skipped": job["skipped"], "errors": job["errors_total"], "verified": job["verified"],
-                    "identical_copy": job["identical_copy"], "unverified": len(job["unverified"])}
+                    "identical_copy": job["identical_copy"], "unverified": job["unverified_total"]}
         # --- bucket prefetch (parallel downloads ahead of the extractor) + LRU eviction of downloaded bucket data
         import concurrent.futures, threading
         cache_limit = int(os.environ.get("HBK_CACHE_GB", "20")) * (1 << 30)
