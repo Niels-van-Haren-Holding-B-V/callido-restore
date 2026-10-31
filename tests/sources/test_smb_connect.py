@@ -38,7 +38,7 @@ class SmbErrors(unittest.TestCase):
         self.assertIn("Details: couldn't connect SMB", msg)
 
     def test_no_hint_for_local_addresses_and_names(self):
-        for h in (ip(192, 168, 1, 2), ip(10, 0, 0, 5), ip(172, 20, 1, 1), "nas", "nas.local", "2001:db8::1", ip(169, 254, 1, 1)):
+        for h in (ip(192, 168, 1, 2), ip(10, 0, 0, 5), ip(172, 20, 1, 1), "nas", "nas.local", "2001:db8::1", ip(169, 254, 1, 1), ip(100, 101, 102, 103), ip(100, 64, 0, 1)):   # 100.64/10: Tailscale / CGNAT
             self.assertEqual(rclone.smb_host_hint(h), "", h)
         self.assertIn("not an address on a local network", rclone.smb_host_hint(ip(8, 8, 8, 8)))
         self.assertNotIn("Did you mean", rclone.smb_host_hint(ip(8, 8, 8, 8)))

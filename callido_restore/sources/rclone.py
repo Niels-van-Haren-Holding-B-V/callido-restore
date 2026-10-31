@@ -378,15 +378,15 @@ def smb_address(raw):
     return h, None
 
 def smb_host_hint(host):
-    """A sentence when ``host`` is an IPv4 address outside the local-network ranges, which a NAS at home or in the office never
-    has: usually a typo (192.158.x.x for 192.168.x.x). '' otherwise (names, IPv6, local addresses)."""
+    """A sentence when ``host`` is a public (globally routable) IPv4 address, which a NAS at home, in the office or behind a
+    VPN such as Tailscale never has: usually a typo (192.158.x.x for 192.168.x.x). '' otherwise (names, IPv6, local addresses)."""
     import ipaddress
     try: ip = ipaddress.IPv4Address(host)
     except ValueError: return ""
-    if ip.is_private or ip.is_loopback or ip.is_link_local: return ""
+    if not ip.is_global: return ""                          # local, link-local, and VPN/CGNAT (Tailscale 100.64/10) addresses
     a, b, c, d = str(ip).split(".")
     guess = f" Did you mean {'.'.join(['192', '168', c, d])}?" if a == "192" and b != "168" else ""
-    return f"{host} is not an address on a local network; a NAS normally has one starting with 192.168., 10. or 172.16-31.{guess}"
+    return f"{host} is not an address on a local network; a NAS normally has one starting with 192.168., 10. or 172.16-31. (or a VPN address such as Tailscale's 100.x).{guess}"
 
 # rclone / go-smb2 / Windows socket wording -> what a person can act on. First match wins.
 _SMB_ERRORS = [
