@@ -217,7 +217,7 @@ class Source:
                     ok = False; errs.append(f"{remote}: {str(e)[-160:]}")
                 if ok:
                     tmp.rename(dest)
-                    parent = str(Path(rel).parent).strip("/")
+                    parent = Path(rel).parent.as_posix().strip("/")          # listing keys use "/" (Windows: not "\\")
                     with self._lock: self._list.pop("" if parent == "." else parent, None)   # that listing is stale now (root key is "")
                     return dest
                 if tmp.exists(): tmp.unlink()
