@@ -302,12 +302,14 @@ const sinceText=s=>{const d=Math.max(0,Math.round(Date.now()/1000-(s||Date.now()
 const STALE={};function staleInfo(job){if(job.state!=='running')return null;const key=`${job.progress||0}|${job.done_bytes||0}`;const now=Date.now();const s=STALE[job.id]||(STALE[job.id]={key,t:now});
   if(s.key!==key){s.key=key;s.t=now;return null}return now-s.t>=3000?Math.round((now-s.t)/1000):null}
 function progressHtml(job,rich,extra){const pct=Math.round((job.progress||0)*100);const running=job.state==='running';
-  const eta=running?etaText(job.id,job.progress||0,job.done_bytes,job.total_bytes):'';const stale=staleInfo(job);
+  // Once every byte is on disk the job is computing (the pool map): no speed slot, and the time left follows the progress, not the bytes.
+  const dlDone=!!job.total_bytes&&(job.done_bytes||0)>=job.total_bytes;
+  const eta=running?etaText(job.id,job.progress||0,dlDone?undefined:job.done_bytes,dlDone?undefined:job.total_bytes):'';const stale=staleInfo(job);
   // Fixed slots that never disappear once the job runs: phase | done of total | speed | time left | elapsed. The "still working"
   // note has its own small line under the bar, so the main line keeps its shape from poll to poll.
   const slots=[];
-  if(job.total_bytes)slots.push(`${human(job.done_bytes||0)} of ${human(job.total_bytes)} (${pct}%)`);else slots.push(`${pct}%`);
-  if(running&&job.total_bytes)slots.push(speedText(job.id));
+  if(dlDone)slots.push(`${human(job.total_bytes)} downloaded · ${pct}%`);else if(job.total_bytes)slots.push(`${human(job.done_bytes||0)} of ${human(job.total_bytes)} (${pct}%)`);else slots.push(`${pct}%`);
+  if(running&&job.total_bytes&&!dlDone)slots.push(speedText(job.id));
   if(running)slots.push(eta||'time left: estimating…');
   if(running)slots.push(`${sinceText(job.started)} elapsed`);
   if(running&&!(job.progress>0)&&!(job.done_bytes>0))
