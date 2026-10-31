@@ -1,5 +1,11 @@
 **Callido Restore** restores files from a Synology Hyper Backup (`.hbk`) without Hyper Backup or a working NAS. It reads the backup's own metadata, shows every backup run on a timeline, and restores the folders you pick to a NAS share or a local folder. Files already at the destination are never overwritten or deleted, and the backup source is only read.
 
+## What's new in 0.3.8
+
+- **The pool map places far more of the backup, and only what it can check.** The map builder now knows that a file backed up a second time (another share, a move, a later run) stores no data of its own, that bucket numbers are reused over time, and that every chunk has its own length, so a file's place in the pool can be checked against its size. On a real backup it places 74.5 % of all bytes and 1,279 of 1,593 files over 100 MB (it was 57.6 % and 696), and 454,000 files are verified by their size. Where the data is too alike to decide, it leaves the file out rather than guess (#98, #99, #100).
+- **Restore results say what was checked.** Every restored file is counted as checked (its place in the backup matched the file size and every block's checksum was verified on the way out; this is not a whole-file checksum), from an identical copy, or couldn't be verified. The unverified files are listed with a plain reason, and a restore with such files is marked "needs checking" in the earlier-restores list (#101, #102).
+- The preparation's memory use is capped at every step of the mapping, and the mapping phase itself needs about 2 GB.
+
 ## What's new in 0.3.7
 
 - **The pool-map scan reads the index files from where they are.** For a backup kept on Google Drive it looked for them under a local folder that does not exist; it now resolves every file through the app cache. Without this the mapper could not run on a Drive-backed backup at all.
