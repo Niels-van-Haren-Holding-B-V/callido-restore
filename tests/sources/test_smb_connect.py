@@ -17,6 +17,14 @@ class SmbHost(unittest.TestCase):
             self.assertEqual(rclone.smb_host(raw), want, raw)
 
 
+class SmbAddress(unittest.TestCase):
+    def test_port_split_off(self):
+        for raw, want in [("nas", ("nas", None)), ("nas:445", ("nas", "445")), ("\\\\nas:4450\\x", ("nas", "4450")),
+                          ("192.0.2.10:445", ("192.0.2.10", "445")), ("[2001:db8::1]:445", ("2001:db8::1", "445")),
+                          ("[2001:db8::1]", ("2001:db8::1", None)), ("2001:db8::1", ("2001:db8::1", None)), ("nas:x", ("nas", None))]:
+            self.assertEqual(rclone.smb_address(raw), want, raw)
+
+
 class Elapsed(unittest.TestCase):
     def test_message_counts_up_and_result_passes_through(self):
         job, seen = {}, []
@@ -58,6 +66,27 @@ class ConnectApi(unittest.TestCase):
              mock.patch("callido_restore.server.api.start_job", return_value={"id": "j1"}) as sj:
             code, out = self.post({"kind": "smb", "name": "nas", "host": "\\\\nas\\Restore", "user": "u", "password": "p"})
         self.assertEqual((code, out), (200, {"id": "j1"})); run.assert_not_called(); sj.assert_called_once()
+
+    def test_job_uses_the_port_option_and_a_fast_probe(self):
+        import subprocess
+        ran, listed, result = [], {}, {}
+        def fake_run(args, **kw):
+            ran.append(list(args))
+            return subprocess.CompletedProcess(args, 0, "OBSCURED\n" if "obscure" in args else "", "")
+        def fake_ls(path, **kw):
+            listed.update(kw, path=path); return [{"Name": "Restore"}, {"Name": "homes"}]
+        def run_now(fn, label):
+            job = {}; result.update(fn(job)); return {"id": "j1"}
+        with mock.patch.object(rclone, "remotes", return_value=[]), mock.patch("subprocess.run", side_effect=fake_run), \
+             mock.patch.object(rclone, "ls", side_effect=fake_ls), mock.patch.object(rclone, "forget"), \
+             mock.patch.object(rclone, "fscache_clear"), mock.patch("callido_restore.server.api.start_job", side_effect=run_now):
+            code, _ = self.post({"kind": "smb", "name": "nas", "host": "smb://nas:4450/Restore", "user": "u", "password": "p"})
+        self.assertEqual(code, 200)
+        create = next(a for a in ran if "create" in a)
+        self.assertIn("host=nas", create); self.assertIn("port=4450", create); self.assertIn("pass=OBSCURED", create)
+        self.assertEqual(listed["path"], "nas:")
+        self.assertEqual(listed["config"], {"ConnectTimeout": "20s", "LowLevelRetries": 1, "Retries": 1})
+        self.assertEqual(result, {"remote": "nas:", "shares": ["Restore", "homes"]})
 
 
 if __name__ == "__main__":
