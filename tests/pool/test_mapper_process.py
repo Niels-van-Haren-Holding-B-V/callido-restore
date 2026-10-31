@@ -90,3 +90,21 @@ class AnchorFirst(unittest.TestCase):
         self.assertEqual(poolmap.read_map(out), ({1: (0, 0)}, 1))
         json.dump({"buckets": {"1": 2, "2": 3}, "mapped_upto": 2}, open(os.path.join(out, "poolmap2.json"), "w"))
         self.assertEqual(poolmap.read_map(out), ({1: 2, 2: 3}, 2))
+
+
+class ScanWorkers(unittest.TestCase):
+    """The anchor scan's workers: the module with -m from a checkout, the app binary with --scan-worker when frozen."""
+    def test_worker_command(self):
+        from callido_restore.pool import anchor
+        argv, kw = anchor._worker_command("/t/job.pkl", "/t/out.pkl")
+        self.assertEqual(argv[1:], ["-m", "callido_restore.pool.anchor", "--worker", "/t/job.pkl", "/t/out.pkl"]); self.assertIn("PYTHONPATH", kw["env"])
+        with mock.patch.object(sys, "frozen", True, create=True):
+            argv, kw = anchor._worker_command("/t/job.pkl", "/t/out.pkl")
+        self.assertEqual(argv, [sys.executable, "--scan-worker", "/t/job.pkl", "/t/out.pkl"]); self.assertEqual(kw, {})
+
+    def test_frozen_app_scans_with_several_workers(self):
+        """scan_anchors used to force one worker when frozen; the worker count now only depends on MAX_WORKERS and the CPUs."""
+        import inspect
+        from callido_restore.pool import anchor
+        src = inspect.getsource(anchor.scan_anchors)
+        self.assertNotIn('1 if getattr(sys, "frozen"', src); self.assertIn("MAX_WORKERS", src)

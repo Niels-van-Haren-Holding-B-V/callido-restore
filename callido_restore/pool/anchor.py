@@ -59,17 +59,21 @@ def _worker_main(argv):
         if _rss_mb() > WORKER_RSS_MB: raise MemoryError(f"scan worker RSS {_rss_mb():.0f} MB > {WORKER_RSS_MB} MB at bucket {b}")
     with open(argv[1], "wb") as f: pickle.dump((hits, checks), f)
 
+def _worker_command(jp, op):
+    """(argv, kwargs) for one scan worker: the frozen app binary with --scan-worker (app/main.py dispatches it to _worker_main),
+    or from a checkout the module with -m, the folder holding callido_restore/ on PYTHONPATH so its imports resolve."""
+    import sys
+    if getattr(sys, "frozen", False): return [sys.executable, "--scan-worker", jp, op], {}
+    root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    env = dict(os.environ, PYTHONPATH=root + os.pathsep + os.environ.get("PYTHONPATH", ""))
+    return [sys.executable, "-m", "callido_restore.pool.anchor", "--worker", jp, op], {"env": env}
+
 def _run_worker(job, tmpdir, n):
     import pickle, subprocess, sys
     jp = os.path.join(tmpdir, f"job{n}.pkl"); op = os.path.join(tmpdir, f"out{n}.pkl")
     with open(jp, "wb") as f: pickle.dump(job, f)
-    # Run the worker as a module so its package imports resolve: the folder holding callido_restore/ goes on PYTHONPATH.
-    # In the frozen .app sys.executable is the app binary and -m cannot work (nor could the old script path); the app runs
-    # one in-process worker (see scan_anchors). When the anchor scan moves into the app, give the entry point a --worker
-    # dispatch that imports this module and calls _worker_main instead of -m.
-    root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    env = dict(os.environ, PYTHONPATH=root + os.pathsep + os.environ.get("PYTHONPATH", ""))
-    p = subprocess.run([sys.executable, "-m", "callido_restore.pool.anchor", "--worker", jp, op], capture_output=True, text=True, env=env)
+    argv, kw = _worker_command(jp, op)
+    p = subprocess.run(argv, capture_output=True, text=True, **kw)
     if p.returncode: raise MemoryError(f"scan worker {n} failed: {p.stderr.strip().splitlines()[-1] if p.stderr.strip() else p.returncode}")
     with open(op, "rb") as f: return pickle.load(f)
 
@@ -116,8 +120,7 @@ def scan_anchors(source, outdir, listing, writers, log=print, max_bucket=None, w
     root = str(source.local)
     for b in buckets:
         if not os.path.isfile(os.path.join(root, f"Pool/0/{b // 2048}/{names1[b]}")): source.ensure(f"Pool/0/{b // 2048}/{names1[b]}")
-    import sys
-    workers = 1 if getattr(sys, "frozen", False) else max(1, min(workers or MAX_WORKERS, MAX_WORKERS, os.cpu_count() or 1))
+    workers = max(1, min(workers or MAX_WORKERS, MAX_WORKERS, os.cpu_count() or 1))     # frozen too: the app binary is the worker
     log(f"anchor scan (x{workers}): {ntag:,} tagged records, {sum(len(v) for v in idx.values()):,} tags, {len(idx):,} keys, {len(buckets):,} buckets, rss {_rss_mb():.0f} MB")
     t0 = time.time(); hits = {}; checks = 0
     def merge(part):
