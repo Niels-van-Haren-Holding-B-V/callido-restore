@@ -425,8 +425,7 @@ class BuildPoolWiringTests(unittest.TestCase):
 
     def test_mapping_needs_a_raw_snapshot_on_this_mac(self):
         """Without any raw <ver>.db snapshot the record tags would be empty and the map anchor-less: the preparation says what
-        to load first; with one, the mapper runs."""
-        self.src.remotes = ["remote:hbk"]
+        to load first; with one, the mapper runs. No remote on the source: CI has no rclone, and nothing here needs one."""
         fetch_ok = lambda *_a, **_k: {"stopped": False, "directories": 1, "directories_complete": 1, "failed": [], "mismatch_count": 0}
         with mock.patch("callido_restore.core.pool.build_runs", lambda *_a, **_k: None), \
              mock.patch("callido_restore.core.pool.build_recsizes", lambda *_a, **_k: None), \
