@@ -109,7 +109,6 @@ class Rotation(unittest.TestCase):
     def test_reused_bucket_ids_restore_every_run(self):
         self.check(self.run_flow(rotate_copy=False))
 
-    @unittest.expectedFailure
     def test_copy_of_a_rotated_original_keeps_its_neighbours(self):
         """hbk-6 finding E6: run 102 copies a file that only a rotated-away run had. Its tag matches the original's entries in an
         older bucket (rev 100), so it is anchored behind in time; the record before it on the same writer (IMG_4107.jpg,
