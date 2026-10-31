@@ -235,7 +235,10 @@ def build_runs(source, outdir, log=print, cancelled=None):
         if cancelled is not None and cancelled(): return None
         w = WRITER_OF_SET[s]
         st = SlicedStream(source, f"Config/file_chunk{s}.index")
-        names = st.names(); paths = [st.slice_path(k) for k in sorted(names)]
+        names = st.names(); paths = []
+        for k in sorted(names):                                  # each slice may be a download: Stop between them
+            if cancelled is not None and cancelled(): return None
+            paths.append(st.slice_path(k))
         rec_off = array("q"); g0 = array("q"); ln = array("l"); nrec = 0; nrefs = 0
         def on_record(off, ids):
             nonlocal nrec, nrefs

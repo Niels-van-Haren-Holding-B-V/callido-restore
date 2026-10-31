@@ -52,26 +52,50 @@ class Cache(unittest.TestCase):
 
 
 class StaleDaemon(unittest.TestCase):
-    """A pid file from a killed app run: the pid is stopped only when it still runs an rclone rcd."""
+    """Pid files from killed app runs: a daemon is stopped only when its recorded parent is gone and the pid still runs rclone rcd."""
     def setUp(self):
         self.d = tempfile.mkdtemp(); self.addCleanup(shutil.rmtree, self.d, True)
         from callido_restore import paths
         p = mock.patch.object(paths, "CONF_DIR", __import__("pathlib").Path(self.d)); p.start(); self.addCleanup(p.stop)
+        self.dir = __import__("pathlib").Path(self.d)
+
+    def _pidfile(self, name, pid, parent):
+        (self.dir / name).write_text(json.dumps({"pid": pid, "parent": parent}))
 
     def test_no_pid_file(self):
-        self.assertFalse(rc.kill_stale())
+        self.assertEqual(rc.kill_stale(), 0)
+
+    def test_running_instance_is_left_alone(self):
+        self._pidfile("rclone-rcd-777.pid", 4242, 777)
+        with mock.patch.object(rc, "_alive", return_value=True), mock.patch.object(os, "kill") as kill:
+            self.assertEqual(rc.kill_stale(), 0); kill.assert_not_called()
+        self.assertTrue((self.dir / "rclone-rcd-777.pid").exists())
 
     def test_pid_reused_by_another_program_is_left_alone(self):
-        rc.PIDFILE().write_text("4242")
-        with mock.patch.object(rc, "_cmdline", return_value="/usr/bin/vim notes.txt"), mock.patch.object(os, "kill") as kill:
-            self.assertFalse(rc.kill_stale()); kill.assert_not_called()
-        self.assertFalse(rc.PIDFILE().exists())
-
-    def test_stale_rcd_is_stopped(self):
-        rc.PIDFILE().write_text("4242")
-        with mock.patch.object(rc, "_cmdline", return_value="/Applications/X.app/Contents/Frameworks/rclone rcd --rc-addr 127.0.0.1:5"), \
+        self._pidfile("rclone-rcd-777.pid", 4242, 777)
+        with mock.patch.object(rc, "_alive", return_value=False), mock.patch.object(rc, "_cmdline", return_value="/usr/bin/vim notes.txt"), \
              mock.patch.object(os, "kill") as kill:
-            self.assertTrue(rc.kill_stale()); kill.assert_called_once_with(4242, 15)
+            self.assertEqual(rc.kill_stale(), 0); kill.assert_not_called()
+        self.assertFalse((self.dir / "rclone-rcd-777.pid").exists())
+
+    def test_orphan_rcd_is_stopped(self):
+        self._pidfile("rclone-rcd-777.pid", 4242, 777)
+        with mock.patch.object(rc, "_alive", return_value=False), \
+             mock.patch.object(rc, "_cmdline", return_value="/Applications/X.app/Contents/Frameworks/rclone rcd --rc-addr 127.0.0.1:5"), \
+             mock.patch.object(os, "kill") as kill:
+            self.assertEqual(rc.kill_stale(), 1); kill.assert_called_once_with(4242, 15)
+
+    def test_old_format_file_is_dropped(self):
+        (self.dir / "rclone-rcd-1.pid").write_text("4242")
+        with mock.patch.object(os, "kill") as kill:
+            self.assertEqual(rc.kill_stale(), 0); kill.assert_not_called()
+        self.assertFalse((self.dir / "rclone-rcd-1.pid").exists())
+
+    def test_own_pidfile_is_written_and_removed(self):
+        if not (rc.RCLONE and shutil.which(rc.RCLONE)): self.skipTest("needs an rclone binary")
+        self.assertTrue(rc.start(timeout=15)); self.addCleanup(rc.stop)
+        f = rc.PIDFILE(); self.assertTrue(f.exists()); self.assertEqual(json.loads(f.read_text())["parent"], os.getpid())
+        rc.stop(); self.assertFalse(f.exists())
 
 
 class DeadDaemon(unittest.TestCase):
