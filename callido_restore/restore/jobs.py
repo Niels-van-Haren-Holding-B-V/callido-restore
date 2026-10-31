@@ -4,6 +4,10 @@ import threading, time, traceback, uuid
 
 JOBS = {}
 
+def _log(msg):
+    try: print(time.strftime("%Y-%m-%d %H:%M:%S"), msg, flush=True)
+    except Exception: pass                                  # no usable stdout (windowed app without a log file)
+
 def start_job(fn, label, **extra):
     """``extra`` keys (e.g. the source id of a pool job) are on the job before it is registered, so a concurrent lookup never
     sees a job without them."""
@@ -16,5 +20,7 @@ def start_job(fn, label, **extra):
             if not (isinstance(job["result"], dict) and job["result"].get("stopped")): job["progress"] = 1.0
         except Exception as e:
             job["state"] = "error"; job["error"] = f"{e}"; job["trace"] = traceback.format_exc()
+            # app.log (stdout in the packaged app): a failed connect or open used to leave no trace there at all
+            _log(f"job {label!r} failed after {time.time() - job['started']:.0f} s: {e}")
     threading.Thread(target=run, daemon=True).start()
     return job
