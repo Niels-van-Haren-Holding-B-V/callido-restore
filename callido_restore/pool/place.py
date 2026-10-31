@@ -318,8 +318,10 @@ def resolve_and_place_v3(writers, anchors, index, log=print, max_bucket=None):
     def search(b, bB, need_c, need_b):
         cands = [(x, counts[x], index.total(x)) for x in window(b, bB)]
         P_ = local_period(b) if bB is not None else None
-        if P_:
-            w_ = claimed.get(b)
+        w_ = claimed.get(b)
+        if P_ and isinstance(w_, int):
+            # Unique within the turn-predicted subset, not over every candidate: "verified" for such a spill means its size
+            # matches exactly under the turn model; a wrong pick would still fail the per-chunk md5 check when it is read.
             sub = [c for c in cands if predicted_owner(c[0], P_) == w_]
             if sub and (need_c or need_b):
                 us, _, nsol, over = _claim_search(sub, need_c, need_b)
@@ -489,7 +491,7 @@ def resolve_and_place_v3(writers, anchors, index, log=print, max_bucket=None):
                     if own_bytes(w, x) is None: flags["guessed"].add((w, x))
         return placed_n
     for rnd in range(ROUNDS):
-        todo, deferred = deferred, []
+        todo, deferred = deferred, []; period_cache.clear()             # owners change between rounds
         for w, ri, b, e in todo: place_anchored(w, ri, b, e, final=(rnd == ROUNDS - 1))
         guard("claims")
         if not gap_pass() and not deferred: break
