@@ -546,12 +546,15 @@ let sumTimer=null;function treeSummary(){const el=$('#rsSelSum');if(!el)return;i
 const PREP={src:null,timer:null,jobId:null};
 async function prepState(){let pool={},jobs=[];try{pool=await api('/api/pool',{src:S.src})}catch(e){return {error:e.message}}
   try{jobs=(await api('/api/jobs')).filter(j=>j.state==='running')}catch(e){}
-  const job=jobs.find(j=>j.label.startsWith('build pool map'))||null;const total=pool.total_buckets||0,mapped=pool.mapped_buckets||0;
+  const pools=jobs.filter(j=>j.label.startsWith('build pool map'));
+  const job=(pool.running?pools.find(j=>j.id===pool.running):null)||(pools.some(j=>j.src!=null)?pools.find(j=>j.src===S.src):(pool.running!==undefined?null:pools[0]))||null;
+  const total=pool.total_buckets||0,mapped=pool.mapped_buckets||0;
   const complete=pool.complete!=null?!!pool.complete:!!(total&&mapped>=total);
   const running=pool.running||(job&&job.id)||null;
   const paused=pool.paused!=null?!!pool.paused:localStorage.getItem('prepPaused:'+S.src)==='1';
   return {pool,job,running,complete,paused,total,mapped}}
-async function prepPause(){const id=PREP.jobId;try{await post('/api/pool/pause',{src:S.src})}catch(e){try{localStorage.setItem('prepPaused:'+S.src,'1');if(id)await api('/api/job/cancel',{id})}catch(e2){}}}
+async function prepPause(id){id=id||PREP.jobId;try{await post('/api/pool/pause',{src:S.src})}catch(e){try{localStorage.setItem('prepPaused:'+S.src,'1');if(id)await api('/api/job/cancel',{id})}catch(e2){}}}
+async function prepRunAgain(){try{await api('/api/pool/build',{src:S.src})}catch(e){toastError(e)}if(S.tab==='restore')tabRestore()}
 async function prepResume(){try{await post('/api/pool/resume',{src:S.src})}catch(e){try{localStorage.removeItem('prepPaused:'+S.src);await api('/api/pool/build',{src:S.src})}catch(e2){toastError(e2)}}}
 function prepPillRender(st){const pill=$('#prepPill');if(!pill)return;if(!st||st.error||st.complete||(!st.running&&!st.paused)){pill.style.display='none';return}
   pill.style.display='inline-flex';$('#prepSpin').style.display=st.running?'':'none';const b=$('#prepBtn');
@@ -623,7 +626,7 @@ async function tabRestore(){const el=$('#tab-restore');
      <details class="adv"><summary>Advanced: everything under one folder</summary><div class="row"><label><input type="checkbox" id="wzOne"> put all selected folders under one folder, as <code>&lt;folder&gt;/&lt;share&gt;/&lt;path&gt;</code></label><input id="wzOnePath" placeholder="nas:Restore/restore-${S.ver} or /Volumes/Restore/restore-${S.ver}" style="width:380px"></div></details>
      <details class="adv"><summary>How the data flows</summary><p class="help">Google Drive → this Mac (decompress and verify) → NAS. The Drive download speed is the limit; data blocks are fetched 4 in parallel ahead of the writer and deleted from the Mac after use (cache ≤ 20 GB).</p></details>`,false)+
   step(4,'Check and start',`<div class="row"><button class="small" id="rsPlan">Count files and size</button><button class="${S.basket.length&&mapOk&&!restoreRun?'primary':''}" id="rsGo" ${S.basket.length&&mapOk&&!restoreRun?'':'disabled'}>${restoreRun?'Restoring…':mapOk?'Start restore':poolRun?'Waiting for the preparation…':prep.paused?'Preparation paused':'Waiting for the preparation'}</button><span class="help">counting needs no preparation, only the restore does · nothing at the target is ever overwritten or deleted: files already there are skipped, so an interrupted restore can simply be started again</span></div>
-     ${mapOk&&total&&mapped<total&&!poolRun?`<p class="help" style="margin:4px 0;color:var(--warn)">The map covers ${mapped.toLocaleString()} of ${total.toLocaleString()} blocks. Files stored in the other blocks cannot be restored yet and are reported as errors; the preparation can be run again later.</p>`:''}
+     ${mapOk&&total&&mapped<total&&!poolRun?`<p class="help" style="margin:4px 0;color:var(--warn)">The map covers ${mapped.toLocaleString()} of ${total.toLocaleString()} blocks. Files stored in the other blocks cannot be restored yet and are reported as errors. <button class="small" id="prepAgain">Run the preparation again</button></p>`:mapOk&&!poolRun?`<p class="help" style="margin:4px 0">The backup is prepared${total?` (${mapped.toLocaleString()} of ${total.toLocaleString()} blocks mapped)`:''}. <button class="small ghost" id="prepAgain">Run the preparation again</button></p>`:''}
      ${mapOk?'':`<div id="prepBox" style="margin:6px 0"><p class="help" style="margin:0 0 4px">Before it can restore, the app learns where every piece of every file is stored: it downloads the backup's index files (a few GB, no file data) and builds a map. This starts by itself${poolRun?'':prep.paused?' once you resume it':(idxLocal||total)?'':' as soon as a share\'s file list is loaded for this run (step 1)'}, continues after a pause or a restart (the downloaded index files are kept; the map itself is computed again), and is kept for later restores.${keyLine(S.info.source.remote,true)?` ${keyLine(S.info.source.remote,true)}`:''}</p>
        ${poolRun?`<div class="row" style="align-items:flex-start"><div id="poolJob" style="flex:1"></div></div>`:
        `<div class="row"><div class="prog"><i style="width:${pct}%"></i></div><span>${total?(mapped?`${pct}% · ${mapped.toLocaleString()} of ${total.toLocaleString()} blocks`:`Folder listing saved · ${total.toLocaleString()} blocks · download not started`):`Not started · ${pool.index_bytes?human(pool.index_bytes)+' of':'a few GB of'} index files to download`}${pool.index_bytes?` · ${human(pool.index_bytes_local||0)} of ${human(pool.index_bytes)} downloaded`:(idxFiles?` · ${idxLocal.toLocaleString()} of ${idxFiles.toLocaleString()} index files on disk`:'')}</span><button class="small ${prep.paused?'primary':''}" id="poolBuild">${prep.paused?'Resume':'Start now'}</button></div><div id="poolJob"></div>`}</div>`}
@@ -637,6 +640,7 @@ async function tabRestore(){const el=$('#tab-restore');
   // One bar: while the pool job runs, its progress (phase, %, bytes, time left, Stop) is the status line and the button is disabled.
   // The preparation's progress is shown under the Start button while it runs (Pause there and in the header pill); when it ends the tab re-renders.
   if(poolRun&&$('#poolJob'))pollJob(poolRun.id,$('#poolJob'),()=>tabRestore(),false,'Pause');
+  const pa=$('#prepAgain');if(pa)pa.onclick=async()=>{pa.disabled=true;pa.textContent='Starting…';await prepRunAgain()};
   const pb=$('#poolBuild');if(pb)pb.onclick=async()=>{pb.disabled=true;pb.textContent='Starting…';pendingBar($('#poolJob'),'Starting the preparation…');await prepResume();tabRestore()};
   // H8: one target per shared folder in the selection. MAP (localStorage) remembers the choice per share, plus the connection and the one-folder option.
   const key=b=>b.share;const ROWS=shareRows();let MAP={};try{MAP=JSON.parse(localStorage.getItem('wzMap')||'{}')}catch(e){}
@@ -718,7 +722,7 @@ async function waitJob(id,onMsg,ms=1000,onJob){for(let miss=0;;){let x=null;try{
 function pollJob(id,el,done,rich,stopLabel){let stopping=false;const t=async()=>{let job;try{job=await api('/api/job',{id})}catch(e){if(/no such job/i.test(e.message)){el.innerHTML+=`<p style="color:var(--bad)">${esc(e.message)}</p>`;return}await sleepOrWake(2000);return t()}
   const stop=stopLabel&&job.state==='running'?`<button class="small" id="jobStop" ${stopping?'disabled':''}>${stopping?'Stopping…':stopLabel}</button>`:'';
   el.innerHTML=progressHtml(job,rich,stop);
-  const b=$('#jobStop');if(b)b.onclick=async()=>{stopping=true;b.disabled=true;b.textContent=stopLabel==='Pause'?'Pausing…':'Stopping…';if(stopLabel==='Pause'&&id===PREP.jobId)await prepPause();else await api('/api/job/cancel',{id})};
+  const b=$('#jobStop');if(b)b.onclick=async()=>{stopping=true;b.disabled=true;b.textContent=stopLabel==='Pause'?'Pausing…':'Stopping…';if(stopLabel==='Pause')await prepPause(id);else await api('/api/job/cancel',{id})};
   if(job.state==='running'){await sleepOrWake(800);return t()}else{if(job.state==='error')el.innerHTML+=`<p style="color:var(--bad)">${esc(job.error)}</p>`;done&&done(job)}};t();}
 // ---------- drawer
 $('#closeDrawer').onclick=()=>$('#drawer').classList.remove('open');
