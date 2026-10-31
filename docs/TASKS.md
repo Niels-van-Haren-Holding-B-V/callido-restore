@@ -16,7 +16,7 @@ Packaging as a `.app` / `.dmg` (T3) is essential for making it usable by everyon
 
 The Drive step already asks for your own client id and secret. Opening a backup selects the latest run (highest version id, regardless of status); pick the last clean run before an incident. Folders are chosen from Browse (or the whole backup) into the restore basket. T7 is the NAS preparation wizard on the restore destination. T8 is never overwriting existing files.
 
-Repo: https://github.com/Niels-van-Haren-Holding-B-V/hyperbackup-desktop · read `docs/HANDOVER.md` and `docs/FORMAT.md` first.
+Repo: https://github.com/Niels-van-Haren-Holding-B-V/callido-restore · read `docs/HANDOVER.md` and `docs/FORMAT.md` first.
 Status snapshot at 2026-10-30 21:21: bucket-index download "dir 11 done: 2048 21:21:31"; mapper test (first 6144 buckets): "still running".
 T4 (resumable index fetch, per-directory stats, Stop) and T6 (parser unit tests + ubuntu CI) are implemented in code. T1 and T2 still need the real backup and are not touched here.
 

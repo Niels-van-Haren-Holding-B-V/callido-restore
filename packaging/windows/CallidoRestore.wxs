@@ -31,7 +31,7 @@
     <Icon Id="AppIcon.ico" SourceFile="$(var.IconFile)" />
     <Property Id="ARPPRODUCTICON" Value="AppIcon.ico" />
     <Property Id="ARPURLINFOABOUT" Value="https://callido.nl" />
-    <Property Id="ARPHELPLINK" Value="https://github.com/Niels-van-Haren-Holding-B-V/hyperbackup-desktop" />
+    <Property Id="ARPHELPLINK" Value="https://github.com/Niels-van-Haren-Holding-B-V/callido-restore" />
     <Property Id="ARPCONTACT" Value="Callido" />
 
     <!-- msiexec /i CallidoRestore.msi DESKTOPSHORTCUT=0 installs without the desktop shortcut -->
