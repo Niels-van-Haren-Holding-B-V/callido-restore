@@ -48,7 +48,6 @@ def run_window(port, smoke=False):
     import webview
     webview.settings["ALLOW_DOWNLOADS"] = True                   # the explorer's single-file download links
     webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] = True
-    webview.settings["PRIVATE_MODE"] = False                     # keep the page's local storage (restore selection, last run) across restarts
     url = f"http://127.0.0.1:{port}"
     win = webview.create_window(APP_NAME, url, width=1360, height=880, min_size=(900, 600), text_select=True)
     result = {}
@@ -66,7 +65,7 @@ def run_window(port, smoke=False):
             finally: _log(f"smoke: page loaded, title={result.get('title')!r}"); win.destroy()
         win.events.loaded += loaded
         guard.start()
-    webview.start()
+    webview.start(private_mode=False)                          # keep the page's local storage (restore selection, last run) across restarts
     return result.get("title")
 
 def main():
