@@ -44,7 +44,8 @@ class _Daemon:
             except OSError as e:
                 self.failed = str(e); self.proc = None; return False
             try:
-                paths.CONF_DIR.mkdir(parents=True, exist_ok=True); PIDFILE().write_text(str(self.proc.pid))
+                paths.CONF_DIR.mkdir(parents=True, exist_ok=True)
+                PIDFILE().write_text(json.dumps({"pid": self.proc.pid, "parent": os.getpid()}))
             except OSError: pass
             self.url = f"http://127.0.0.1:{port}/"
             self.auth = "Basic " + base64.b64encode(f"{user}:{pw}".encode()).decode()
@@ -93,7 +94,10 @@ class _Daemon:
         return self.start(timeout=5.0)
 
 
-def PIDFILE(): return paths.CONF_DIR / "rclone-rcd.pid"
+def PIDFILE():
+    """One pid file per app instance (named by this process's pid): a second copy of the app or a dev server next to it
+    must never stop another instance's daemon or drop its pid file."""
+    return paths.CONF_DIR / f"rclone-rcd-{os.getpid()}.pid"
 
 def _cmdline(pid):
     """The command line of a process, '' when it does not exist (patched in tests)."""
@@ -101,17 +105,33 @@ def _cmdline(pid):
     r = subprocess.run(["ps", "-o", "command=", "-p", str(pid)], capture_output=True, text=True)
     return r.stdout.strip() if r.returncode == 0 else ""
 
+def _alive(pid):
+    """True when a process with this pid exists (patched in tests)."""
+    try: os.kill(pid, 0); return True
+    except ProcessLookupError: return False
+    except OSError: return True
+
 def kill_stale():
-    """Stop the daemon of a previous app run that did not exit cleanly (force quit, crash): the pid file names it, and it is
-    only killed when that pid still runs an ``rclone rcd``. Returns True when something was stopped."""
-    try: pid = int(PIDFILE().read_text().strip())
-    except (OSError, ValueError): return False
-    try: PIDFILE().unlink()
-    except OSError: pass
-    if pid <= 1 or "rclone" not in _cmdline(pid) or " rcd" not in _cmdline(pid): return False
-    try: os.kill(pid, 15)
-    except OSError: return False
-    return True
+    """Stop daemons left behind by app runs that did not exit cleanly (force quit, crash): every ``rclone-rcd-*.pid`` whose
+    recorded parent process is gone names one; it is killed only when that pid still runs an ``rclone rcd``. Files of running
+    instances are left alone. Returns the number of daemons stopped."""
+    stopped = 0
+    for f in paths.CONF_DIR.glob("rclone-rcd-*.pid") if paths.CONF_DIR.is_dir() else []:
+        try: d = json.loads(f.read_text())
+        except (OSError, ValueError):
+            d = None
+        if not isinstance(d, dict):
+            try: f.unlink()                                  # an old-format or unreadable file: forget it
+            except OSError: pass
+            continue
+        pid, parent = int(d.get("pid") or 0), int(d.get("parent") or 0)
+        if parent and parent != os.getpid() and _alive(parent): continue    # another instance is still running it
+        try: f.unlink()
+        except OSError: pass
+        if pid <= 1 or "rclone" not in _cmdline(pid) or " rcd" not in _cmdline(pid): continue
+        try: os.kill(pid, 15); stopped += 1
+        except OSError: pass
+    return stopped
 
 
 DAEMON = _Daemon()

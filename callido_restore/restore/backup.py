@@ -371,14 +371,14 @@ class Backup:
         if job.get("cancel"): return stopped("listing")
         if not all((pool_dir / f"runs_set{k}.bin").is_file() for k in (1, 2, 3, 4)):
             job["message"] = "parsing chunk records (downloads the 4 file_chunk index sets if needed)"; job["progress"] = 0.1
-            pool.build_runs(self.src, str(pool_dir), log)
+            pool.build_runs(self.src, str(pool_dir), log, cancelled=lambda: bool(job.get("cancel")))
         if job.get("cancel"): return stopped("chunk-records")
         job["message"] = "collecting file sizes from loaded snapshots"; job["progress"] = 0.3
         dbs = [(str(p), "index") for p in self.src.index_dir.glob("*__*.sqlite")]
         for sh in self.shares:
             for n, e in self.src.listdir(f"Config/@Share/{sh}").items():
                 if e["local"] and re.match(r"^\d+\.db\.\d+$", n): dbs.append((str(self.src.ensure(f"Config/@Share/{sh}/{n}")), "raw"))
-        pool.build_recsizes(self.src, dbs, str(pool_dir), log)
+        pool.build_recsizes(self.src, dbs, str(pool_dir), log, cancelled=lambda: bool(job.get("cancel")))
         if job.get("cancel"): return stopped("record-sizes")
         entries = json.loads(listing.read_text())
         # New index bytes go to the app cache. Files already in the source or a mirror are only read.
