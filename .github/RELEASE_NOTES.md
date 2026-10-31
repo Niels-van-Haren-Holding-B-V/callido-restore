@@ -1,5 +1,18 @@
 **Callido Restore** restores files from a Synology Hyper Backup (`.hbk`) without Hyper Backup or a working NAS. It reads the backup's own metadata, shows every backup run on a timeline, and restores the folders you pick to a NAS share or a local folder. Files already at the destination are never overwritten or deleted, and the backup source is only read.
 
+## What's new in 0.2.0
+
+A bugfix release from the first real test run of the app.
+
+- **Faster everywhere.** The app keeps one rclone connection open instead of starting a new one for every folder listing, which makes browsing Google Drive and NAS shares several times faster, and reuses listings for 30 seconds.
+- **Google Drive sign-in:** the app tells you a browser window opens and what to do when it shows "Success! All done"; the new connection is selected afterwards, and the wizard no longer gets stuck if you were in the browser for a while.
+- **Adding a backup:** the backups found in a folder are listed with a one-click "Use …" button; Next picks the detected backup instead of asking to "use anyway"; a wrong folder gets a clear explanation.
+- **Every wait shows what is happening:** a small activity indicator in the header ("Listing NAS shares…", "Loading from Google Drive…", "Counting files…"), opening a backup shows its progress step by step and survives switching to another window.
+- **Restore selection:** a "Restore selection" button is always visible, with the number of items and the size, a list to remove items or clear all, and a way to continue to the restore. Adding or removing a folder shows a confirmation with "View selection" and "Undo"; the "+" buttons show whether a folder is already in the restore and remove it on a second click.
+- **Restore step 3** says "Not started · N GB of index files to download" instead of "0% · 0 of 0 blocks", and shows how much is already downloaded.
+- The "@AppConfig" entry is labelled "Application settings (DSM, not restorable here)".
+- Errors appear as notifications instead of blocking pop-ups.
+
 ## Download
 
 | Mac | File |
