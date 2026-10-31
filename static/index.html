@@ -268,7 +268,7 @@ const CHECKED_HELP='Checked = the file’s place in the backup was confirmed by 
 // The reasons come from the restore job (callido_restore/restore); every known one gets plain words, an unknown one is shown as is.
 const REASONS={'placed without a size check':'Its location in the backup couldn’t be confirmed','partial copy':'Restored from a matching copy; not fully checked',
   'reads chunks from a record that is placed without a size check':'Part of it comes from data whose location couldn’t be confirmed','located through the v1 map':'Found with the older, less precise map',
-  'the pool map gives no status':'The map has no check result for it'};
+  'the pool map gives no status':'The map has no check result for it','reads a chunk that no record stores':'Part of it is missing from the backup’s map'};
 const plainReason=r=>{if(!r)return 'Its location in the backup couldn’t be confirmed';if(REASONS[r])return REASONS[r];if(r.startsWith('status check failed:'))return 'The check itself failed: '+r.slice('status check failed:'.length).trim();return r};
 function verifyText(r){
   if(!r)return '';
