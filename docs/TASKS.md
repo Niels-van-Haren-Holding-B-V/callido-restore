@@ -100,6 +100,21 @@ case-sensitive prefix (`substr(path, 1, n) = 'dir/'`) instead of `LIKE 'dir/%'` 
 `restore_target_error()` validates targets for `/api/restore` (creates roots) and `/api/restore/resume` (roots must still be
 there, source check again); a resume that fails keeps the job file. Neutral example names in the files H8 owns (H18 rule).
 
+## H8 — Per-folder destination mapping (owner, 2026-10-30 23:29)
+DONE (hbk-3): #49. "Folder from backup → Restore to" table, one row per shared folder (default: the NAS share with the same name);
+subfolders keep their relative path (H13 rule); each item carries its `dest` (persisted, kept across pause/resume); one
+`.hbk-restore-<job>` staging folder and `place_file` per local root. Tests in `tests/test_restore_mapping.py`.
+
+## H13 — Folder tree selection (owner, 2026-10-31 00:01)
+DONE (hbk-3): #52. Tree with checkboxes in step 2 (children on demand, indeterminate parents, inclusion-list basket), live
+"Selected: N files · size" via `/api/restore_count`.
+
+## H16 — Restructure into packages (owner, 2026-10-31 01:01; docs/handovers/2026-10-31-0101-nas-triage-H16-now.md) — TOP PRIORITY
+IN PROGRESS (hbk-2): step 1 = `callido_restore/core/pool.py` (was `hbk_pool.py`; root shim kept) + `tests/core/`. Next steps, one
+PR each from fresh origin/main, pure moves, zero behaviour change, green on unit + both DMG builds: (2) `pool/` (`hbk_poolmap*.py`,
+`hbk_anchor.py` incl. its worker entry, `hbk_indexfetch.py`); (3) `restore/` + `sources/` out of `hbk_explorer.py`; (4) `server/` +
+`app/` with the entry point, build_app.sh / PyInstaller, README; (5) remove the root shims. No other code PRs in the meantime.
+
 ## Do not
 * Do not change the on-disk layout of `~/.hbk-explorer/index/<src>/pool/*` without a migration; the full map build takes hours of downloads.
 * Do not commit anything from `~/.hbk-explorer` or user paths/remotes into the repo, and no real share/folder/host names (H18 rule in docs/HANDOVER.md).

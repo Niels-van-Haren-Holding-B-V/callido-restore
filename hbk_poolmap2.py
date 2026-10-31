@@ -6,7 +6,7 @@ snapshot *tag* (md5 of the first K chunk hashes + their total length), keeps unm
 ends by size, and assigns buckets to writers with the round-robin rhythm as a prior plus limited-discrepancy search."""
 import os, bisect, collections, time, hashlib
 from array import array
-from hbk_pool import BLOCK, WRITER_OF_SET, SET_OF_WRITER, load_runs, bucket_index_entries, load_json, dump_json
+from callido_restore.core.pool import BLOCK, WRITER_OF_SET, SET_OF_WRITER, load_runs, bucket_index_entries, load_json, dump_json
 from hbk_poolmap import new_range
 
 LOOK = 96            # how many upcoming records (stream order) are considered as "the file starting here"

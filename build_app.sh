@@ -187,6 +187,7 @@ build_bundle() {
     --add-data "$ROOT/assets/logo.png:assets" \
     --add-data "$ROOT/build/licenses/rclone-COPYING:Licenses" \
     --add-data "$ROOT/build/licenses/THIRD-PARTY-NOTICES.txt:Licenses" \
+    --hidden-import callido_restore.core.pool \
     --hidden-import hbk_pool \
     --hidden-import hbk_poolmap \
     --hidden-import lz4 \

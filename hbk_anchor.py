@@ -1,7 +1,7 @@
 """Anchor-first pool mapping: locate every tagged record's first chunk in the bucket indexes (tag = md5 of the first K
 chunk md5s + their total length), derive bucket owners from anchors, then place the untagged remainder by chunk counts."""
 import os, json, hashlib, collections, time, bisect
-from hbk_pool import SET_OF_WRITER, bucket_index_entries
+from callido_restore.core.pool import SET_OF_WRITER, bucket_index_entries
 from hbk_poolmap2 import TAGK
 
 def dump_json(path, obj):
