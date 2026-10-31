@@ -72,7 +72,8 @@ def _run_worker(job, tmpdir, n):
     import pickle, subprocess, sys
     jp = os.path.join(tmpdir, f"job{n}.pkl"); op = os.path.join(tmpdir, f"out{n}.pkl")
     with open(jp, "wb") as f: pickle.dump(job, f)
-    p = subprocess.run(*_worker_command(jp, op), capture_output=True, text=True)
+    argv, kw = _worker_command(jp, op)
+    p = subprocess.run(argv, capture_output=True, text=True, **kw)
     if p.returncode: raise MemoryError(f"scan worker {n} failed: {p.stderr.strip().splitlines()[-1] if p.stderr.strip() else p.returncode}")
     with open(op, "rb") as f: return pickle.load(f)
 
