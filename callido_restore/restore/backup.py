@@ -79,7 +79,7 @@ class Backup:
         tally(cfg)
         shares = sorted(n for n, e in s.listdir("Config/@Share").items() if e["dir"]) if "@Share" in cfg else []
         for i, sh in enumerate(shares):
-            log(f"Listing shares {i + 1}/{len(shares)}…"); t0 = time.time(); ents = s.listdir(f"Config/@Share/{sh}"); tally(ents)
+            log(f"Listing shares {i + 1}/{len(shares)}…"); ents = s.listdir(f"Config/@Share/{sh}"); tally(ents)
             ll = getattr(s, "last_listing", None)
             if ll and ll.get("rel", "").endswith(sh): log(f"Listing shares {i + 1}/{len(shares)} · {len(ents):,} entries in {ll['seconds']:.0f} s")
         info["ransomware"] = {"locked_files": locked, "notes": notes, "examples": ex}

@@ -1,6 +1,6 @@
 """The shared rclone client: subprocess fallback when the daemon is not running, remote-control calls when it is, and (when an
 rclone binary is available) a real daemon round trip on a local folder."""
-import json, os, shutil, subprocess, tempfile, unittest
+import json, os, re, shutil, subprocess, tempfile, unittest
 from unittest import mock
 
 from callido_restore.sources import rclone as rc
@@ -149,6 +149,16 @@ class DeadDaemon(unittest.TestCase):
             rc.version()                                       # no exception: answered by the fallback
             stop.assert_called(); self.assertGreaterEqual(run.call_count, 2)
 
+    def test_a_slow_answer_is_not_a_dead_daemon(self):
+        """A read timeout (an SMB listing slower than the caller's timeout) raises RcloneError and leaves the daemon running;
+        before, it stopped the daemon, fell back to a fresh rclone with the same timeout and reported '60 s' after 120+."""
+        import urllib.error, socket
+        for exc in (TimeoutError("timed out"), urllib.error.URLError(socket.timeout("timed out")), urllib.error.URLError("The read operation timed out")):
+            with mock.patch.object(type(rc.DAEMON), "running", new_callable=mock.PropertyMock, return_value=True), \
+                 mock.patch.object(rc.DAEMON, "_call", side_effect=exc), mock.patch.object(rc.DAEMON, "stop") as stop:
+                with self.assertRaises(rc.RcloneError) as cm: rc.DAEMON.rc("operations/list", timeout=60, fs="nas:", remote="x")
+                self.assertNotIsInstance(cm.exception, rc.DaemonGone); self.assertIn("within 60 s", str(cm.exception)); stop.assert_not_called()
+
     def test_available_restarts_a_dead_daemon_at_most_once_a_minute(self):
         d = rc._Daemon(); d.proc = mock.Mock(); d.proc.poll.return_value = 1; d.last_start = 1.0    # started once, died long ago
         with mock.patch.object(d, "start", return_value=True) as start:
@@ -187,6 +197,34 @@ class ViaDaemon(unittest.TestCase):
         self.assertEqual([e["Path"] for e in out], ["Config", "notes.txt"])
         self.assertEqual(rc._split("nas:Backups/x.hbk/"), ("nas:", "Backups/x.hbk")); self.assertEqual(rc._split("gdrive:"), ("gdrive:", ""))
         self.assertEqual(rc._split("/Volumes/backup/backup_1.hbk"), ("/Volumes/backup/backup_1.hbk", ""))
+        with mock.patch.object(rc.paths, "is_remote_path", lambda p, windows=None: ":" in p and not re.match(r"^[A-Za-z]:[\\\\/]", p)):
+            self.assertEqual(rc._split("D:\\Backups\\backup_1.hbk"), ("D:\\Backups\\backup_1.hbk", ""))       # a Windows drive is local
+            self.assertEqual(rc._split("C:/x/backup_1.hbk"), ("C:/x/backup_1.hbk", ""))
+
+    def test_ls_prefix_strip_ignores_case_and_falls_back(self):
+        """A case-insensitive SMB share may answer 'backups/X.hbk/…' for 'Backups/x.hbk': stripped all the same; an answer that
+        does not carry the prefix at all makes ls list the folder as its own fs (every Path relative to it for sure)."""
+        calls = []
+        def fake_rc(method, timeout=None, **params):
+            calls.append(params)
+            if params["remote"] == "Backups/x.hbk": return {"list": [{"Path": "backups/X.hbk/Config", "Name": "Config", "IsDir": True, "Size": -1}]}
+            if params["remote"] == "Other": return {"list": [{"Path": "elsewhere/Config", "Name": "Config", "IsDir": True, "Size": -1}]}
+            return {"list": [{"Path": "Config", "Name": "Config", "IsDir": True, "Size": -1}]}
+        with mock.patch.object(type(rc.DAEMON), "running", new_callable=mock.PropertyMock, return_value=True), mock.patch.object(rc.DAEMON, "rc", side_effect=fake_rc):
+            self.assertEqual([e["Path"] for e in rc.ls("nas:Backups/x.hbk")], ["Config"])
+            self.assertEqual([e["Path"] for e in rc.ls("nas:Other")], ["Config"])
+        self.assertEqual((calls[-1]["fs"], calls[-1]["remote"]), ("nas:Other", ""))                 # the fallback call
+
+    def test_ls_config_reaches_the_daemon_and_the_fallback(self):
+        seen = {}
+        def fake_rc(method, timeout=None, **params): seen.update(params); return {"list": []}
+        with mock.patch.object(type(rc.DAEMON), "running", new_callable=mock.PropertyMock, return_value=True), mock.patch.object(rc.DAEMON, "rc", side_effect=fake_rc):
+            rc.ls("nas:", dirs_only=True, max_depth=1, config={"ConnectTimeout": "20s", "LowLevelRetries": 1})
+        self.assertEqual(seen["_config"], {"ConnectTimeout": "20s", "LowLevelRetries": 1, "MaxDepth": 1})
+        ok = subprocess.CompletedProcess([], 0, stdout="[]", stderr="")
+        with mock.patch.object(rc.DAEMON, "available", return_value=False), mock.patch.object(subprocess, "run", return_value=ok) as run:
+            rc.ls("nas:", config={"ConnectTimeout": "20s", "LowLevelRetries": 1})
+        args = run.call_args[0][0]; self.assertEqual(args[args.index("--contimeout") + 1], "20s"); self.assertEqual(args[args.index("--low-level-retries") + 1], "1")
 
     def test_remotes_and_version_via_rc(self):
         types = {"nas": {"type": "smb"}, "gdrive": {"type": "drive"}}

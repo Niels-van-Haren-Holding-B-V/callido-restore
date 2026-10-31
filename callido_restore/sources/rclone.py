@@ -95,6 +95,12 @@ class _Daemon:
         try: return self._call(method, params, timeout=timeout)
         except urllib.error.HTTPError: raise
         except (urllib.error.URLError, ConnectionError, TimeoutError, OSError) as e:
+            # A slow answer (an SMB listing that takes longer than the caller's timeout) is not a dead daemon: the daemon keeps
+            # running and the caller gets rclone's silence as an error. Only a refused or broken connection means it is gone
+            # (then the subprocess fallback and a restart a minute later make sense).
+            reason = getattr(e, "reason", e)
+            if isinstance(reason, (TimeoutError, socket.timeout)) or "timed out" in str(e).lower():
+                raise RcloneError(f"no answer from rclone within {timeout:.0f} s" if timeout else "no answer from rclone") from None
             self.stop()
             raise DaemonGone(f"rclone daemon unreachable: {e}") from None
 
@@ -290,18 +296,21 @@ def _run(args, timeout=None, **kw):
 
 
 def _split(path):
-    """("remote:", "folder/inside") for an rclone path, (path, "") for a local one."""
+    """("remote:", "folder/inside") for an rclone path, (path, "") for a local one (a Windows drive path "D:\\x" is local)."""
     m = re.match(r"^([A-Za-z0-9_-]+):(.*)$", path)
-    if not m or path.startswith("/"): return path, ""
+    if not m or not paths.is_remote_path(path): return path, ""
     return m.group(1) + ":", m.group(2).strip("/")
 
+# rclone config keys a caller may set per call (``ls(config=...)``) and their command-line form for the subprocess fallback.
+_CONFIG_FLAGS = {"ConnectTimeout": "--contimeout", "Timeout": "--timeout", "LowLevelRetries": "--low-level-retries", "Retries": "--retries"}
 
-def ls(path, dirs_only=False, files_only=False, recurse=False, max_depth=None, no_modtime=False, timeout=None, cache=False):
+
+def ls(path, dirs_only=False, files_only=False, recurse=False, max_depth=None, no_modtime=False, timeout=None, cache=False, config=None):
     """Entries of ``path`` as ``rclone lsjson`` returns them (dicts with Path, Name, Size, IsDir, ModTime). Raises RcloneError.
     ``cache=True`` serves a repeat of the same listing within CACHE_TTL seconds without asking rclone (UI renders only)."""
     if cache:
         key = ("ls", path, dirs_only, files_only, recurse, max_depth, no_modtime)
-        return _cached(key, lambda: ls(path, dirs_only, files_only, recurse, max_depth, no_modtime, timeout))
+        return _cached(key, lambda: ls(path, dirs_only, files_only, recurse, max_depth, no_modtime, timeout, config=config))
     if DAEMON.available():
         # One backend per connection: fs is the remote root ("nas:") and the folder is the remote part, so the daemon reuses
         # its SMB session and Drive's directory cache for every folder (fs = full path opened a new backend, and on SMB a new
@@ -310,23 +319,39 @@ def ls(path, dirs_only=False, files_only=False, recurse=False, max_depth=None, n
         # list_destination's skip check relies on. A local path has no remote root and stays the fs itself.
         fs, rel = _split(path)
         opt = {"noMimeType": True, "dirsOnly": bool(dirs_only), "filesOnly": bool(files_only), "recurse": bool(recurse), "noModTime": bool(no_modtime)}
+        cfg = dict(config or {})
+        if max_depth is not None: cfg["MaxDepth"] = int(max_depth)
         params = {"fs": fs, "remote": rel, "opt": opt}
-        if max_depth is not None: params["_config"] = {"MaxDepth": int(max_depth)}
+        if cfg: params["_config"] = cfg
         try:
             out = DAEMON.rc("operations/list", timeout=timeout, **params).get("list") or []
-            if rel:
-                pre = rel + "/"
-                for e in out:
-                    if e.get("Path", "").startswith(pre): e["Path"] = e["Path"][len(pre):]
+            if rel and not _strip_prefix(out, rel):
+                # an entry did not carry the folder prefix (a case or separator difference on a case-insensitive SMB share):
+                # list the folder as its own fs, the old way, so every Path is relative to it for sure
+                params["fs"], params["remote"] = path, ""
+                out = DAEMON.rc("operations/list", timeout=timeout, **params).get("list") or []
             return out
         except DaemonGone: pass                                 # killed or crashed daemon: plain rclone below
     args = ["lsjson", "--no-mimetype"]
+    for k, v in (config or {}).items():
+        if k in _CONFIG_FLAGS: args += [_CONFIG_FLAGS[k], str(v)]
     if no_modtime: args.append("--no-modtime")
     if dirs_only: args.append("--dirs-only")
     if files_only: args.append("--files-only")
     if recurse: args.append("-R")
     if max_depth is not None: args += ["--max-depth", str(max_depth)]
     return json.loads(_run(args + [path], timeout=timeout) or "[]")
+
+
+def _strip_prefix(entries, rel):
+    """Strip "<rel>/" from every entry's Path (compared without case and with separators normalised, as a case-insensitive
+    SMB share may answer in another spelling). False when an entry does not start with it."""
+    pre = rel.replace("\\", "/").strip("/").lower() + "/"
+    for e in entries:
+        p = e.get("Path", "")
+        if p.replace("\\", "/").lower().startswith(pre): e["Path"] = p[len(pre):]
+        else: return False
+    return True
 
 
 def remotes(cache=False):
