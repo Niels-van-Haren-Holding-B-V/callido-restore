@@ -330,15 +330,17 @@ class PoolReader:
         listing = os.path.join(self.pool_dir, "listing.json")
         st = {"listing": os.path.isfile(listing), "runs": all(os.path.isfile(os.path.join(self.pool_dir, f"runs_set{s}.bin")) for s in (1, 2, 3, 4)),
               "recsizes": os.path.isfile(os.path.join(self.pool_dir, "recsize_set1.json")), "map": self.map is not None,
-              "mapped_buckets": len(self.map["buckets"]) if self.map else 0, "total_buckets": 0, "indexes_local": 0, "index_files": 0}
+              "mapped_buckets": len(self.map["buckets"]) if self.map else 0, "total_buckets": 0, "indexes_local": 0, "index_files": 0,
+              "index_bytes": 0, "index_bytes_local": 0}      # bytes of all bucket indexes / of those already here (UI progress text)
         if st["listing"]:
             l = load_json(listing); idx = [e for e in l if e["t"] == "index"]
             st["total_buckets"] = len({e["b"] for e in idx})
             st["index_files"] = len(idx)
-            n = 0
+            n = 0; have = 0
             for e in idx:
-                if self.src.has_sized_file(f"Pool/0/{e['b'] // 2048}/{e['name']}", e.get("size")): n += 1
-            st["indexes_local"] = n
+                size = e.get("size") or 0; st["index_bytes"] += size
+                if self.src.has_sized_file(f"Pool/0/{e['b'] // 2048}/{e['name']}", e.get("size")): n += 1; have += size
+            st["indexes_local"] = n; st["index_bytes_local"] = have
         return st
     def bucket_name(self, b, kind):
         if self.names is None:
