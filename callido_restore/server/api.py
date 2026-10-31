@@ -200,6 +200,13 @@ class H(BaseHTTPRequestHandler):
                 if kind == "drive":
                     cid, csec = (body.get("client_id") or "").strip(), (body.get("client_secret") or "").strip()
                     args = None
+                    # An existing name is only re-keyed when it is a Google Drive remote: the SMB restore target (or any other
+                    # remote) must never be replaced by a Drive section. Known Drive remotes are updated, not re-created, so
+                    # options set outside the app (root folder, shared drive, ...) survive.
+                    try: existing = dict(rclone.remotes()).get(name + ":")
+                    except rclone.RcloneError: existing = None
+                    if existing and existing != "drive":
+                        return self._json({"error": f"“{name}” is a {existing} connection, not Google Drive. Pick the Google Drive connection, or connect Google Drive under a new name."}, 400)
                 elif kind == "smb":
                     # the password is handed to rclone over stdin ("-"), so it never appears in a process list; the obscured
                     # form that lands in rclone.conf is the only thing passed as an argument
@@ -218,7 +225,9 @@ class H(BaseHTTPRequestHandler):
                         except rclone.RcloneError as e: raise RuntimeError("Google sign-in failed: " + str(e))
                         params = {"scope": "drive.readonly", "token": token}
                         if cid: params.update(client_id=cid, client_secret=csec)
-                        try: rclone.config_create(name, "drive", params)
+                        try:
+                            if existing == "drive": rclone.config_update(name, params)
+                            else: rclone.config_create(name, "drive", params)
                         except rclone.RcloneError as e: raise RuntimeError(str(e))
                     else:
                         job["message"] = "Connecting…"

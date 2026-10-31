@@ -206,17 +206,25 @@ def authorize_drive(client_id="", client_secret="", on_url=None, template=None, 
 def config_create(name, typ, params, timeout=120):
     """``rclone config create`` without questions: the backend's remaining questions (for drive: replace the token? shared
     drive?) are answered with their 'no' through rclone's --continue state machine, so no prompt and no browser ever appears."""
-    base = [RCLONE, "config", "create", name, typ, *[f"{k}={v}" for k, v in params.items()], "--non-interactive"]
+    _config(["create", name, typ], params, timeout)
+
+def config_update(name, params, timeout=120):
+    """``rclone config update``: only the given keys change, everything else the user set on that remote (root folder, shared
+    drive, ...) stays; questions are answered like in ``config_create``."""
+    _config(["update", name], params, timeout)
+
+def _config(verb, params, timeout):
+    base = [RCLONE, "config", *verb, *[f"{k}={v}" for k, v in params.items()], "--non-interactive"]
     state = None
     for _ in range(10):
         args = base if state is None else base + ["--continue", "--state", state, "--result", "false"]
         r = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
-        if r.returncode != 0: raise RcloneError(r.stderr.strip()[-400:] or f"rclone config create {name} failed")
+        if r.returncode != 0: raise RcloneError(r.stderr.strip()[-400:] or f"rclone config {verb[0]} {verb[1]} failed")
         try: out = json.loads(r.stdout or "{}")
         except ValueError: out = {}
         state = (out.get("State") or "") if isinstance(out, dict) else ""
         if not state: return
-    raise RcloneError(f"rclone config create {name}: too many questions")
+    raise RcloneError(f"rclone config {verb[0]} {verb[1]}: too many questions")
 
 
 def fscache_clear():

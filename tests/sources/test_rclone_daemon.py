@@ -273,6 +273,11 @@ class ConfigCreate(unittest.TestCase):
         self.assertEqual(calls[1][-4:], ["--state", "*oauth-confirm,teamdrive,oauth,", "--result", "false"])
         self.assertEqual(calls[2][-4:], ["--state", "teamdrive_ok", "--result", "false"])
 
+    def test_update_changes_only_the_given_keys(self):
+        with mock.patch.object(rc, "RCLONE", "/fake/rclone"), mock.patch.object(subprocess, "run", return_value=subprocess.CompletedProcess([], 0, stdout="{}", stderr="")) as run:
+            rc.config_update("gdrive", {"client_id": "x", "client_secret": "y", "token": "{}"})
+        self.assertEqual(run.call_args[0][0], ["/fake/rclone", "config", "update", "gdrive", "client_id=x", "client_secret=y", "token={}", "--non-interactive"])
+
     def test_failure_raises(self):
         with mock.patch.object(rc, "RCLONE", "/fake/rclone"), mock.patch.object(subprocess, "run", return_value=subprocess.CompletedProcess([], 1, stdout="", stderr="boom")):
             with self.assertRaises(rc.RcloneError): rc.config_create("x", "drive", {})
