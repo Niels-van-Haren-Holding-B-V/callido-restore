@@ -1,5 +1,11 @@
 **Callido Restore** restores files from a Synology Hyper Backup (`.hbk`) without Hyper Backup or a working NAS. It reads the backup's own metadata, shows every backup run on a timeline, and restores the folders you pick to a NAS share or a local folder. Files already at the destination are never overwritten or deleted, and the backup source is only read.
 
+## What's new in 0.2.4
+
+- Stop takes effect within a second during every phase of the preparation, including the chunk-record parsing and the index-set downloads; what was already parsed is simply redone next time.
+- The preparation's progress bar moves during the chunk-record parsing (per set and by bytes parsed) instead of sitting at 10 %.
+- Running two copies of the app, or a development server next to it, no longer stops the other one's internal rclone helper.
+
 ## What's new in 0.2.3
 
 - The restore selection and the last chosen run survive quitting the app (the window no longer runs in private mode).
