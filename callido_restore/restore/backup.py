@@ -12,6 +12,7 @@ from callido_restore.core.hbkmeta import SCRIPT_EXT
 from callido_restore.core.hbkmeta import is_sqlite
 from callido_restore.core.hbkmeta import rev_of
 from callido_restore.oscompat import popen_kw
+from callido_restore.restore.jobs import log
 from callido_restore.paths import RCLONE, ui_path
 from callido_restore.restore.destination import file_target
 from callido_restore.restore.destination import list_destination
@@ -676,6 +677,8 @@ class Backup:
                     if attempt < 2 and not isinstance(e, KeyError):      # KeyError = chunk not in pool map: retrying will not help
                         job["message"] = f"{f['share']}/{f['path']}: {e} — retrying"; time.sleep([2, 10][attempt]); continue
                     job["errors"].append({"path": f"{f['share']}/{f['path']}", "error": str(e)}); job["errors_total"] += 1   # the list is capped in the saved file, the total is not
+                    if job["errors_total"] <= 100 or job["errors_total"] % 100 == 0:          # app.log: the first 100, then every 100th
+                        log(f"restore error {job['errors_total']}: {f['share']}/{f['path']}: {e}")
                     if job["errors_total"] > 2000: raise RuntimeError("too many errors, aborting")
                     break                                              # recorded once; without this a non-retried error was logged on every attempt
                 done_bytes += f["size"]; job["done_bytes"] = done_bytes

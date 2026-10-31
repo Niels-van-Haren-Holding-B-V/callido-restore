@@ -762,7 +762,11 @@ async function tabRestore(){const el=$('#tab-restore');
     pollJob(id,$('#rsBar'),job=>{const g=$('#rsGo');if(g){g.disabled=false;g.textContent='Start restore'}showSaved();$('#rsProg').querySelector('h4').textContent=job.result&&job.result.paused?'Restore paused':job.state==='error'?'Restore failed':'Restore finished';$('#rsProg').innerHTML+=`<p><b>${job.result&&job.result.paused?'Paused':'Done'}:</b> ${job.result?`${job.result.restored} restored · ${job.result.skipped} skipped · ${job.result.errors} errors · ${human(job.result.bytes)}${verifyText(job.result)}`:esc(job.error||'')}</p>`;
       // Files whose place in the backup could not be confirmed are listed (the job carries the capped list) so the user can check them by hand.
       const unv=job.unverified||[];if(unv.length)$('#rsUnverified').innerHTML=`<h4 style="font-size:12px;color:var(--warn)">Couldn’t be verified: check these ${unv.length}${(job.result&&job.result.unverified)>unv.length?' of '+job.result.unverified.toLocaleString():''} files before you rely on them</h4><p class="help" style="margin:0 0 4px">${esc(CHECKED_HELP)}</p><div class="tablewrap"><table>${unv.slice(0,500).map(e=>`<tr><td class="mono">${esc(e.path)}</td><td>${esc(plainReason(e.reason))}</td></tr>`).join('')}</table></div>`;
-      if(job.errors&&job.errors.length)$('#rsErrors').innerHTML=`<h4 style="font-size:12px;color:var(--muted)">Errors (${(job.errors_total??job.errors.length).toLocaleString()})</h4><div class="tablewrap"><table>${job.errors.slice(0,500).map(e=>`<tr><td class="mono">${esc(e.path)}</td><td title="${esc(e.error)}">${esc(plainError(e.error))}</td></tr>`).join('')}</table></div>`},true)};
+      showErrs(job,true)},true,undefined,job=>showErrs(job))};
+  // The error list is shown while the restore runs (it used to appear only at the end), redrawn only when the count changes.
+  let errsShown=-1;
+  const showErrs=(job,force)=>{const n=job.errors_total??(job.errors||[]).length;if(!job.errors||!job.errors.length||(!force&&n===errsShown))return;errsShown=n;
+    const el=$('#rsErrors');if(!el)return;el.innerHTML=`<h4 style="font-size:12px;color:var(--muted)">Errors (${n.toLocaleString()})${job.state==='running'?' so far':''}</h4><div class="tablewrap"><table>${job.errors.slice(0,500).map(e=>`<tr><td class="mono">${esc(e.path)}</td><td title="${esc(e.error)}">${esc(plainError(e.error))}</td></tr>`).join('')}</table></div>`};
   if(restoreRun)watchRestore(restoreRun.id);                                 // a restore that runs already keeps its bar after a re-render
   else if(S.queued&&mapOk)startQueued();
   $('#rsGo').onclick=async()=>{if(S.queued){S.queued=null;toast('The queued restore was cancelled.');tabRestore();return}
@@ -780,9 +784,9 @@ const sleepOrWake=ms=>new Promise(res=>{let t=null;const done=()=>{clearTimeout(
 // an unknown job id ends the wait with an error result.
 async function waitJob(id,onMsg,ms=1000,onJob){for(let miss=0;;){let x=null;try{x=await api('/api/job',{id});miss=0}catch(e){if(/no such job/i.test(e.message)||++miss>60)return{state:'error',error:e.message}}
   if(x&&onJob)onJob(x);if(x&&x.state!=='running')return x;if(x&&onMsg)onMsg(x.message||'');await sleepOrWake(ms)}}
-function pollJob(id,el,done,rich,stopLabel){let stopping=false;const t=async()=>{if(!el.isConnected)return;let job;try{job=await api('/api/job',{id})}catch(e){if(/no such job/i.test(e.message)){el.innerHTML+=`<p style="color:var(--bad)">${esc(e.message)}</p>`;return}await sleepOrWake(2000);return t()}
+function pollJob(id,el,done,rich,stopLabel,onTick){let stopping=false;const t=async()=>{if(!el.isConnected)return;let job;try{job=await api('/api/job',{id})}catch(e){if(/no such job/i.test(e.message)){el.innerHTML+=`<p style="color:var(--bad)">${esc(e.message)}</p>`;return}await sleepOrWake(2000);return t()}
   const stop=stopLabel&&job.state==='running'?`<button class="small" id="jobStop" ${stopping?'disabled':''}>${stopping?'Stopping…':stopLabel}</button>`:'';
-  el.innerHTML=progressHtml(job,rich,stop);
+  el.innerHTML=progressHtml(job,rich,stop);if(onTick)onTick(job);   // e.g. the restore's error list, shown while it runs
   const b=$('#jobStop');if(b)b.onclick=async()=>{stopping=true;b.disabled=true;b.textContent=stopLabel==='Pause'?'Pausing…':'Stopping…';if(stopLabel==='Pause')await prepPause(id);else await api('/api/job/cancel',{id})};
   if(job.state==='running'){await sleepOrWake(800);return t()}else{if(job.state==='error')el.innerHTML+=`<p style="color:var(--bad)">${esc(job.error)}</p>`;done&&done(job)}};t();}
 // ---------- drawer
