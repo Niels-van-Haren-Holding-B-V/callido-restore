@@ -22,6 +22,34 @@ from callido_restore.sources.source import is_remote_path
 
 UNVERIFIED_MAX = 2000        # unverified files listed per job (like errors); the counts are complete
 
+def mapper_phase(line):
+    """(message for the user, job progress or None) for one line the pool mapper logs. The mapper's lines are for the log:
+    counters, stats dicts, writer numbers. The user sees what is happening and how far it is: the scan is 70-95 % of the
+    job, the placement 95-100 %."""
+    s = line.strip()
+    m = re.search(r"scanned ([\d,]+)/([\d,]+)", s)
+    if m:
+        i, n = int(m.group(1).replace(",", "")), int(m.group(2).replace(",", ""))
+        return f"reading the index ({i:,} of {n:,})", 0.7 + 0.25 * i / max(1, n)
+    m = re.search(r"placing writer (\d): ([\d,]+)/([\d,]+)", s)
+    if m:
+        w, k, n = int(m.group(1)), int(m.group(2).replace(",", "")), int(m.group(3).replace(",", ""))
+        return f"building the map (part {w + 1} of 4, {k:,} of {n:,})", 0.96 + 0.04 * (w + k / max(1, n)) / 4
+    m = re.search(r"resolving copies: pass (\d)/3, ([\d,]+)/([\d,]+)", s)
+    if m: return f"resolving duplicate files (pass {m.group(1)} of 3, {m.group(2)} of {m.group(3)})", 0.955
+    if s.startswith("loading the record tables"): return "loading the record tables", 0.7
+    if s.startswith("writer") and "records=" in s: return "loading the record tables", 0.7
+    if s.startswith(("anchor scan (", "scanning the bucket indexes")): return "reading the index", 0.7
+    if s.startswith(("anchor scan done", "placing records", "owners from anchors", "placement:", "phase2:")): return "building the map", 0.955
+    m = re.search(r"mapped ([\d,]+)/([\d,]+) buckets \(anchor-first\)", s)
+    if m: return "writing the map", 0.995
+    m = re.search(r"mapped (\d+)/(\d+)", s)                       # the v1 search, kept for HBK_MAPPER=v1
+    if m: return f"building the map ({m.group(1)} of {m.group(2)})", 0.7 + 0.3 * int(m.group(1)) / max(1, int(m.group(2)))
+    if s.startswith("record meta:"): return "collecting file tags", None
+    if "{" in s or "=" in s: return "building the map", None       # a stats line: not for the user
+    return s, None
+
+
 class Backup:
     def __init__(self, src: Source, log=None):
         """log(message) is called at every step of the scan, so a job can show progress (the first open of a remote backup
@@ -433,14 +461,12 @@ class Backup:
             raise RuntimeError("no snapshot database is on this Mac yet: load the file list of at least one share for the chosen run (the chips above the tabs), then run the preparation again")
         job["message"] = "mapping buckets to writers"; job["progress"] = 0.7
         def mlog(m):
-            job["message"] = str(m)
-            mm = re.search(r"scanned (\d+)/(\d+)", str(m))                 # anchor scan: 70-95 % of the job
-            if mm: job["progress"] = 0.7 + 0.25 * int(mm.group(1)) / max(1, int(mm.group(2))); return
-            mm = re.search(r"placing writer (\d): ([\d,]+)/([\d,]+)", str(m))      # placement: 96-100 %, four writers in turn
-            if mm: job["progress"] = 0.96 + 0.04 * (int(mm.group(1)) + int(mm.group(2).replace(",", "")) / max(1, int(mm.group(3).replace(",", "")))) / 4; return
-            if str(m).startswith(("owners from anchors", "placement", "phase2", "  resolving copies")): job["progress"] = 0.955; return
-            mm = re.search(r"mapped (\d+)/(\d+)", str(m))                  # v1 search, or the anchor-first summary line
-            if mm: job["progress"] = 0.7 + 0.3 * int(mm.group(1)) / max(1, int(mm.group(2)))
+            # The mapper's lines carry counters and stats for the log; the job shows a plain phrase (mapper_phase) and takes
+            # its progress from the counters. The raw line stays on the job as "detail" (not shown, there for support).
+            job["detail"] = str(m)
+            text, frac = mapper_phase(str(m))
+            job["message"] = text
+            if frac is not None: job["progress"] = frac
         # In a child process: the app stays responsive while the search runs at full CPU, and Stop ends it at once.
         res, upto = poolmap.build_poolmap_detached(self.src, str(pool_dir), mlog, max_bucket=max_bucket, cancelled=lambda: bool(job.get("cancel")))
         self._pool = None
