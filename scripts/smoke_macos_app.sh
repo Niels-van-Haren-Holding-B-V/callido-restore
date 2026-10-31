@@ -106,14 +106,18 @@ wait_for_smoke_exit() {
 }
 
 check_about() {
-  python3 - "$PORT" <<'PY'
+  # the expected version is the one in callido_restore/about.py, the single source (same as APP_NAME above)
+  local expected
+  expected=$(sed -n 's/^VERSION = "\([^"]*\)".*/\1/p' callido_restore/about.py)
+  [ -n "$expected" ] || die "VERSION not found in callido_restore/about.py"
+  python3 - "$PORT" "$expected" <<'PY'
 import json, sys, urllib.request
-port = sys.argv[1]
+port, expected = sys.argv[1], sys.argv[2]
 with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/about", timeout=15) as response:
     data = json.load(response)
 print(data)
-if data.get("version") != "0.1.0":
-    raise SystemExit(f"unexpected app version: {data!r}")
+if data.get("version") != expected:
+    raise SystemExit(f"unexpected app version (expected {expected}): {data!r}")
 rclone = data.get("rclone") or ""
 if not rclone.lower().startswith("rclone v"):
     raise SystemExit(f"about did not report a bundled rclone version: {data!r}")
