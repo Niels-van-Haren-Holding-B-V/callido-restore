@@ -116,12 +116,6 @@ case-sensitive prefix (`substr(path, 1, n) = 'dir/'`) instead of `LIKE 'dir/%'` 
 `restore_target_error()` validates targets for `/api/restore` (creates roots) and `/api/restore/resume` (roots must still be
 there, source check again); a resume that fails keeps the job file. Neutral example names in the files H8 owns (H18 rule).
 
-## H16 — Restructure into packages (Niels, 2026-10-31 00:20 / 01:01; see docs/handovers)
-IN PROGRESS (hbk-3): starts right after #53 (H17) and #54 merge; no other code PRs in between. Layout `callido_restore/` with
-`core/`, `pool/`, `restore/`, `sources/`, `server/`, `app/`; `tests/` mirrors the packages; root keeps README, LICENSE,
-pyproject.toml, docs/, scripts/, .github/. Pure moves first (git mv + imports, zero behaviour change), one layer per PR, each
-branched from fresh origin/main and green on unit + both DMG builds + check_private; build/packaging and docs updated in each.
-
 ## H19 — Search prefix filter (Reviewer, 2026-10-31 00:59)
 DONE (hbk-3) in #53: `Backup._where` selects a folder prefix with exact `substr`, test in `tests/test_query_where.py`.
 
