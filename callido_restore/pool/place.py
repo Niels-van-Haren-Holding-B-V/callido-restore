@@ -20,6 +20,7 @@ positions take one whose bytes match. Everything placed without a byte check is 
 import os, bisect, collections, struct, time
 from array import array
 from callido_restore.pool.anchor import _rss_mb, PARENT_RSS_MB
+from callido_restore.pool.poolmap2 import TAGK
 
 SEARCH_NODES = 20000         # DFS budget per claim search; over budget counts as ambiguous
 MAX_CANDIDATES = 6000        # widest search window (a whole revision band)
@@ -117,6 +118,18 @@ def resolve_and_place_v3(writers, anchors, index, log=print, max_bucket=None):
     for pl, rl in _group_by_tag(anchors):
         pl = sorted(p for p in pl if p[0] in bset)
         if pl: groups.append((pl, sorted((first_id(w, ri), w, ri) for w, ri in rl)))
+    # A tag the scan found nowhere (its first chunks straddle a bucket boundary, which the scan does not follow) still says
+    # which records are copies: a file of two or more chunks backed up again stores nothing, so only the earliest record can
+    # be the stored one; the later ones alias it (it is laid out by the gap pass and verified by size). Such records are not
+    # in ``anchors`` at all, so they are grouped from the writer tables.
+    notag = collections.defaultdict(list)
+    for w in W:
+        for r in W[w]:
+            # only records the scan looked for: their first chunks are their own (a later version whose head is dedup
+            # references shares the tag of the version before it but stores its changed chunks; it is not a copy)
+            if r.tag and r.n > 1 and r.head_new >= min(r.n + r.nd, TAGK) and (w, r.idx) not in anchors: notag[r.tag].append((first_id(w, r.idx), w, r.idx))
+    for tag, rl in notag.items():
+        if len(rl) > 1: groups.append(([], sorted(rl)))
     byrev = collections.defaultdict(list)
     for pl, rl in groups:
         if len(pl) == 1: byrev[rev.get(pl[0][0], 0)].append(rl[0][0])
@@ -129,8 +142,9 @@ def resolve_and_place_v3(writers, anchors, index, log=print, max_bucket=None):
     def too_new(g, b): return g > maxid_at(rev.get(b, 0)) * CLOCK_SLACK + CLOCK_MARGIN      # ids beyond what existed at the bucket's revision
     phys = {w: [r.n for r in W[w]] for w in W}; alias = {}; found = {}; cand = {}
     for pl, rl in groups:
-        stored = rl[:len(pl)] if len(pl) < len(rl) else rl
+        stored = rl[:max(1, len(pl))] if len(pl) < len(rl) else rl
         for g, w, ri in rl[len(stored):]: phys[w][ri] = 0; alias[(w, ri)] = (stored[0][1], stored[0][2])
+        if not pl: R["tag-without-position"] += 1; continue
         for g, w, ri in stored:
             if len(pl) == 1 and too_new(g, pl[0][0]): phys[w][ri] = 0; found[(w, ri)] = (pl[0][0], pl[0][1])
             else: cand[(w, ri)] = pl

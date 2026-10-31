@@ -101,6 +101,19 @@ class Placer(unittest.TestCase):
         self.assertEqual(pl[0][0], [(1, 1, 2), (2, 0, 2)]); self.assertEqual(pl[0][2], [(3, 0, 2)]); self.assertEqual(R["verified"], 2)
         pool.tmp.cleanup()
 
+    def test_copies_of_a_tag_without_positions_are_phantoms(self):
+        # E7: T's tag straddles a bucket boundary, so the scan found no position for it; T2 is a later byte-identical copy (same
+        # tag, same size). T2 must store nothing (so the gap between A and B is exactly T), T is laid out by the gap pass and
+        # verified by size, and T2 aliases it.
+        pool = Pool({0: (2, [10, 20, 30, 40])})
+        A = _rec(0, 100, 1, size=10, tag="a"); T = _rec(1, 101, 2, size=50, tag="t"); T2 = _rec(2, 900, 2, size=50, tag="t"); B = _rec(3, 103, 1, size=40, tag="b")
+        anchors = {(0, 0): [(0, 0, 1)], (0, 3): [(0, 3, 1)]}                       # the scanner lists no record of tag "t"
+        owner, pl, R, flags = self.run_placer(pool, {0: [A, T, T2, B], 1: [], 2: [], 3: []}, anchors)
+        self.assertEqual(R["tag-without-position"], 1); self.assertEqual(R["phantom-of-tagged"], 1)
+        self.assertEqual(pl[0][1], [(0, 1, 2)]); self.assertEqual(pl[0][2], [(0, 1, 2)]); self.assertEqual(flags["aliased"], {(0, 2): (0, 1)})
+        self.assertEqual(flags["guessed"], set()); self.assertEqual(R["verified"], 3)
+        pool.tmp.cleanup()
+
     def test_gap_records_between_anchors_are_laid_out_and_verified(self):
         # bucket 0: A (1 chunk) then an untagged record U (2 chunks) then a record H whose head is a dedup reference to A's chunk
         # (so it has a tag but was never scanned), then B anchored; sizes: U unknown (guessed), H = own 70 + referenced 10
