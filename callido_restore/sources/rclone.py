@@ -313,7 +313,7 @@ def ls(path, dirs_only=False, files_only=False, recurse=False, max_depth=None, n
 
 
 def smb_host(raw):
-    """The NAS host from what a person types: "nas", "192.168.1.10", or the Windows / Finder forms "\\\\nas", "\\\\nas\\share",
+    """The NAS host from what a person types: "nas", "192.0.2.10", or the Windows / Finder forms "\\\\nas", "\\\\nas\\share",
     "//nas/share", "smb://nas/share" (Windows users copy the address from File Explorer). rclone's smb backend wants the bare host;
     the share is picked afterwards from the listing. "" when nothing usable is left."""
     h = (raw or "").strip()

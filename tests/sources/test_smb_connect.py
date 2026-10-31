@@ -12,7 +12,7 @@ from callido_restore.sources import rclone
 
 class SmbHost(unittest.TestCase):
     def test_forms_people_type(self):
-        for raw, want in [("nas", "nas"), ("  192.168.1.10 ", "192.168.1.10"), ("\\\\nas", "nas"), ("\\\\nas\\Restore\\x", "nas"),
+        for raw, want in [("nas", "nas"), ("  192.0.2.10 ", "192.0.2.10"), ("\\\\nas", "nas"), ("\\\\nas\\Restore\\x", "nas"),
                           ("//nas/Restore", "nas"), ("smb://nas.local/Restore", "nas.local"), ("SMB://user@nas", "nas"), ("", ""), (None, "")]:
             self.assertEqual(rclone.smb_host(raw), want, raw)
 

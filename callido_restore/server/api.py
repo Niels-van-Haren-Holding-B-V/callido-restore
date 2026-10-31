@@ -277,7 +277,7 @@ class H(BaseHTTPRequestHandler):
                     # UI shows nothing until the job exists)
                     pw = (body.get("password") or "").replace("\n", "")
                     host = rclone.smb_host(body.get("host"))
-                    if not host: return self._json({"error": "Fill in the NAS address (for example 192.168.1.10 or nas)."}, 400)
+                    if not host: return self._json({"error": "Fill in the NAS address (for example 192.0.2.10 or nas)."}, 400)
                 def run(job):
                     if kind == "drive":
                         # The sign-in runs through `rclone authorize` with the app's own landing page (static/oauth.html) instead of
