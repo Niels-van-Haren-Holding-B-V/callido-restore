@@ -182,8 +182,11 @@ class H(BaseHTTPRequestHandler):
             if u.path == "/api/snapshot_info":
                 return self._json(b.snapshot_info(q["share"], int(q["ver"])))
             if u.path == "/api/index":
-                share, ver = q["share"], int(q["ver"])
-                shares = b.shares if share == "*" else [share]
+                share, ver = q.get("share", "*"), int(q["ver"])
+                # `share` is one name or "*"; `shares` (JSON list) loads just those, e.g. the unloaded shares of a selection
+                shares = json.loads(q["shares"]) if q.get("shares") else b.shares if share == "*" else [share]
+                shares = [s for s in shares if s in b.shares] or shares
+                share = share if len(shares) == 1 else f"{len(shares)} shares"
                 def run(job):
                     out = []
                     for i, sh in enumerate(shares):

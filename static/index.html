@@ -422,7 +422,8 @@ async function refreshShares(){const id=S.ver;S.snaps={};const infos=await Promi
     (allIdx?'':`<button class="small primary" id="loadAll">Load all shares for this run</button>`)+`<span id="jobStatus" class="status"></span>`;
   $$('#snapShares .chip').forEach(c=>c.onclick=()=>{const i=S.snaps[c.dataset.share];if(!i.indexed&&i.available&&!i.locked)runIndex(c.dataset.share)});
   const la=$('#loadAll');if(la){try{if((await api('/api/jobs')).some(j=>j.state==='running'&&j.label.startsWith('index')))la.disabled=true,la.textContent='Loading…'}catch(e){}la.onclick=()=>{la.disabled=true;la.textContent='Loading…';runIndex('*')}}}
-async function runIndex(share){const el=$('#jobStatus');pendingBar(el,'Starting…');let j;try{j=await api('/api/index',{src:S.src,share,ver:S.ver})}catch(e){el.textContent='';toastError(e);return}
+async function runIndex(share){const el=$('#jobStatus');pendingBar(el,'Starting…');let j;   // share: one name, '*' for all, or an array of names
+  const q=Array.isArray(share)?{shares:JSON.stringify(share)}:{share};try{j=await api('/api/index',{src:S.src,...q,ver:S.ver})}catch(e){el.textContent='';toastError(e);return}
   const show=job=>{el.innerHTML=`<span class="prog" style="display:inline-block;vertical-align:middle"><i style="width:${Math.round((job.progress||0)*100)}%"></i></span> ${esc(job.message||'')} <span class="muted">${etaText(job.id,job.progress||0)}</span>`};
   const job=await waitJob(j.id,null,700,show);                     // survives errors and a throttled window, like the other waits
   el.textContent=job.state==='error'?'Error: '+job.error:'';const errs=(job.result||[]).filter(r=>!r.ok);if(errs.length)el.textContent=errs.map(e=>e.share+': '+e.error).join(' · ');
@@ -733,7 +734,7 @@ async function tabRestore(){const el=$('#tab-restore');
     $$('.jr').forEach(b=>b.onclick=async()=>{b.disabled=true;b.textContent='Resuming…';try{const j=await post('/api/restore/resume',{id:b.dataset.i});pollJob(j.id,$('#rsProg'),()=>tabRestore(),true)}catch(e){toastError(e);b.disabled=false;b.textContent='Continue'}tabRestore()});
     $$('.jc').forEach(b=>b.onclick=async()=>{await api('/api/job/cancel',{id:b.dataset.i});setTimeout(showSaved,1500)})}catch(e){}};
   showSaved();
-  const ll=$('#rsLoadLists');if(ll)ll.onclick=()=>{ll.disabled=true;ll.textContent='Loading…';runIndex(notLoaded.length>1?'*':notLoaded[0])};
+  const ll=$('#rsLoadLists');if(ll)ll.onclick=()=>{ll.disabled=true;ll.textContent='Loading…';runIndex(notLoaded.length>1?notLoaded:notLoaded[0])};   // only the selected shares, not every share of the run
   $('#rsPlan').onclick=async()=>{$('#rsPlanOut').textContent='counting…';await checkAll()};
   $('#rsGo').onclick=async()=>{const its=items();const dest=oneMode()?oneDest():'';
     if(!oneMode()&&its.some(x=>!x.dest)){toast('Choose a target for every shared folder in step 4.',{kind:'warn'});return}

@@ -81,6 +81,9 @@ class AppFlow(unittest.TestCase):
         self.assertEqual(max(v["id"] for v in info["versions"]), m["incident"])
         # a local backup has every snapshot .db on disk already, so the preparation may start right at open;
         # loading the file lists of the last clean run starts it otherwise
+        # the Restore step loads just the selected shares whose list is missing (a JSON list), then "*" loads the rest
+        j = self.wait_job(self.get("/api/index", src=src, shares=json.dumps(["Photos", "homes"]), ver=ver)["id"])
+        self.assertEqual([x["share"] for x in j["result"]], ["Photos", "homes"]); self.assertTrue(all(x["ok"] for x in j["result"]), j["result"])
         j = self.wait_job(self.get("/api/index", src=src, share="*", ver=ver)["id"])
         self.assertTrue(all(x["ok"] for x in j["result"]), j["result"])
         st = self.get("/api/pool", src=src); self.assertTrue(st["running"] or st["complete"], f"preparation did not start: {st}")
