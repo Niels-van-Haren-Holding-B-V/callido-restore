@@ -78,7 +78,10 @@ class Backup:
         cfg = s.listdir("Config") if "Config" in top else {}
         tally(cfg)
         shares = sorted(n for n, e in s.listdir("Config/@Share").items() if e["dir"]) if "@Share" in cfg else []
-        for i, sh in enumerate(shares): log(f"Listing shares {i + 1}/{len(shares)}…"); tally(s.listdir(f"Config/@Share/{sh}"))
+        for i, sh in enumerate(shares):
+            log(f"Listing shares {i + 1}/{len(shares)}…"); ents = s.listdir(f"Config/@Share/{sh}"); tally(ents)
+            ll = getattr(s, "last_listing", None)
+            if ll and ll.get("rel", "").endswith(sh): log(f"Listing shares {i + 1}/{len(shares)} · {len(ents):,} entries in {ll['seconds']:.0f} s")
         info["ransomware"] = {"locked_files": locked, "notes": notes, "examples": ex}
         info["layout"] = {"top": sorted(top), "config": sorted(cfg), "pool_present": "Pool" in top, "control_present": "Control" in top}
         # task config

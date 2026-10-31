@@ -14,6 +14,7 @@ class Source:
         self.remotes = [r for r in (remote if isinstance(remote, list) else [remote]) if r]
         self.remote = self.remotes[0] if self.remotes else None
         self.local = Path(os.path.expanduser(local))
+        self.last_listing = None                     # {rel, entries, seconds} of the last remote listing
         self.extra = [Path(os.path.expanduser(x)) for x in (extra or []) if x]
         self._list = {}
         self._lock = threading.Lock()
@@ -137,13 +138,14 @@ class Source:
         with self._lock: saved = None if refresh else self._remote_lists.get(rel)
         if saved and time.time() - saved.get("t", 0) < self.LISTING_TTL: return saved["e"]
         if not self.remotes: return {}
-        out = {}; asked = False
+        out = {}; asked = False; t0 = time.time()
         for remote in self.remotes:
             try: entries = rclone.ls(f"{remote}/{rel}" if rel else remote, no_modtime=True)
             except rclone.RcloneError: continue                 # an unreachable remote adds nothing (as before)
             asked = True
             for e in entries: out.setdefault(e["Name"], {"size": e["Size"], "dir": e["IsDir"]})
         if asked:
+            self.last_listing = {"rel": rel, "entries": len(out), "seconds": time.time() - t0}     # the open job reports it
             with self._lock: self._remote_lists[rel] = {"t": time.time(), "e": out}
             self._save_listings()
         elif saved: return saved["e"]                            # remote unreachable right now: the stale listing beats nothing
