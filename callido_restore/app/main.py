@@ -65,7 +65,7 @@ def run_window(port, smoke=False):
             finally: _log(f"smoke: page loaded, title={result.get('title')!r}"); win.destroy()
         win.events.loaded += loaded
         guard.start()
-    webview.start()
+    webview.start(private_mode=False)                          # keep the page's local storage (restore selection, last run) across restarts
     return result.get("title")
 
 def main():

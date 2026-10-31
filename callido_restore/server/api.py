@@ -38,6 +38,7 @@ BACKUPS = {}
 
 def backup_for(sid, refresh=False, log=None):
     if sid not in SOURCES: raise KeyError(f"unknown source {sid}")
+    if refresh: SOURCES[sid].forget_listings()                   # the ↻ button: read the backup's folders from the remote again
     if refresh or sid not in BACKUPS: BACKUPS[sid] = Backup(SOURCES[sid], log)
     return BACKUPS[sid]
 

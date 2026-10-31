@@ -23,6 +23,9 @@ class Source:
         self._lock = threading.Lock()
         self.index_dir = paths.INDEX_DIR / sid
         self.index_dir.mkdir(parents=True, exist_ok=True)
+        # Remote folder listings survive a restart (listings.json): opening a backup again costs no Drive round trips.
+        # A listing older than LISTING_TTL seconds, or a refresh (the ↻ button, the pool index fetch), asks the remote again.
+        self._remote_lists = self._load_listings()
         # Fetched metadata and pool objects land here, not in self.local / extra.
         self.cache_dir = paths.CACHE_DIR / sid
         self.cache_dir.mkdir(parents=True, exist_ok=True)
@@ -112,8 +115,47 @@ class Source:
         return {"id": self.id, "name": self.name, "local": str(self.local), "remote": self.remote, "remotes": self.remotes, "extra": [str(x) for x in self.extra],
                 "local_exists": self.local.is_dir()}
 
+    LISTING_TTL = 3600.0
+
+    def _listings_file(self): return self.index_dir / "listings.json"
+
+    def _load_listings(self):
+        try: d = json.loads(self._listings_file().read_text())
+        except (OSError, ValueError): return {}
+        return d if isinstance(d, dict) else {}
+
+    def _save_listings(self):
+        tmp = self._listings_file().with_suffix(".json.tmp")
+        try:
+            tmp.write_text(json.dumps(self._remote_lists)); os.replace(tmp, self._listings_file())
+        except OSError: pass
+
+    def forget_listings(self):
+        """Drop every cached folder listing (memory and disk): the next listdir asks the remote again."""
+        with self._lock: self._list.clear(); self._remote_lists.clear()
+        try: self._listings_file().unlink()
+        except OSError: pass
+
+    def _remote_entries(self, rel, refresh):
+        """Remote entries of ``rel`` as {name: {size, dir}}: from listings.json when fresh enough, else from the remotes."""
+        with self._lock: saved = None if refresh else self._remote_lists.get(rel)
+        if saved and time.time() - saved.get("t", 0) < self.LISTING_TTL: return saved["e"]
+        if not self.remotes: return {}
+        out = {}; asked = False
+        for remote in self.remotes:
+            try: entries = rclone.ls(f"{remote}/{rel}" if rel else remote, no_modtime=True)
+            except rclone.RcloneError: continue                 # an unreachable remote adds nothing (as before)
+            asked = True
+            for e in entries: out.setdefault(e["Name"], {"size": e["Size"], "dir": e["IsDir"]})
+        if asked:
+            with self._lock: self._remote_lists[rel] = {"t": time.time(), "e": out}
+            self._save_listings()
+        elif saved: return saved["e"]                            # remote unreachable right now: the stale listing beats nothing
+        return out
+
     def listdir(self, rel, refresh=False):
-        """Merged listing of a relative dir: {name: {size, dir, local, remote}}."""
+        """Merged listing of a relative dir: {name: {size, dir, local, remote}}. Local roots are read fresh, the remote part comes
+        from listings.json when it is younger than LISTING_TTL (see ``_remote_entries``)."""
         rel = rel.strip("/")
         with self._lock:
             if rel in self._list and not refresh: return self._list[rel]
@@ -128,13 +170,10 @@ class Source:
                 except OSError: continue
                 if e.name in ents: continue
                 ents[e.name] = {"size": st.st_size if e.is_file() else 0, "dir": e.is_dir(), "local": True, "remote": False}
-        for remote in self.remotes:
-            try: entries = rclone.ls(f"{remote}/{rel}" if rel else remote, no_modtime=True)
-            except rclone.RcloneError: continue                 # an unreachable remote adds nothing (as before)
-            for e in entries:
-                ent = ents.setdefault(e["Name"], {"size": e["Size"], "dir": e["IsDir"], "local": False, "remote": False})
-                ent["remote"] = True
-                if not ent["local"]: ent["size"] = e["Size"]
+        for name, e in self._remote_entries(rel, refresh).items():
+            ent = ents.setdefault(name, {"size": e["size"], "dir": e["dir"], "local": False, "remote": False})
+            ent["remote"] = True
+            if not ent["local"]: ent["size"] = e["size"]
         with self._lock: self._list[rel] = ents
         return ents
 
