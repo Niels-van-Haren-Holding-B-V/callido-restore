@@ -38,6 +38,13 @@ A reference `r` encodes a **global chunk id** `g = (r − 64) / 29`. Ids are han
 each writer (set 4→writer 0, set 3→1, set 1→2, set 2→3) takes a block when it needs ids. Other TLVs (`a93b0156/01b5/015b`
 4-byte, `a93b0143` 28-byte) are markers.
 
+### Attribute record before a chunk list
+Some file records (photos on a real backup: 4,421 of 349,914 files in three shares) have a 28-byte attribute TLV in front of
+the chunk-list header: `[0xa93b0186][u32 28][000000c9 01000000 12000000 01000000 08000000 ffffffff 00000000]`, the last
+word doubling as the header's flags word, then `[0xa93b0200][u32 len]` and the list. Virtual-file pointer B then points at
+the TLV's body, 24 bytes before the header; pointer A (words 0-1) points at the list itself, `A = B + 12` for a plain record
+and `B + 36` for these. `ChunkRecords.record()` reads through pointer A (same set as B) and recognises the TLV from B.
+
 ## Small files
 `off_virtual_file < 0` → `Pool/file_pool/<-off>.file.<N>`: 0x140-byte header, then chunks `[u16 0xe5bb][u32 clen][u32 ulen][u16 0][LZ4 block]`.
 `file_pool_map.db` holds md5 of the whole file.
