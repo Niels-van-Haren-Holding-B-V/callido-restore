@@ -585,10 +585,18 @@ function prepPillRender(st){const pill=$('#prepPill');if(!pill)return;if(!st||st
   if(st.running){const j=st.job||{};const dl=j.total_bytes&&(j.done_bytes||0)<j.total_bytes;const bytes=dl?` · ${human(j.done_bytes||0)} of ${human(j.total_bytes)}${j.state==='running'?' · '+speedText(j.id):''}`:'';
     $('#prepText').textContent=`Preparing the backup · ${j.message||'starting…'}${bytes}`;b.textContent='Pause';b.onclick=async()=>{b.disabled=true;b.textContent='Pausing…';await prepPause()}}
   else{$('#prepText').textContent='Preparation paused · the restore waits for it';$('#prepPill').title='Resume continues the download where it stopped; the map itself is computed again.';b.textContent='Resume';b.disabled=false;b.onclick=async()=>{b.disabled=true;b.textContent='Resuming…';await prepResume()}}}
+// A restore queued with "Start when the backup is prepared" starts here, from the preparation watcher, whatever tab is open;
+// the Restore tab picks the running restore up with its own bar when it is (re-)rendered.
+async function startQueued(){const q=S.queued;if(!q||q.src!==S.src||q.starting)return;q.starting=true;
+  try{await post('/api/restore',{src:q.src,dest:q.dest,items:q.its,skip_meta:q.skip});S.queued=null;
+    toast('The backup is prepared: the queued restore has started.',S.tab==='restore'?{}:{actions:[['Show',()=>showTab('restore')]]})}
+  catch(e){S.queued=null;toastError(e)}
+  if(S.tab==='restore')tabRestore()}
 async function prepWatch(){if(PREP.src===S.src&&PREP.timer)return;PREP.src=S.src;if(PREP.timer){clearTimeout(PREP.timer);PREP.timer=null}
   const tick=async()=>{if(PREP.src!==S.src)return;const st=await prepState();PREP.pool=st.pool||PREP.pool;const was=PREP.jobId;PREP.jobId=st.running||null;PREP.eta=st.job?etaText(st.job.id,st.job.progress||0,st.job.done_bytes,st.job.total_bytes):'';prepPillRender(st);prepLineRender(st);
     // the preparation ended, or the backup became prepared between two polls (a short run): Start, or a queued restore, may go now
     const ready=!!st.complete,became=PREP.complete===false&&ready;PREP.complete=ready;
+    if(ready&&S.queued)startQueued();                                           // whatever tab is open: the queued restore goes now
     if(((was&&!PREP.jobId)||became)&&S.tab==='restore')tabRestore();
     PREP.timer=setTimeout(tick,st.running?2000:5000)};tick()}
 function shareRows(){const rows=[];S.basket.forEach(b=>{let r=rows.find(x=>x.share===b.share);if(!r){r={share:b.share,paths:[]};rows.push(r)}r.paths.push(b.path)});return rows}
@@ -750,7 +758,7 @@ async function tabRestore(){const el=$('#tab-restore');
       const unv=job.unverified||[];if(unv.length)$('#rsUnverified').innerHTML=`<h4 style="font-size:12px;color:var(--warn)">Couldn’t be verified: check these ${unv.length}${(job.result&&job.result.unverified)>unv.length?' of '+job.result.unverified.toLocaleString():''} files before you rely on them</h4><p class="help" style="margin:0 0 4px">${esc(CHECKED_HELP)}</p><div class="tablewrap"><table>${unv.slice(0,500).map(e=>`<tr><td class="mono">${esc(e.path)}</td><td>${esc(plainReason(e.reason))}</td></tr>`).join('')}</table></div>`;
       if(job.errors&&job.errors.length)$('#rsErrors').innerHTML=`<h4 style="font-size:12px;color:var(--muted)">Errors (${(job.errors_total??job.errors.length).toLocaleString()})</h4><div class="tablewrap"><table>${job.errors.slice(0,500).map(e=>`<tr><td class="mono">${esc(e.path)}</td><td title="${esc(e.error)}">${esc(plainError(e.error))}</td></tr>`).join('')}</table></div>`},true)};
   if(restoreRun)watchRestore(restoreRun.id);                                 // a restore that runs already keeps its bar after a re-render
-  else if(S.queued&&mapOk){const q=S.queued;S.queued=null;toast('The backup is prepared: the queued restore starts now.');startRestore(q.its,q.dest,q.skip)}
+  else if(S.queued&&mapOk)startQueued();
   $('#rsGo').onclick=async()=>{if(S.queued){S.queued=null;toast('The queued restore was cancelled.');tabRestore();return}
     const its=items();const dest=oneMode()?oneDest():'';
     if(!oneMode()&&its.some(x=>!x.dest)){toast('Choose a target for every shared folder in step 3.',{kind:'warn'});return}
