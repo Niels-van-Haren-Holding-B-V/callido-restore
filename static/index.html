@@ -506,7 +506,7 @@ async function tabRestore(){const el=$('#tab-restore');
   $('#wdConnect').onclick=async()=>{const q={kind:'smb',name:$('#wdName').value.trim()||'nas',host:$('#wdHost').value.trim(),user:$('#wdUser').value.trim(),password:$('#wdPass').value};
     if(!q.host||!q.user){$('#wdConn').textContent='Fill in the NAS address and the user.';return}
     $('#wdConnect').disabled=true;$('#wdConn').textContent='Connecting…';
-    try{const j=await post('/api/rclone/connect',q);const job=await new Promise(res=>{const t=async()=>{const x=await api('/api/job',{id:j.id});if(x.state==='running'){$('#wdConn').textContent=x.message||'';setTimeout(t,1000)}else res(x)};t()});
+    try{const j=await post('/api/rclone/connect',q);const job=await waitJob(j.id,m=>{$('#wdConn').textContent=m});
       if(job.state==='error'){$('#wdConn').textContent='Failed: '+job.error;$('#wdConnect').disabled=false;return}
       MAP._rem=job.result.remote;saveMap();
       $('#wdConn').textContent='Connected: '+job.result.remote+(job.result.shares?' · shares: '+job.result.shares.join(', '):'');setTimeout(tabRestore,800)}
@@ -526,11 +526,18 @@ async function tabRestore(){const el=$('#tab-restore');
       pollJob(j.id,$('#rsProg'),job=>{showSaved();$('#rsProg').innerHTML+=`<p><b>${job.result&&job.result.paused?'Paused':'Done'}:</b> ${job.result?`${job.result.restored} restored · ${job.result.skipped} skipped · ${job.result.errors} errors · ${human(job.result.bytes)}`:esc(job.error||'')}</p>`;
         if(job.errors&&job.errors.length)$('#rsErrors').innerHTML=`<h4 style="font-size:12px;color:var(--muted)">Errors (${job.errors.length})</h4><div class="tablewrap"><table>${job.errors.slice(0,500).map(e=>`<tr><td class="mono">${esc(e.path)}</td><td>${esc(e.error)}</td></tr>`).join('')}</table></div>`},true)}
     catch(e){alert(e.message)}};}
-function pollJob(id,el,done,rich,stopLabel){let stopping=false;const t=async()=>{const job=await api('/api/job',{id});
+// Sleep that also ends when the window becomes visible or focused again: while the user is in the browser (Google sign-in) the
+// embedded WebKit view throttles timers, so a plain setTimeout chain may not resume for a long time.
+const sleepOrWake=ms=>new Promise(res=>{let t=null;const done=()=>{clearTimeout(t);document.removeEventListener('visibilitychange',done);window.removeEventListener('focus',done);res()};t=setTimeout(done,ms);document.addEventListener('visibilitychange',done);window.addEventListener('focus',done)});
+// Wait for a job to leave the running state. A failed poll (network hiccup, throttled view) is retried, never left hanging;
+// an unknown job id ends the wait with an error result.
+async function waitJob(id,onMsg,ms=1000){for(let miss=0;;){let x=null;try{x=await api('/api/job',{id});miss=0}catch(e){if(/no such job/i.test(e.message)||++miss>60)return{state:'error',error:e.message}}
+  if(x&&x.state!=='running')return x;if(x&&onMsg)onMsg(x.message||'');await sleepOrWake(ms)}}
+function pollJob(id,el,done,rich,stopLabel){let stopping=false;const t=async()=>{let job;try{job=await api('/api/job',{id})}catch(e){if(/no such job/i.test(e.message)){el.innerHTML+=`<p style="color:var(--bad)">${esc(e.message)}</p>`;return}await sleepOrWake(2000);return t()}
   const stop=stopLabel&&job.state==='running'?`<button class="small" id="jobStop" ${stopping?'disabled':''}>${stopping?'Stopping…':stopLabel}</button>`:'';
   el.innerHTML=progressHtml(job,rich,stop);
   const b=$('#jobStop');if(b)b.onclick=async()=>{stopping=true;b.disabled=true;b.textContent='Stopping…';await api('/api/job/cancel',{id})};
-  if(job.state==='running')setTimeout(t,800);else{if(job.state==='error')el.innerHTML+=`<p style="color:var(--bad)">${esc(job.error)}</p>`;done&&done(job)}};t();}
+  if(job.state==='running'){await sleepOrWake(800);return t()}else{if(job.state==='error')el.innerHTML+=`<p style="color:var(--bad)">${esc(job.error)}</p>`;done&&done(job)}};t();}
 // ---------- drawer
 $('#closeDrawer').onclick=()=>$('#drawer').classList.remove('open');
 async function openDetail(share,ver,id){const d=await api('/api/file',{src:S.src,share,ver,id});if(!d)return;
@@ -552,7 +559,7 @@ const WS={step:1,remote:'',path:'',kind:'existing'};
 function wsShow(){$('#wzS').textContent=`step ${WS.step} of 3`;[1,2,3].forEach(i=>$('#ws'+i).style.display=WS.step===i?'':'none');$('#wsBack').style.display=WS.step>1?'':'none';$('#wsNext').textContent=WS.step===3?'Add backup':'Next'}
 $('#addSrc').onclick=async()=>{WS.step=1;wsShow();$('#dlgSrc').showModal();try{const r=await api('/api/remotes');$('#wsRem').innerHTML=r.remotes.map(x=>`<option>${esc(x)}</option>`).join('')||'<option value="">(none configured)</option>'}catch(e){}};
 $$('input[name=wsk]').forEach(r=>r.onchange=()=>{WS.kind=r.value;$('#wsDrive').style.display=WS.kind==='drive'?'':'none';$('#wsSmb').style.display=WS.kind==='smb'?'':'none'});
-$('#nCancel').onclick=()=>$('#dlgSrc').close();$('#wsBack').onclick=()=>{WS.step--;wsShow()};
+$('#nCancel').onclick=()=>{$('#wsNext').disabled=false;$('#dlgSrc').close()};$('#wsBack').onclick=()=>{$('#wsNext').disabled=false;WS.step--;wsShow()};
 const wsInto=d=>(WS.remote?(WS.path?WS.path.replace(/\/$/,'')+'/':''):(WS.path.replace(/\/$/,'')+'/'))+d;   // child folder d of the current path
 async function wsList(){const r=await api('/api/rclone/ls',{remote:WS.remote,path:WS.path});if(r.error){$('#wsList').innerHTML=`<p style="color:var(--bad)">${esc(r.error)}</p>`;return}
   WS.path=r.path;$('#wsPath').value=WS.path;$('#wsPathShow').textContent=(WS.remote||'')+WS.path;
@@ -569,8 +576,9 @@ $('#wsNext').onclick=async()=>{
     else if(k==='local'){WS.remote='';WS.path='~'}
     else{const q=k==='drive'?{kind:'drive',name:$('#wsDName').value,client_id:$('#wsCid').value.trim(),client_secret:$('#wsCsec').value.trim()}:{kind:'smb',name:$('#wsSName').value,host:$('#wsHost').value.trim(),user:$('#wsUser').value.trim(),password:$('#wsPass').value};
       $('#wsConn').textContent=k==='drive'?'A browser window opens for the Google sign-in. When it shows “Success! All done”, close it and come back to this window…':'Connecting…';$('#wsNext').disabled=true;
-      try{const j=await post('/api/rclone/connect',q);const job=await new Promise(res=>{const t=async()=>{const x=await api('/api/job',{id:j.id});if(x.state==='running'){$('#wsConn').textContent=x.message||'';setTimeout(t,1000)}else res(x)};t()});
-        if(job.state==='error'){$('#wsConn').textContent='Failed: '+job.error;$('#wsNext').disabled=false;return}
+      let job;try{const j=await post('/api/rclone/connect',q);job=await waitJob(j.id,m=>{$('#wsConn').textContent=m})}catch(e){job={state:'error',error:e.message}}
+      $('#wsNext').disabled=false;                                   // whatever happened, the user is never stuck on step 1
+      try{if(job.state==='error'){$('#wsConn').textContent='Failed: '+job.error;return}
         WS.remote=job.result.remote;WS.path='';const sel=$('#wsRem');if(![...sel.options].some(o=>o.value===WS.remote))sel.add(new Option(WS.remote,WS.remote));sel.value=WS.remote;   // the new connection is the selected one from now on
         $('#wsConn').textContent='Connected: '+WS.remote+' — now pick the backup folder on it.'}catch(e){$('#wsConn').textContent=e.message;$('#wsNext').disabled=false;return}
       $('#wsNext').disabled=false}
