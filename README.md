@@ -10,6 +10,25 @@ Browse a Synology **Hyper Backup** (`.hbk`) on a timeline and restore files from
 Works on a `.hbk` that sits on Google Drive (or any rclone remote), on a NAS share over SMB, or on a local disk, complete or partial.
 Built after a ransomware incident; the backup's own metadata databases are read directly, only the data you restore is downloaded.
 
+## How it looks
+
+Every backup run on a timeline: files new, modified and removed per run. A burst of red and blue at the end is what an incident looks like.
+
+![Timeline of backup runs, the incident run selected](docs/screenshots/overview.png)
+
+<table>
+<tr>
+<td width="50%"><b>What changed in a run.</b> Encrypted copies and ransom notes are flagged.<br><img src="docs/screenshots/changes.png" alt="Changed files of the incident run with ransomware flags"></td>
+<td width="50%"><b>Browse the last clean run</b> and add folders or single files to the restore.<br><img src="docs/screenshots/browse.png" alt="Folder browser of the last clean run"></td>
+</tr>
+<tr>
+<td width="50%"><b>Restore selection.</b> Always visible, with file counts and sizes, items can be removed again.<br><img src="docs/screenshots/basket.png" alt="Restore selection panel"></td>
+<td width="50%"><b>Restore wizard.</b> Run, selection, one-time preparation, one target folder per shared folder.<br><img src="docs/screenshots/restore.png" alt="Restore wizard"></td>
+</tr>
+</table>
+
+The pictures show a small demo backup (`scripts/make_demo_backup.py`); `scripts/screenshots.py` regenerates them.
+
 ## Product goal
 
 A macOS app anyone can use to restore a Synology Hyper Backup (`.hbk`) without Hyper Backup.
