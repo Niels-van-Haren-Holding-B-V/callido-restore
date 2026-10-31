@@ -224,6 +224,8 @@ function renderFlow(){const cur=!S.info?1:!S.ver?2:S.tab==='restore'?4:3;
   $$('#flow li').forEach(li=>{const n=+li.dataset.s;li.classList.toggle('done',n<cur||(n===3&&S.basket.length>0&&cur>=3));li.classList.toggle('on',n===cur)})}
 $$('#flow li').forEach(li=>li.onclick=()=>{const n=+li.dataset.s;if(n===1)$('#overview').scrollIntoView({behavior:'smooth'});else if(n===2)$('#versions').scrollIntoView({behavior:'smooth'});else if(S.ver){showTab(n===4?'restore':'browse');$('#snap').scrollIntoView({behavior:'smooth'})}else $('#versions').scrollIntoView({behavior:'smooth'})});
 const LOGO=$('#logo').src;$('#favicon').href=LOGO;
+// "@AppConfig" is Hyper Backup's application-settings part (DSM package config, users/groups, shared-folder settings), not files.
+const APPCFG='@AppConfig';const isAppCfg=n=>n===APPCFG;const shareLabel=n=>isAppCfg(n)?'Application settings (DSM, not restorable here)':n;
 const emptyState=(title,text,btn)=>`<div class="empty"><img src="${LOGO}" alt=""><b>${title}</b><p>${text}</p>${btn||''}</div>`;
 // ETA from observed progress: samples of (time, fraction); returns "about 4 min left" or ''
 const ETA={};
@@ -254,12 +256,13 @@ async function openSource(refresh){const id=$('#srcSel').value;if(!id)return;S.s
 function renderOverview(){const i=S.info,t=i.task||{},r=i.ransomware;let h='';
   if(r.locked_files>0||i.problems.length){h+=`<div class="alert"><b>${r.locked_files>0?'Ransomware-encrypted backup.':'Problems.'}</b> ${r.locked_files>0?`${r.locked_files} metadata files carry the <code>${esc(r.examples[0]?.split('.').pop())}</code> suffix and are unreadable (e.g. ${r.examples.slice(0,3).map(esc).join(', ')}).`:''} ${i.problems.map(esc).join(' · ')}</div>`}
   const locked=i.shares.reduce((a,s)=>a+(s.locked||0),0);
-  const shares=`<div><b>${i.shares.length}</b><span>shares: ${i.shares.map(s=>esc(s.name)).join(', ')}${locked?` · <span style="color:var(--bad)">${locked} encrypted snapshots</span>`:''}</span></div>`;
+  const userShares=i.shares.filter(s=>!isAppCfg(s.name));
+  const shares=`<div><b>${userShares.length}</b><span>shares: ${userShares.map(s=>esc(s.name)).join(', ')}${i.shares.some(s=>isAppCfg(s.name))?` <span class="muted">· plus the DSM application settings (not restorable here)</span>`:''}${locked?` · <span style="color:var(--bad)">${locked} encrypted snapshots</span>`:''}</span></div>`;
   const first=i.versions[0],last=i.versions[i.versions.length-1];
   h+=`<h2>Backup of <b>${esc(t.host_name||'?')}</b> <span class="help">· task “${esc(t.name||'?')}”${t.enable_data_encrypt?' · <b style="color:var(--warn)">client-side encryption on (not supported yet)</b>':''}</span></h2>
   <div class="kpi"><div><b>${i.versions.length.toLocaleString()}</b><span>backup runs${first?` · ${dd(first.ts)} → ${dd(last.ts)}`:''}</span></div>${shares}
   <div><b>${i.layout.pool_present?'yes':'no'}</b><span>file data present</span></div></div>
-  <details class="adv"><summary>Details</summary><p class="help">Source: <code>${esc(i.source.remote||'local only')}</code> · cache: <code>${esc(i.source.local)}</code><br>Snapshots per share: ${i.shares.map(s=>`${esc(s.name)} ${s.snapshots.toLocaleString()}`).join(' · ')}<br>Backed-up folders: ${(t.backup_folders||[]).map(x=>`<code>${esc(x)}</code>`).join(' ')||'?'} · compression ${t.data_compress_type??'?'} · version rotation ${t.enable_version_rotation?'on':'off'}</p></details>`;
+  <details class="adv"><summary>Details</summary><p class="help">Source: <code>${esc(i.source.remote||'local only')}</code> · cache: <code>${esc(i.source.local)}</code><br>Snapshots per share: ${i.shares.map(s=>`${esc(shareLabel(s.name))} ${s.snapshots.toLocaleString()}`).join(' · ')}<br>Backed-up folders: ${(t.backup_folders||[]).map(x=>`<code>${esc(x)}</code>`).join(' ')||'?'} · compression ${t.data_compress_type??'?'} · version rotation ${t.enable_version_rotation?'on':'off'}</p></details>`;
   $('#overview').innerHTML=h;}
 
 // ---------- version chart
@@ -305,7 +308,7 @@ async function refreshShares(){const id=S.ver;S.snaps={};const infos=await Promi
   infos.forEach(i=>S.snaps[i.share]=i);
   const allIdx=infos.every(i=>i.indexed);
   $('#snapShares').innerHTML=infos.map(i=>{let dot='',txt='';if(i.error){dot='bad';txt=i.error}else if(i.indexed){dot='ok';txt=`${(i.meta?.files||0).toLocaleString()} files · ${human(i.meta?.bytes||0)}`}else if(i.locked){dot='bad';txt='encrypted'}else if(!i.available){dot='bad';txt='no snapshot'}else if(i.local){dot='warn';txt='downloaded, click to load'}else{dot='dl';txt=`click to download ${human(i.size)} + load`}
-    return `<span class="chip ${i.indexed?'on':''}" data-share="${esc(i.share)}" title="${esc(txt)}"><i class="dot ${dot}"></i>${esc(i.share)} <span class="muted">${esc(txt)}</span></span>`}).join('')+
+    return `<span class="chip ${i.indexed?'on':''}" data-share="${esc(i.share)}" title="${esc(isAppCfg(i.share)?'Hyper Backup\'s application-settings part (DSM package config, users, shared-folder settings). Readable here, not restorable as files. '+txt:txt)}" style="${isAppCfg(i.share)?'opacity:.6':''}"><i class="dot ${dot}"></i>${esc(shareLabel(i.share))} <span class="muted">${esc(txt)}</span></span>`}).join('')+
     (allIdx?'':`<button class="small primary" id="loadAll">Load all shares for this run</button>`)+`<span id="jobStatus" class="status"></span>`;
   $$('#snapShares .chip').forEach(c=>c.onclick=()=>{const i=S.snaps[c.dataset.share];if(!i.indexed&&i.available&&!i.locked)runIndex(c.dataset.share)});
   const la=$('#loadAll');if(la)la.onclick=()=>runIndex('*');}
@@ -372,7 +375,7 @@ async function tabTimeline(){const el=$('#tab-timeline');if(needLoad(el))return;
 
 let BR={share:null,dir:''};
 async function tabBrowse(){const el=$('#tab-browse');if(needLoad(el))return;const shares=indexedShares();if(!shares.includes(BR.share)){BR.share=shares[0];BR.dir=''}
-  el.innerHTML=`<div class="row" style="margin-bottom:8px"><label>Share <select id="brShare">${shares.map(s=>`<option ${s===BR.share?'selected':''}>${esc(s)}</option>`).join('')}</select></label><span class="crumbs" id="crumbs"></span><span style="flex:1"></span><button class="small" id="brBasket">+ Restore this folder</button></div><div id="brTable"></div>`;
+  el.innerHTML=`<div class="row" style="margin-bottom:8px"><label>Share <select id="brShare">${shares.map(s=>`<option value="${esc(s)}" ${s===BR.share?'selected':''}>${esc(shareLabel(s))}</option>`).join('')}</select></label><span class="crumbs" id="crumbs"></span><span style="flex:1"></span><button class="small" id="brBasket">+ Restore this folder</button></div><div id="brTable"></div>`;
   $('#brShare').onchange=e=>{BR.share=e.target.value;BR.dir='';tabBrowse()};$('#brBasket').onclick=()=>addBasket({share:BR.share,path:BR.dir,is_dir:1,name:BR.dir.split('/').pop()||'(share root)'});
   const parts=BR.dir?BR.dir.split('/'):[];let c=`<a data-p="">${esc(BR.share)}</a>`;parts.forEach((p,i)=>c+=`<span>/</span><a data-p="${esc(parts.slice(0,i+1).join('/'))}">${esc(p)}</a>`);$('#crumbs').innerHTML=c;
   $$('#crumbs a').forEach(a=>a.onclick=()=>{BR.dir=a.dataset.p;tabBrowse()});
@@ -395,7 +398,7 @@ async function tabSearch(){const el=$('#tab-search');if(needLoad(el))return;
 
 async function tabCompare(){const el=$('#tab-compare');const vs=S.info.versions.filter(v=>v.indexed.length);
   el.innerHTML=`<p class="help">Compares two loaded snapshots of one share by path (added / removed / size-or-mtime changed). Load more versions from the chart above to compare further back.</p>
-  <div class="row" style="margin-bottom:8px"><label>Share <select id="cpShare">${S.info.shares.map(s=>`<option>${esc(s.name)}</option>`).join('')}</select></label><label>From <select id="cpA"></select></label><label>To <select id="cpB"></select></label><button class="primary" id="cpGo">Compare</button><span id="cpStat" class="muted"></span></div><div id="cpOut"></div>`;
+  <div class="row" style="margin-bottom:8px"><label>Share <select id="cpShare">${S.info.shares.map(s=>`<option value="${esc(s.name)}">${esc(shareLabel(s.name))}</option>`).join('')}</select></label><label>From <select id="cpA"></select></label><label>To <select id="cpB"></select></label><button class="primary" id="cpGo">Compare</button><span id="cpStat" class="muted"></span></div><div id="cpOut"></div>`;
   const fill=()=>{const sh=$('#cpShare').value;const list=vs.filter(v=>v.indexed.includes(sh));const o=list.map(v=>`<option value="${v.id}">v${v.id} · ${dd(v.ts)}</option>`).join('');$('#cpA').innerHTML=o;$('#cpB').innerHTML=o;if(list.length>1){$('#cpA').value=list[list.length-2].id;$('#cpB').value=list[list.length-1].id}};
   $('#cpShare').onchange=fill;fill();
   $('#cpGo').onclick=async()=>{$('#cpStat').textContent='comparing…';const d=await api('/api/diff',{src:S.src,share:$('#cpShare').value,a:$('#cpA').value,b:$('#cpB').value});
