@@ -5,6 +5,14 @@ name: build-windows
 on:
   push: { branches: [main], tags: ['v*'] }
   pull_request:
+    paths:                       # docs-only PRs do not wait on the Windows build; the unit tests run in tests.yml (windows leg)
+      - 'callido_restore/**'
+      - 'static/**'
+      - 'assets/**'
+      - 'packaging/**'
+      - 'requirements.txt'
+      - 'pyproject.toml'
+      - '.github/workflows/build-windows.yml'
   workflow_dispatch:
 
 permissions:
@@ -30,8 +38,6 @@ jobs:
           & "$env:USERPROFILE\.dotnet\tools\wix.exe" extension add -g "WixToolset.UI.wixext/$env:WIX_VERSION" "WixToolset.Util.wixext/$env:WIX_VERSION"
       - name: Python dependencies
         run: python -m pip install -r requirements.txt "pyinstaller>=6.0"
-      - name: Unit tests (Windows)
-        run: python -m unittest discover -s tests -t . -v
       - name: Build app and MSI
         shell: pwsh
         run: |
