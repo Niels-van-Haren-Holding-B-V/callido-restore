@@ -127,6 +127,10 @@ DONE (hbk-2, #79): downloads through the daemon (`copyfile`), four record-set sl
 triage note of 2026-10-31 09:17 (hbk-2, claimed 09:35): the daemon gets the same Drive throttling as the one-process fallback
 (`--tpslimit 8 --drive-pacer-min-sleep 100ms --low-level-retries 20`, `rclone.THROTTLE`), progress counts rclone's group bytes once
 (they already include the in-flight bytes), `rclone.Cancelled` instead of a string compare, tests.
+Crash leftovers (hbk-2, 2026-10-31 10:10): an app that died with its disk image left its `rclone rcd` and a `copyto` running for
+six hours at full CPU, on the user's Drive quota, and they ignored SIGTERM; `kill_orphans()` at start stops bundled rclone
+processes whose parent is gone, `_terminate()` follows SIGTERM with SIGKILL. The bucket-index phase now feeds rclone's
+transferred bytes into the job between completed files (the UI speed read 6.7 KB/s while rclone pulled 2 MB/s).
 
 ## v0.2.0 — first-run fixes and UI responsiveness (Niels's DMG test, 2026-10-31)
 DONE: #59 (hbk-3: Google sign-in guidance, throttle-proof job waits, one-click pick of the detected backup, open-backup job with

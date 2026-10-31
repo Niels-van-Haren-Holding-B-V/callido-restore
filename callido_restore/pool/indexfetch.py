@@ -23,8 +23,11 @@ _XFR = re.compile(r"xfr#(\d+)/(\d+)")
 # Integer "Checks:" / "Transferred:" lines are file counts. Byte lines carry a unit
 # ("1.055 MiB") and do not match.
 _FILE = re.compile(r"\b(Checks|Transferred):\s+([0-9][0-9,]*)\s*/\s*([0-9][0-9,]*)\s*,\s*(\d+)%")
-# rclone's stats String(): "<size> / <size>, <pct>, <speed>, ETA <eta>" where pct is "12%" or "-".
-_BYTE = re.compile(r"/\s*[\d.]+\s*[A-Za-z]+\s*,\s*(\d+%|-)")
+# rclone's stats String(): "<size> / <size>, <pct>, <speed>, ETA <eta>" where pct is "12%" or "-". The first size is what this
+# rclone run has transferred so far, in-flight bytes included; it feeds the job's byte counter between completed files.
+_BYTE = re.compile(r"([\d.]+)\s*([A-Za-z]+)\s*/\s*[\d.]+\s*[A-Za-z]+\s*,\s*(\d+%|-)")
+_UNITS = {"B": 1, "KiB": 1 << 10, "MiB": 1 << 20, "GiB": 1 << 30, "TiB": 1 << 40, "PiB": 1 << 50,
+          "kB": 1000, "MB": 1000 ** 2, "GB": 1000 ** 3, "TB": 1000 ** 4}
 
 
 def parse_rclone_stats(line):
@@ -56,7 +59,10 @@ def parse_rclone_stats(line):
     m = _BYTE.search(line)
     if m:
         out["_full"] = True
-        out["byte_pct"] = None if m.group(1) == "-" else int(m.group(1).rstrip("%"))
+        out["byte_pct"] = None if m.group(3) == "-" else int(m.group(3).rstrip("%"))
+        unit = _UNITS.get(m.group(2))
+        if unit:
+            out["bytes"] = int(float(m.group(1)) * unit)
     return out or None
 
 
@@ -350,7 +356,9 @@ def fetch_bucket_indexes(cache_root, remotes, listing, job, run=None, attempts=2
                 if job.get("cancel"):
                     return stopped()
                 latest = {}
-                def on_line(line, _i=i, _d=d, _total=total, _expected=expected):
+                have0 = done_dir.get(d, 0)                     # complete bytes before this rclone run; its counter starts at 0
+                dir_bytes = sum(int(size or 0) for size in expected.values())
+                def on_line(line, _i=i, _d=d, _total=total, _expected=expected, _have0=have0, _dir_bytes=dir_bytes):
                     st = parse_rclone_stats(line)
                     if not st:
                         return
@@ -359,6 +367,11 @@ def fetch_bucket_indexes(cache_root, remotes, listing, job, run=None, attempts=2
                         latest.clear()
                     latest.update(st)
                     have, _, _ = tally(_d, _expected, park=False)
+                    # Between completed files the on-disk count stands still; rclone's transferred bytes (partial files
+                    # included) keep the job's bytes, and so the speed in the UI, moving. Never below the complete bytes,
+                    # never above the directory's listed size.
+                    if latest.get("bytes"):
+                        set_done(_d, max(done_dir.get(_d, 0), min(_have0 + latest["bytes"], _dir_bytes)))
                     job["message"] = describe_dir(_i, n, _d, latest, have, _total)
                     job["progress"] = _progress(progress_base, progress_span, _i, n, stats_fraction(latest, have, _total))
                 rc = run(index_copy_cmd(rclone, remote, d, dest), on_line, lambda: bool(job.get("cancel")))

@@ -27,11 +27,12 @@ class ParseStatsTests(unittest.TestCase):
     def test_one_line_and_multiline(self):
         st = F.parse_rclone_stats(ONE_LINE)
         self.assertEqual(st["byte_pct"], 2)
+        self.assertEqual(st["bytes"], int(1.055 * 1024 * 1024))
         self.assertEqual(st["checks"], (12, 2048))
         self.assertEqual(st["transfers"], (5, 100))
         self.assertTrue(st["_full"])
         zero = F.parse_rclone_stats(ZERO_LINE)
-        self.assertIsNone(zero["byte_pct"])
+        self.assertIsNone(zero["byte_pct"]); self.assertEqual(zero["bytes"], 0)
         self.assertTrue(zero["_full"])
         self.assertEqual(F.parse_rclone_stats(CHECKS)["checks"], (12, 2048))
         self.assertNotIn("_full", F.parse_rclone_stats(CHECKS))
@@ -545,3 +546,23 @@ class ProgressBytes(unittest.TestCase):
         job2 = {}
         F.fetch_bucket_indexes(root, ["r:"], listing, job2, run=lambda *a: 0, pause=lambda *_: None)      # everything already there
         self.assertEqual((job2["total_bytes"], job2["done_bytes"]), (60, 60))
+
+    def test_bytes_move_with_rclone_stats_between_completed_files(self):
+        """Directory 0 holds 30 bytes of index files; while rclone reports partial transfers the job's bytes follow its stats
+        line (the files on disk stand still), capped at the directory's listed size, and never below the complete bytes."""
+        import tempfile, shutil
+        from callido_restore.pool import indexfetch as F
+        root = Path(tempfile.mkdtemp()); self.addCleanup(shutil.rmtree, root, True)
+        listing = [{"b": 0, "t": "index", "rev": 1, "size": 10, "name": "0.index.1"}, {"b": 1, "t": "index", "rev": 1, "size": 20, "name": "1.index.1"}]
+        (F._bucket_dir(root, 0)).mkdir(parents=True); (F._bucket_dir(root, 0) / "0.index.1").write_bytes(b"x" * 10)   # one file already there
+        probe = []
+        def run(cmd, on_line, should_stop):
+            on_line("         7 B / 20 B, 35%, 1 B/s, ETA 13s (xfr#0/1)"); probe.append(job["done_bytes"])
+            on_line("        12 B / 20 B, 60%, 1 B/s, ETA 8s (xfr#0/1)"); probe.append(job["done_bytes"])
+            on_line("       999 B / 20 B, 100%, 1 B/s, ETA 0s (xfr#0/1)"); probe.append(job["done_bytes"])
+            (F._bucket_dir(root, 0) / "1.index.1").write_bytes(b"x" * 20)
+            on_line("        20 B / 20 B, 100%, 1 B/s, ETA 0s (xfr#1/1)"); probe.append(job["done_bytes"])
+            return 0
+        job = {}
+        F.fetch_bucket_indexes(root, ["r:"], listing, job, run=run, pause=lambda *_: None)
+        self.assertEqual(probe, [17, 22, 30, 30]); self.assertEqual(job["done_bytes"], 30)
