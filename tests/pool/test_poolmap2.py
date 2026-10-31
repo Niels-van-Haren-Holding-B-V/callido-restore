@@ -144,7 +144,7 @@ class ReaderMaps(unittest.TestCase):
         pool.dump_json(os.path.join(self.pool, "poolmap2.json"), v2)
         r = pool.PoolReader(_Src(self.pool), self.pool); r.load_map2(os.path.join(self.pool, "poolmap2.json"))
         ids = {100: [1000, 1001, 1002], 110: [1100, 1001], 120: [1200, 2001], 200: [2000, 2001, 2002], 300: [1000, 1001, 1002], 310: [1400, 2001], 320: list(range(10)), 330: [5, 6], 400: [1400, 2001]}
-        r.vf = mock.Mock(); r.vf.entry = lambda off: {"set": 4, "rec_off": off}; r.recs = mock.Mock(); r.recs.record = lambda s, ro: {"ids": ids[ro]}
+        r.vf = mock.Mock(); r.vf.entry = lambda off: {"set": 4, "rec_off": off}; r.recs = mock.Mock(); r.recs.record = lambda s, ro: {"ids": ids.get(ro, [9999])}
         self.assertEqual(r.verification(100), ("verified", "")); self.assertEqual(r.verification(110), ("verified", ""))
         self.assertEqual(r.verification(120), ("unverified", "reads chunks from a record that is placed without a size check"))
         self.assertEqual(r.verification(200), ("unverified", "placed without a size check"))
@@ -152,7 +152,7 @@ class ReaderMaps(unittest.TestCase):
         self.assertEqual(r.verification(310), ("unverified", "reads chunks from a record that is placed without a size check"))   # its source reads from the guessed one
         self.assertEqual(r.verification(320), ("unverified", "partial copy")); self.assertEqual(r.verification(330), ("unverified", "partial copy"))
         self.assertEqual(r.verification(-5), ("verified", "")); self.assertEqual(r.verification(999)[0], "unverified")
-        r2 = pool.PoolReader(_Src(self.pool), self.pool); self.assertEqual(r2.verification(100), ("unverified", "located through the v1 map"))
+        r.v2 = False; self.assertEqual(r.verification(100), ("unverified", "located through the v1 map"))      # a v1-only map
 
     def test_dump_json_atomic(self):
         p = os.path.join(self.pool, "x.json"); pool.dump_json(p, [1]); self.assertEqual(pool.load_json(p), [1]); self.assertEqual(os.listdir(self.pool), ["x.json"])
