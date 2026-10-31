@@ -169,6 +169,17 @@ step progress, one listing call per click, @AppConfig labelled), #61 (hbk-3: hea
 restore selection panel, state-aware + buttons, step-3 "Not started" text), #63 (hbk-2: persistent rclone daemon with 30 s cache,
 pid file, VERSION 0.2.0, release notes). Open: auto-start of the pool preparation (Niels decides), OAuth client "Callido Restore".
 
+## T14 — Windows 10/11 installer (MSI)
+IN PROGRESS (hbk-5, session hbk-explorer-d2): branches `hbk5/*`. Investigation and plan: docs/WINDOWS.md.
+PR B (packaging): `packaging/windows/` (WiX 5 MSI with Callido branding, `build_msi.py`, `smoke_windows.py`),
+`assets/AppIcon.ico`, `scripts/make_windows_art.py`, workflow `build-windows.yml` (separate from build-macos).
+PR A (code portability, after #104/#105/#106 land): Windows drive paths are not rclone remotes, process liveness/stop without
+POSIX signals, `_rss_mb` without `resource`, mapper Stop via `taskkill /T`, no console windows for rclone, folder picker roots.
+Follow-up: orphan cleanup on Windows (`kill_orphans`, `kill_orphan_helpers`, `kill_stale` are no-ops there; port to
+CIM `Win32_Process` with parent liveness instead of ppid 1). Attach the MSI to Releases on a `v*` tag; code signing.
+Acceptance: the MSI installs on Windows 10 and 11 without admin tricks, the app opens in its own window (WebView2), the full
+restore flow works with a local folder and a Drive source, uninstall leaves `~/.hbk-explorer` alone.
+
 ## Do not
 * Do not change the on-disk layout of `~/.hbk-explorer/index/<src>/pool/*` without a migration; the full map build takes hours of downloads.
 * Do not commit anything from `~/.hbk-explorer` or user paths/remotes into the repo, and no real share/folder/host names (H18 rule in docs/HANDOVER.md).

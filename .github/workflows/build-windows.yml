@@ -1,0 +1,47 @@
+name: build-windows
+# Windows 10/11 x64 MSI (packaging/windows). Separate from build-macos on purpose: a Windows failure never blocks the DMG
+# release. The MSI is uploaded as a workflow artifact; attaching it to GitHub Releases is a later step.
+on:
+  push: { branches: [main], tags: ['v*'] }
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  msi:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    env:
+      WIX_VERSION: "5.0.2"
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+      - name: Install WiX Toolset
+        shell: pwsh
+        run: |
+          dotnet tool install --global wix --version $env:WIX_VERSION
+          "$env:USERPROFILE\.dotnet\tools" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          & "$env:USERPROFILE\.dotnet\tools\wix.exe" extension add -g "WixToolset.UI.wixext/$env:WIX_VERSION" "WixToolset.Util.wixext/$env:WIX_VERSION"
+      - name: Python dependencies
+        run: python -m pip install -r requirements.txt "pyinstaller>=6.0"
+      - name: Unit tests (Windows)
+        run: python -m unittest discover -s tests -t . -v
+        continue-on-error: true   # the portability fixes land in a separate PR; until then this shows what still fails on Windows
+      - name: Build app and MSI
+        shell: pwsh
+        run: |
+          $env:PATH = "C:\Program Files\Git\usr\bin;$env:PATH"   # gpg for the rclone signature check
+          python packaging/windows/build_msi.py
+      - name: Smoke test (install, run, uninstall)
+        run: python packaging/windows/smoke_windows.py --msi dist/CallidoRestore-x64.msi
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: CallidoRestore-windows-x64
+          path: |
+            dist/CallidoRestore-x64.msi
+            dist/CallidoRestore-x64.msi.sha256
