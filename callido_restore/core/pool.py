@@ -390,11 +390,19 @@ class PoolReader:
         listing = os.path.join(self.pool_dir, "listing.json")
         st = {"listing": os.path.isfile(listing), "runs": all(os.path.isfile(os.path.join(self.pool_dir, f"runs_set{s}.bin")) for s in (1, 2, 3, 4)),
               "recsizes": os.path.isfile(os.path.join(self.pool_dir, "recsize_set1.json")), "map": self.map is not None,
-              "mapped_buckets": len(self.map["buckets"]) if self.map else 0, "total_buckets": 0, "indexes_local": 0, "index_files": 0,
-              "index_bytes": 0, "index_bytes_local": 0}      # bytes of all bucket indexes / of those already here (UI progress text)
+              "mapped_buckets": len(self.map.get("buckets", {})) if self.map else 0, "total_buckets": 0, "indexes_local": 0, "index_files": 0,
+              "index_bytes": 0, "index_bytes_local": 0,      # bytes of all bucket indexes / of those already here (UI progress text)
+              "map_complete": False, "records_placed": None, "records_total": None, "bytes_pct": None}
+        # map_complete: the placer ran over every bucket, whatever the owned count (the buckets without an owner hold files it could
+        # not locate; a rerun gives the same map, only more loaded snapshots add tags). The coverage is what the UI shows. The
+        # preparation's own "complete" marker (prepared.json, hbk-2) is a different thing and is added by Backup.pool_status.
+        if self.map:
+            st["map_complete"] = bool(self.map.get("map_complete")); stats = self.map.get("stats") or {}
+            st["records_placed"] = stats.get("placed"); st["records_total"] = stats.get("records"); st["bytes_pct"] = stats.get("bytes-placed-pct")
         if st["listing"]:
             l = load_json(listing); idx = [e for e in l if e["t"] == "index"]
             st["total_buckets"] = len({e["b"] for e in idx})
+            if st["map"] and st["mapped_buckets"] >= st["total_buckets"] > 0: st["map_complete"] = True
             st["index_files"] = len(idx)
             n = 0; have = 0
             for e in idx:
@@ -424,7 +432,7 @@ class PoolReader:
         # copies restored from another record's entries: rec_off -> (source set, source rec_off) or None (untagged original)
         self.aliased = {int(s): {(x[0] if isinstance(x, list) else x): ((x[1], x[2]) if isinstance(x, list) and x[1] is not None else None) for x in v}
                         for s, v in d.get("aliased", {}).items()}
-        self.map = d; self.mapped_upto = d.get("mapped_upto", 0)
+        self.map = d; self.mapped_upto = d.get("mapped_upto", 0); self.map_complete = bool(d.get("map_complete"))
         return True
     def _rec_status(self, s, ro, n_chunks, seen):
         """status of one record's placement: "verified" (its entries matched its size when the map was built, chunk md5s are

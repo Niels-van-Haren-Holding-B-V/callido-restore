@@ -303,7 +303,7 @@ def build_poolmap_anchor(source, outdir, log=print, max_bucket=None):
     writers = poolmap2.build_writers(outdir, log)
     log("scanning the bucket indexes for tagged records…")
     anchors, counts = anchor.scan_anchors(source, outdir, listing, writers, log=log, max_bucket=max_bucket)
-    flags = None
+    flags = None; complete = False
     if os.environ.get("HBK_PLACER", "v3") == "v2":
         log("placing records: owners from anchors, copies by neighbours, gaps by chunk count…")
         owner, placements, report = anchor.resolve_and_place(writers, anchors, counts, log=log, max_bucket=max_bucket)
@@ -315,10 +315,12 @@ def build_poolmap_anchor(source, outdir, log=print, max_bucket=None):
             if e.get("t") == "index" and e.get("name") and e.get("rev", 0) >= names.get(e["b"], ("", -1))[1]: names[e["b"]] = (e["name"], e["rev"])
         index = place.Index(counts, anchor.bucket_revs(listing), lambda b: str(source.ensure(f"Pool/0/{b // 2048}/{names[b][0]}")),
                             ubytes=anchor.load_bucket_totals(outdir), lru=1500)          # the scan just saved them
-        owner, placements, report, flags = place.resolve_and_place_v3(writers, anchors, index, log=log, max_bucket=max_bucket)
+        owner, placements, report, flags = place.resolve_and_place_v3(writers, anchors, index, log=log, max_bucket=max_bucket); complete = True
     buckets = sorted(b for b in counts if max_bucket is None or b <= max_bucket)
-    upto = len(buckets) if len(owner) >= len(buckets) else len(owner)        # partial when not every bucket got an owner
-    anchor.export_map(writers, owner, placements, counts, outdir, mapped_upto=upto, flags=flags, report=report)
+    # v3 ran over every bucket: the map is complete even when buckets stay without an owner (they hold files it could not
+    # locate; a rerun gives the same result, only more loaded snapshots add tags). v2: partial when not every bucket got an owner.
+    upto = len(buckets) if complete or len(owner) >= len(buckets) else len(owner)
+    anchor.export_map(writers, owner, placements, counts, outdir, mapped_upto=upto, flags=flags, report=report, complete=complete)
     log(f"mapped {len(owner)}/{len(buckets)} buckets (anchor-first); {dict(report)}")
     return dict(owner), upto
 

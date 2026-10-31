@@ -116,7 +116,9 @@ class Export(unittest.TestCase):
         d = json.load(open(os.path.join(out, "poolmap2.json")))
         self.assertEqual(d["guessed"], {"4": [0], "3": [], "1": [], "2": []}); self.assertEqual(d["aliased"]["4"], [[1000, 4, 0]]); self.assertEqual(d["stats"], {"placed": 2})
         m = anchor.export_map(writers, {0: 0}, {0: {1: [(0, 0, 1)]}, 1: {}, 2: {}, 3: {}}, {0: 1}, out, mapped_upto=1, flags={"guessed": set(), "aliased": {(0, 1): None}})
-        self.assertEqual(json.load(open(os.path.join(out, "poolmap2.json")))["aliased"]["4"], [[1000, None, None]])
+        d = json.load(open(os.path.join(out, "poolmap2.json"))); self.assertEqual(d["aliased"]["4"], [[1000, None, None]]); self.assertFalse(d["map_complete"])
+        anchor.export_map(writers, {0: 0}, {0: {}, 1: {}, 2: {}, 3: {}}, {0: 1}, out, mapped_upto=1, complete=True)
+        self.assertTrue(json.load(open(os.path.join(out, "poolmap2.json")))["map_complete"])
 
     def test_scan_keeps_bucket_totals(self):
         from tests.pool.test_anchor import Scan

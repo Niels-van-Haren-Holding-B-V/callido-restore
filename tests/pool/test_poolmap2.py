@@ -154,6 +154,15 @@ class ReaderMaps(unittest.TestCase):
         self.assertEqual(r.verification(-5), ("verified", "")); self.assertEqual(r.verification(999)[0], "unverified")
         r.v2 = False; self.assertEqual(r.verification(100), ("unverified", "located through the v1 map"))      # a v1-only map
 
+    def test_status_complete_and_coverage(self):
+        v2 = dict(self.v2); v2["map_complete"] = True; v2["buckets"] = {"7": 0, "8": 0}; v2["stats"] = {"placed": 618, "records": 845, "bytes-placed-pct": 74.5}
+        pool.dump_json(os.path.join(self.pool, "poolmap2.json"), v2); json.dump([{"t": "index", "b": b, "rev": 2, "name": f"{b}.index.2", "size": 96} for b in range(5)], open(os.path.join(self.pool, "listing.json"), "w"))
+        src = _Src(self.pool); src.has_sized_file = lambda rel, size: False
+        st = pool.PoolReader(src, self.pool).status()
+        self.assertEqual((st["mapped_buckets"], st["total_buckets"], st["map_complete"], st["records_placed"], st["records_total"], st["bytes_pct"]), (2, 5, True, 618, 845, 74.5))
+        v2["map_complete"] = False; pool.dump_json(os.path.join(self.pool, "poolmap2.json"), v2)
+        self.assertFalse(pool.PoolReader(src, self.pool).status()["map_complete"])                   # 2 of 5 buckets and not finished: not complete
+
     def test_dump_json_atomic(self):
         p = os.path.join(self.pool, "x.json"); pool.dump_json(p, [1]); self.assertEqual(pool.load_json(p), [1]); self.assertEqual(os.listdir(self.pool), ["x.json"])
 
