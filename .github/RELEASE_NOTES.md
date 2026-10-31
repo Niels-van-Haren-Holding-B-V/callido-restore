@@ -5,6 +5,7 @@
 - The restore selection and the last chosen run survive quitting the app (the window no longer runs in private mode).
 - Opening a backup you already opened is instant: the backup's folder listings are kept on disk and refreshed after an hour or with the ↻ button, instead of being read from Google Drive on every start.
 - After the preparation's folder listing is done but nothing is downloaded yet, step 3 says so instead of showing 0 %.
+- A job you start (preparation, restore, loading the file lists) shows a moving progress bar immediately, with its phase and the seconds elapsed, until real progress figures arrive; the button is disabled from the click on, so a slow first answer no longer looks like a dead click.
 
 ## What's new in 0.2.2
 
