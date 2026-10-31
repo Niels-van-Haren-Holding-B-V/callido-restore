@@ -147,7 +147,7 @@ class ReaderMaps(unittest.TestCase):
         pool.dump_json(os.path.join(self.pool, "poolmap2.json"), v2)
         r = pool.PoolReader(_Src(self.pool), self.pool); r.load_map2(os.path.join(self.pool, "poolmap2.json"))
         ids = {100: [1000, 1001, 1002], 110: [1100, 1001], 120: [1200, 2001], 200: [2000, 2001, 2002], 300: [1000, 1001, 1002], 310: [1400, 2001], 320: list(range(10)), 330: [5, 6], 400: [1400, 2001]}
-        r.vf = mock.Mock(); r.vf.entry = lambda off: {"set": 4, "rec_off": off}; r.recs = mock.Mock(); r.recs.record = lambda s, ro: {"ids": ids.get(ro, [9999])}
+        r.vf = mock.Mock(); r.vf.entry = lambda off: {"set": 4, "rec_off": off}; r.recs = mock.Mock(); r.recs.record = lambda s, ro, lo=None: {"ids": ids.get(ro, [9999])}
         self.assertEqual(r.verification(100), ("verified", "")); self.assertEqual(r.verification(110), ("verified", ""))
         self.assertEqual(r.verification(120), ("unverified", "reads chunks from a record that is placed without a size check"))
         self.assertEqual(r.verification(200), ("unverified", "placed without a size check"))
@@ -178,7 +178,7 @@ class ReaderMaps(unittest.TestCase):
         blob += b"\1" + struct.pack(">Q", 64 + 29 * 2) + b"\0" * 20                 # id 3: a copy, refers to id 2's record
         open(os.path.join(d, "0.idx.2"), "wb").write(blob)
         r = pool.PoolReader(_Src(os.path.join(self.pool, "src")), self.pool)
-        r.vf = mock.Mock(); r.vf.entry = lambda off: {"set": 4, "rec_off": 100}; r.recs = mock.Mock(); r.recs.record = lambda s, ro: {"ids": [2, 0, 1]}
+        r.vf = mock.Mock(); r.vf.entry = lambda off: {"set": 4, "rec_off": 100}; r.recs = mock.Mock(); r.recs.record = lambda s, ro, lo=None: {"ids": [2, 0, 1]}
         self.assertTrue(r.ci.available()); self.assertEqual(r.plan(64)[0], [(9, 4), (7, 0), (7, 1)])
         self.assertEqual(r.verification(64), ("verified", ""))
         self.assertEqual(r.ci.loc(3), (9, 4))                                     # a reference record is followed
@@ -208,6 +208,19 @@ class ReaderMaps(unittest.TestCase):
         for t in ts: t.start()
         for t in ts: t.join()
         self.assertEqual(errs, []); self.assertEqual(got, {i: f"Pool/0/0/{i}.index.2" for i in range(8)})
+
+    def test_record_with_an_attribute_record_in_front(self):
+        # Some file records (photos on a real backup) have a 28-byte attribute TLV (0xa93b0186) before the chunk-list header;
+        # virtual-file pointer B then points at that TLV's body, pointer A at the chunk list. Both must give the chunk ids.
+        refs = [64 + 29 * g for g in (5, 6, 7)]; body = b"".join(struct.pack(">Q", r) for r in refs) + struct.pack(">II", 0x74000000, 0)
+        plain = struct.pack(">III", 0, pool.REC_MAGIC, len(body)) + body
+        attr = struct.pack(">II", 0xa93b0186, 28) + bytes.fromhex("000000c9010000001200000001000000" "08000000ffffffff00000000")    # its body ends with the record's flags word
+        stream = b"\0" * 64 + plain + attr + struct.pack(">II", pool.REC_MAGIC, len(body)) + body
+        d = os.path.join(self.pool, "src", "Config", "file_chunk1.index"); os.makedirs(d); open(os.path.join(d, "0.idx.2"), "wb").write(stream)
+        recs = pool.ChunkRecords(_Src(os.path.join(self.pool, "src")))
+        b1 = 64; b2 = 64 + len(plain) + 8                                         # pointer B of each record
+        self.assertEqual(recs.record(1, b1)["ids"], [5, 6, 7]); self.assertEqual(recs.record(1, b1, b1 + 12)["ids"], [5, 6, 7])
+        self.assertEqual(recs.record(1, b2)["ids"], [5, 6, 7]); self.assertEqual(recs.record(1, b2, b2 + 36)["ids"], [5, 6, 7])
 
     def test_dump_json_atomic(self):
         p = os.path.join(self.pool, "x.json"); pool.dump_json(p, [1]); self.assertEqual(pool.load_json(p), [1]); self.assertEqual(os.listdir(self.pool), ["x.json"])
