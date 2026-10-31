@@ -158,7 +158,7 @@ class H(BaseHTTPRequestHandler):
                     try: d = json.loads(jf.read_text())
                     except Exception: continue
                     if d["id"] in JOBS and JOBS[d["id"]]["state"] == "running": d["state"] = "running"
-                    out.append({k: d.get(k) for k in ("id", "label", "state", "dest", "roots", "items", "next_index", "total_files", "done_files", "skipped", "total_bytes", "done_bytes", "started", "updated", "src", "verified", "identical_copy")} | {"errors": d.get("errors_total", len(d.get("errors") or [])), "unverified": len(d.get("unverified") or [])})
+                    out.append({k: d.get(k) for k in ("id", "label", "state", "dest", "roots", "items", "next_index", "total_files", "done_files", "skipped", "total_bytes", "done_bytes", "started", "updated", "src", "verified", "identical_copy")} | {"errors": d.get("errors_total", len(d.get("errors") or [])), "unverified": d.get("unverified_total", len(d.get("unverified") or []))})
                 return self._json(out[:20])
             if u.path == "/api/job/cancel":
                 j = JOBS.get(q.get("id"))
@@ -318,8 +318,9 @@ class H(BaseHTTPRequestHandler):
                 err = restore_target_error(b.src, d["items"], dest, create=False)     # source check again, roots still there
                 if err: return self._json({"error": err}, 400)                        # the job file stays, so it can be resumed later
                 jf.unlink()
-                seed = {k: d[k] for k in ("done_files", "skipped", "errors", "errors_total", "verified", "identical_copy", "unverified") if k in d}   # counts and errors from before the pause
-                if "errors_total" not in seed and "errors" in seed: seed["errors_total"] = len(seed["errors"])        # a job file from before the counter
+                seed = {k: d[k] for k in ("done_files", "skipped", "errors", "errors_total", "verified", "identical_copy", "unverified", "unverified_total") if k in d}   # counts and lists from before the pause
+                if "errors_total" not in seed and "errors" in seed: seed["errors_total"] = len(seed["errors"])        # a job file from before the counters
+                if "unverified_total" not in seed and "unverified" in seed: seed["unverified_total"] = len(seed["unverified"])
                 def resumed(job):
                     job.update(seed); return b.restore(d["items"], dest, job, d.get("skip_meta", True), start_at=d.get("next_index", 0))
                 job = start_job(resumed, "restore (resumed)")
