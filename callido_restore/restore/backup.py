@@ -371,8 +371,10 @@ class Backup:
         if job.get("cancel"): return stopped("listing")
         if not all((pool_dir / f"runs_set{k}.bin").is_file() for k in (1, 2, 3, 4)):
             job["message"] = "parsing chunk records (downloads the 4 file_chunk index sets if needed)"; job["progress"] = 0.1
+            def report(message, done, total):                    # bytes of the set's slices fetched so far: the UI shows speed
+                job["message"] = message; job["done_bytes"] = done; job["total_bytes"] = total
             pool.build_runs(self.src, str(pool_dir), log, cancelled=lambda: bool(job.get("cancel")),
-                            progress=lambda f: job.__setitem__("progress", 0.1 + 0.2 * f))   # this phase spans 10-30 % of the job
+                            progress=lambda f: job.__setitem__("progress", 0.1 + 0.2 * f), report=report)   # this phase spans 10-30 % of the job
         if job.get("cancel"): return stopped("chunk-records")
         job["message"] = "collecting file sizes from loaded snapshots"; job["progress"] = 0.3
         dbs = [(str(p), "index") for p in self.src.index_dir.glob("*__*.sqlite")]
