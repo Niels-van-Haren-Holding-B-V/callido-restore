@@ -61,7 +61,7 @@ class Backup:
             except Exception as e: info["problems"].append(f"task config: {e}")
         # versions
         vi = s.latest("Config", "version_info.db")
-        if not vi: info["problems"].append("Config/version_info.db not found"); 
+        if not vi: info["problems"].append(f"This folder is not a Hyper Backup root (no Config/version_info.db in {s.remote or s.local}). Expected something like <folder>/<name>.hbk: remove this backup and add it again, picking the folder whose name ends in .hbk."); 
         elif vi[3]: info["problems"].append(f"version database is ransomware-encrypted ({vi[0]})")
         else:
             p = s.ensure(f"Config/{vi[0]}")
