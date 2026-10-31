@@ -64,6 +64,9 @@ def _run_worker(job, tmpdir, n):
     jp = os.path.join(tmpdir, f"job{n}.pkl"); op = os.path.join(tmpdir, f"out{n}.pkl")
     with open(jp, "wb") as f: pickle.dump(job, f)
     # Run the worker as a module so its package imports resolve: the folder holding callido_restore/ goes on PYTHONPATH.
+    # In the frozen .app sys.executable is the app binary and -m cannot work (nor could the old script path); the app runs
+    # one in-process worker (see scan_anchors). When the anchor scan moves into the app, give the entry point a --worker
+    # dispatch that imports this module and calls _worker_main instead of -m.
     root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     env = dict(os.environ, PYTHONPATH=root + os.pathsep + os.environ.get("PYTHONPATH", ""))
     p = subprocess.run([sys.executable, "-m", "callido_restore.pool.anchor", "--worker", jp, op], capture_output=True, text=True, env=env)

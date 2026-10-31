@@ -10,7 +10,8 @@ mirrors the packages. Lower layers never import higher ones. `core` and `pool` h
   (`hbk_pool.py` at the root is a shim that returns this module; it goes away with the last H16 step.)
 * `callido_restore/pool/` — the pool map: `poolmap.py` (v1, sequential mapping of chunk ids to buckets, see `docs/FORMAT.md`),
   `poolmap2.py` (v2, tag-based), `anchor.py` (anchor scan with subprocess workers, `python -m callido_restore.pool.anchor --worker`),
-  `indexfetch.py` (resumable bucket-index download). Root `hbk_poolmap*.py`, `hbk_anchor.py`, `hbk_indexfetch.py` are shims until step 5.
+  `indexfetch.py` (resumable bucket-index download). The anchor workers are started with `sys.executable -m`, which only works from a
+  source checkout; the frozen app uses one in-process worker, and an in-app anchor scan will need a `--worker` dispatch in the entry point. Root `hbk_poolmap*.py`, `hbk_anchor.py`, `hbk_indexfetch.py` are shims until step 5.
 * `static/index.html` — single-page UI, no build step, no external dependencies. Shown in a native window (pywebview, WebKit on macOS)
   by `run_window`; the HTTP server listens on 127.0.0.1 only and the process exits when the window closes (`_exit_app`).
 * `~/.hbk-explorer/` — `sources.json`, `index/<source>/<share>__<ver>.sqlite` (derived, queryable snapshot), `index/<source>/pool/`
