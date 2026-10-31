@@ -49,7 +49,7 @@ md5 is of the decompressed chunk. Chunks of a file are consecutive in the writer
 at ~52 MB and gets its id in **fill-completion order** across all writers (so bucket ids interleave between writers).
 
 ## Chunk id → bucket (the hard part)
-Nothing in the backup stores it. `hbk_poolmap.py` reconstructs it:
+Nothing in the backup stores it. `callido_restore/pool/poolmap.py` reconstructs it:
 1. parse all records; a writer's *new* chunks are the runs that continue its allocation frontier (`g == frontier+1` or a new block);
    everything else is a dedup reference. This yields block ownership and, per writer, the ordered "pieces" of stored chunks.
 2. file sizes come from the snapshot databases (record → size).

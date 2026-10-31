@@ -3,8 +3,8 @@ is what exhausted the RAM on the full scan); resolve/place work on the shared li
 import hashlib, json, os, struct, tempfile, unittest
 from pathlib import Path
 
-import hbk_anchor
-from hbk_poolmap2 import Rec
+from callido_restore.pool import anchor as hbk_anchor
+from callido_restore.pool.poolmap2 import Rec
 
 
 def _entry(ulen, seed):

@@ -21,14 +21,14 @@ Status snapshot at 2026-10-30 21:21: bucket-index download "dir 11 done: 2048 21
 T4 (resumable index fetch, per-directory stats, Stop) and T6 (parser unit tests + ubuntu CI) are implemented in code. T1 and T2 still need the real backup and are not touched here.
 
 ## T1 — Full pool map (blocking for restores) — owner: claude-hbk-1, in progress
-Approach changed on 2026-10-30 23:30 (see docs/handovers): the sequential mapper (`hbk_poolmap.py`) is obsolete. The map is now built
-**anchor-first** by `hbk_anchor.py`: (1) `scan_anchors` finds every tagged record's first chunk in the bucket indexes
+Approach changed on 2026-10-30 23:30 (see docs/handovers): the sequential mapper (`callido_restore/pool/poolmap.py`) is obsolete. The map is now built
+**anchor-first** by `callido_restore/pool/anchor.py`: (1) `scan_anchors` finds every tagged record's first chunk in the bucket indexes
 (`version_list.tag` = md5 of the first K chunk md5s + their total length, K ≤ 9; records whose leading chunks are dedup refs are
 skipped); (2) `resolve_and_place` derives bucket owners from unique anchors, resolves copies (multi-hit records) by stream neighbours,
 fills gaps between consecutive anchors with the writer's untagged records by chunk count, assigns anchor-less buckets by count, and
 exports `poolmap2.json` (per-record placement segments + id ranges) that `PoolReader` already reads.
 Acceptance: `/api/pool` reports the map; a sample of files from every share restores byte-exact (tag/size verified). Do not run
-`build_poolmap` (v1); do not edit `hbk_anchor.py` / `hbk_poolmap2.py` without coordinating with hbk-1.
+`build_poolmap` (v1); do not edit `callido_restore/pool/anchor.py` / `poolmap2.py` without coordinating with hbk-1.
 
 ## T2 — End-to-end restore test to the NAS
 Wizard → version 1234 (the last clean run) → <a small folder> → target `<remote>:<restore-test-folder>`.
@@ -110,9 +110,9 @@ DONE (hbk-3): #52. Tree with checkboxes in step 2 (children on demand, indetermi
 "Selected: N files · size" via `/api/restore_count`.
 
 ## H16 — Restructure into packages (owner, 2026-10-31 01:01; docs/handovers/2026-10-31-0101-nas-triage-H16-now.md) — TOP PRIORITY
-IN PROGRESS (hbk-2): step 1 = `callido_restore/core/pool.py` (was `hbk_pool.py`; root shim kept) + `tests/core/`. Next steps, one
-PR each from fresh origin/main, pure moves, zero behaviour change, green on unit + both DMG builds: (2) `pool/` (`hbk_poolmap*.py`,
-`hbk_anchor.py` incl. its worker entry, `hbk_indexfetch.py`); (3) `restore/` + `sources/` out of `hbk_explorer.py`; (4) `server/` +
+IN PROGRESS (hbk-2): step 1 DONE (#55): `callido_restore/core/pool.py` + `tests/core/`. Step 2 in review: `callido_restore/pool/`
+(`poolmap.py`, `poolmap2.py`, `anchor.py` with `python -m callido_restore.pool.anchor --worker`, `indexfetch.py`) + `tests/pool/`,
+root shims kept. Next, one PR each from fresh origin/main, pure moves, zero behaviour change, green on unit + both DMG builds: (3) `restore/` + `sources/` out of `hbk_explorer.py`; (4) `server/` +
 `app/` with the entry point, build_app.sh / PyInstaller, README; (5) remove the root shims. No other code PRs in the meantime.
 
 ## Do not

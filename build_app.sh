@@ -189,6 +189,10 @@ build_bundle() {
     --add-data "$ROOT/build/licenses/THIRD-PARTY-NOTICES.txt:Licenses" \
     --hidden-import callido_restore.core.pool \
     --hidden-import hbk_pool \
+    --hidden-import callido_restore.pool.poolmap \
+    --hidden-import callido_restore.pool.poolmap2 \
+    --hidden-import callido_restore.pool.anchor \
+    --hidden-import callido_restore.pool.indexfetch \
     --hidden-import hbk_poolmap \
     --hidden-import lz4 \
     --hidden-import lz4.block \
