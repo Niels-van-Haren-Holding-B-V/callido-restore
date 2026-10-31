@@ -4,6 +4,8 @@
 
 - Every job bar with a known size shows bytes, speed and time left, the restore included; the preparation reports the download of each index set ("downloading index set 2/4 · 123 of 560 MB").
 - A progress bar whose value has not moved for a few seconds shows a shimmer and "still working · last update N s ago", so a slow phase still reads as working.
+- Downloads from Google Drive (and every other rclone remote) go through the app's internal rclone helper instead of one process per file: the index sets of the preparation are fetched four at a time, with live bytes and speed, a "rate-limited, retrying" note when Google slows the transfer down, and Stop takes effect at once.
+- Job bars have fixed slots (phase · done of total · speed · time left · elapsed) that do not jump around; the speed is a steady 30-second average.
 
 ## What's new in 0.2.4
 
