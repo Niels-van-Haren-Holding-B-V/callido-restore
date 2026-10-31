@@ -272,5 +272,27 @@ class PoolStatusTests(unittest.TestCase):
         self.assertFalse(st["map"])
 
 
+
+class CancelDuringParse(unittest.TestCase):
+    """The Stop button of the pool job is honoured inside the record parsing, not only between phases."""
+    def test_parse_record_stream_raises_cancelled(self):
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "slice"
+            rec = struct.pack(">II", cpool.REC_MAGIC, 16) + struct.pack(">QQ", 64 + 29 * 5, (0x74000000 << 32) | 1)
+            p.write_bytes(b"\0" * 64 + rec * 12000)
+            seen = []
+            with self.assertRaises(cpool.Cancelled):
+                cpool.parse_record_stream([str(p)], lambda off, ids: seen.append(off), cancelled=lambda: True)
+            self.assertLess(len(seen), 12000)
+            cpool.parse_record_stream([str(p)], lambda off, ids: None, cancelled=lambda: False)     # not cancelled: completes
+
+    def test_build_runs_stops_before_the_first_set(self):
+        with tempfile.TemporaryDirectory() as td:
+            out = Path(td) / "pool"
+            self.assertIsNone(cpool.build_runs(_LocalSource(Path(td)), str(out), log=lambda *a: None, cancelled=lambda: True))
+            self.assertFalse((out / "blocks.json").exists())
+
+
 if __name__ == "__main__":
     unittest.main()
+
