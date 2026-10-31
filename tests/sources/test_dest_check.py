@@ -14,6 +14,7 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from callido_restore import paths
+from callido_restore.server import api as hbk_api
 from callido_restore.server.api import H
 from callido_restore.sources.source import SOURCES, Source
 
@@ -131,6 +132,17 @@ class DestCheckApiTests(SourceFixture):
         self.assertEqual(self.check(src="t7", dest="")["error"], "no destination")
         out = self.check(src="t7", dest=os.path.join(self.tmp.name, "nope", "new"))     # parent missing: /api/restore would refuse it too
         self.assertFalse(out["exists"]); self.assertIn("does not exist", out["error"])
+
+    def test_ls_remote_is_one_rclone_call(self):                           # a Drive listing takes about a second; one call per click
+        calls = []
+        def run(args, **kw):
+            calls.append(args)
+            return subprocess.CompletedProcess(args, 0, stdout=json.dumps([{"Name": "backup_1.hbk", "IsDir": True}, {"Name": "Config", "IsDir": True}, {"Name": "notes.txt", "IsDir": False}, {"Name": "Pool", "IsDir": True}]), stderr="")
+        with mock.patch.object(hbk_api.subprocess, "run", run):
+            with urlopen(f"http://127.0.0.1:{self.srv.server_address[1]}/api/rclone/ls?" + urlencode({"remote": "gdrive:", "path": "Synology"})) as r: out = json.loads(r.read())
+        self.assertEqual(len(calls), 1); self.assertIn("--max-depth", calls[0]); self.assertNotIn("--dirs-only", calls[0])
+        self.assertEqual(out["dirs"], ["Config", "Pool", "backup_1.hbk"]); self.assertEqual(out["files"], ["notes.txt"])
+        self.assertTrue(out["looks_like_hbk"]); self.assertEqual(out["hbk_dirs"], ["backup_1.hbk"])
 
     def test_connect_password_goes_over_stdin_and_post_only(self):
         calls = []

@@ -19,17 +19,20 @@ from callido_restore.sources.source import Source
 from callido_restore.sources.source import is_remote_path
 
 class Backup:
-    def __init__(self, src: Source):
+    def __init__(self, src: Source, log=None):
+        """log(message) is called at every step of the scan, so a job can show progress (the first open of a remote backup
+        lists folders and fetches small files over rclone; each step can take seconds)."""
         self.src = src
         self.info = {"source": src.to_json(), "ransomware": {"locked_files": 0, "notes": [], "examples": []},
                      "task": {}, "shares": [], "versions": [], "readable": False, "problems": []}
         self.versions = []
         self._snap_cache = {}
-        self.scan()
+        self.scan(log)
 
     # --- discovery
-    def scan(self):
-        s = self.src; info = self.info
+    def scan(self, log=None):
+        s = self.src; info = self.info; log = log or (lambda m: None)
+        log("Listing the backup folder…")
         top = s.listdir("")
         locked, notes, ex = 0, [], []
         def tally(ents):
@@ -43,11 +46,12 @@ class Backup:
         cfg = s.listdir("Config") if "Config" in top else {}
         tally(cfg)
         shares = sorted(n for n, e in s.listdir("Config/@Share").items() if e["dir"]) if "@Share" in cfg else []
-        for sh in shares: tally(s.listdir(f"Config/@Share/{sh}"))
+        for i, sh in enumerate(shares): log(f"Listing shares {i + 1}/{len(shares)}…"); tally(s.listdir(f"Config/@Share/{sh}"))
         info["ransomware"] = {"locked_files": locked, "notes": notes, "examples": ex}
         info["layout"] = {"top": sorted(top), "config": sorted(cfg), "pool_present": "Pool" in top, "control_present": "Control" in top}
         # task config
         if "_Syno_TaskConfig" in top:
+            log("Reading the task info…")
             try:
                 txt = s.ensure("_Syno_TaskConfig").read_text(errors="replace")
                 task = {}
@@ -60,8 +64,9 @@ class Backup:
                 info["task"] = task
             except Exception as e: info["problems"].append(f"task config: {e}")
         # versions
+        log("Reading the version list…")
         vi = s.latest("Config", "version_info.db")
-        if not vi: info["problems"].append("Config/version_info.db not found"); 
+        if not vi: info["problems"].append(f"This folder is not a Hyper Backup root (no Config/version_info.db in {s.remote or s.local}). Expected something like <folder>/<name>.hbk: remove this backup and add it again, picking the folder whose name ends in .hbk."); 
         elif vi[3]: info["problems"].append(f"version database is ransomware-encrypted ({vi[0]})")
         else:
             p = s.ensure(f"Config/{vi[0]}")
@@ -76,6 +81,7 @@ class Backup:
         st = s.latest("", "storage_statistics.db")
         stats = {}
         if st and not st[3]:
+            log("Reading the backup statistics…")
             try:
                 p = s.ensure(st[0]); con = sqlite3.connect(f"file:{p}?mode=ro", uri=True)
                 for r in con.execute("select version_id, total_count, new_count, modify_count, remove_count, source_size, start_time, end_time from source_table"):
@@ -87,7 +93,8 @@ class Backup:
             v["indexed"] = []   # shares indexed locally for this version
         # shares + which snapshot dbs are available
         self.shares = shares
-        for sh in shares:
+        for i, sh in enumerate(shares):
+            log(f"Reading the snapshot list of share {i + 1}/{len(shares)}…")
             ents = s.listdir(f"Config/@Share/{sh}")
             vers = {}
             for n, e in ents.items():

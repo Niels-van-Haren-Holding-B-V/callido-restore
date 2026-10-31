@@ -110,6 +110,7 @@ details.adv summary::-webkit-details-marker{display:none}details.adv summary::be
 details.adv>*:not(summary){margin-top:8px}
 /* restore wizard steps */
 .basket li{display:flex;gap:8px;align-items:center;padding:4px 0}
+.spin{display:inline-block;width:14px;height:14px;border:2px solid var(--line,#d0d0d5);border-top-color:var(--accent,#7c3aed);border-radius:50%;animation:spin .8s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
 .tree{max-height:420px;overflow:auto;border:1px solid var(--line,#e5e5ea);border-radius:8px;padding:6px 8px}
 .tn{display:flex;align-items:center;gap:6px;padding:2px 0;white-space:nowrap}.tn .tog{display:inline-block;width:14px;text-align:center;cursor:pointer;color:var(--muted);user-select:none}.tn .tog.leaf{cursor:default}.tn input{margin:0}.basket{padding-left:0;list-style:none}
 .step{position:relative;padding:14px 18px 14px 56px;border:1px solid var(--line);border-radius:var(--r);background:var(--panel);margin-bottom:10px}
@@ -181,8 +182,8 @@ footer.madeBy img{width:18px;height:18px;border-radius:5px;vertical-align:middle
     <p>Where is the Hyper Backup (<code>.hbk</code>) folder?</p>
     <div class="row" style="flex-direction:column;align-items:flex-start;gap:6px">
       <label><input type="radio" name="wsk" value="existing" checked> a connection I already set up: <select id="wsRem"></select></label>
-      <label><input type="radio" name="wsk" value="drive"> Google Drive — connect now (opens Google sign-in in your browser)</label>
-      <div id="wsDrive" style="display:none;margin-left:22px"><p class="help">Only read access to your Drive is requested.</p>
+      <label><input type="radio" name="wsk" value="drive"> Google Drive — connect now (a browser window opens for the Google sign-in)</label>
+      <div id="wsDrive" style="display:none;margin-left:22px"><p class="help">Only read access to your Drive is requested. A browser window opens for the Google sign-in; when it shows “Success! All done”, close it and come back to this window: the app continues by itself.</p>
         <details class="adv"><summary>Advanced</summary><label class="f">connection name <input id="wsDName" value="gdrive"></label>
         <label class="f">your own Google OAuth client id (optional, recommended: avoids the shared rate limit) <input id="wsCid" placeholder="xxxxx.apps.googleusercontent.com"></label>
         <label class="f">client secret <input id="wsCsec" type="password"></label>
@@ -204,7 +205,7 @@ footer.madeBy img{width:18px;height:18px;border-radius:5px;vertical-align:middle
     <details class="adv"><summary>Advanced</summary><label class="f">Local cache folder on this Mac (metadata and temporarily fetched bucket data land here) <input id="nLocal"></label></details>
     <p class="help" id="wsSummary"></p>
   </div>
-  <div class="row" style="justify-content:flex-end;margin-top:10px"><button id="nCancel" class="ghost">Cancel</button><button id="wsBack" style="display:none">Back</button><button id="wsNext" class="primary">Next</button></div>
+  <div class="row" style="justify-content:flex-end;margin-top:10px"><span id="wsBusy" class="muted" style="display:none;align-items:center;gap:8px"><span class="spin"></span><span id="wsBusyText">Signing in…</span></span><button id="nCancel" class="ghost">Cancel</button><button id="wsBack" style="display:none">Back</button><button id="wsNext" class="primary">Next</button></div>
 </dialog>
 <script>
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
@@ -223,6 +224,8 @@ function renderFlow(){const cur=!S.info?1:!S.ver?2:S.tab==='restore'?4:3;
   $$('#flow li').forEach(li=>{const n=+li.dataset.s;li.classList.toggle('done',n<cur||(n===3&&S.basket.length>0&&cur>=3));li.classList.toggle('on',n===cur)})}
 $$('#flow li').forEach(li=>li.onclick=()=>{const n=+li.dataset.s;if(n===1)$('#overview').scrollIntoView({behavior:'smooth'});else if(n===2)$('#versions').scrollIntoView({behavior:'smooth'});else if(S.ver){showTab(n===4?'restore':'browse');$('#snap').scrollIntoView({behavior:'smooth'})}else $('#versions').scrollIntoView({behavior:'smooth'})});
 const LOGO=$('#logo').src;$('#favicon').href=LOGO;
+// "@AppConfig" is Hyper Backup's application-settings part (DSM package config, users/groups, shared-folder settings), not files.
+const APPCFG='@AppConfig';const isAppCfg=n=>n===APPCFG;const shareLabel=n=>isAppCfg(n)?'Application settings (DSM, not restorable here)':n;
 const emptyState=(title,text,btn)=>`<div class="empty"><img src="${LOGO}" alt=""><b>${title}</b><p>${text}</p>${btn||''}</div>`;
 // ETA from observed progress: samples of (time, fraction); returns "about 4 min left" or ''
 const ETA={};
@@ -243,19 +246,23 @@ async function loadSources(){const list=await api('/api/sources');const sel=$('#
   if(!list.length){$('#overview').innerHTML=emptyState('No backup added yet','Point the app at a Hyper Backup folder on Google Drive, on a NAS share or on a disk. Only the backup\'s small index files are read until you restore something.','<button class="primary" onclick="$(\'#addSrc\').click()">Add your backup</button>');renderFlow();return}
   const want=localStorage.getItem('src');sel.value=list.some(s=>s.id===want)?want:list[0].id;openSource();}
 $('#srcSel').onchange=openSource;$('#refreshSrc').onclick=()=>openSource(true);
-async function openSource(refresh){const id=$('#srcSel').value;if(!id)return;S.src=id;localStorage.setItem('src',id);$('#srcStatus').textContent='scanning…';$('#overview').innerHTML=emptyState('Reading the backup…','The backup\'s index files are being read. The first time this can take a minute or two.');$('#snap').style.display='none';S.ver=null;renderFlow();
-  try{S.info=await api('/api/open',{src:id,refresh:refresh===true?1:0});}catch(e){$('#overview').innerHTML=`<div class="alert">Could not open: ${esc(e.message)}</div>`;$('#srcStatus').textContent='';return}
+async function openSource(refresh){const id=$('#srcSel').value;if(!id)return;S.src=id;localStorage.setItem('src',id);$('#srcStatus').textContent='scanning…';$('#overview').innerHTML=emptyState('Reading the backup…','<span class="spin"></span> <span id="openMsg">Opening the backup…</span><br><span class="muted">The first time this lists the backup folder and reads its small index files; over Google Drive every step can take a few seconds.</span>');$('#snap').style.display='none';S.ver=null;renderFlow();
+  // The scan runs as a job: a long single request can get lost while the window is in the background (WebKit throttling),
+  // and the job message gives visible progress per step.
+  try{const j=await api('/api/open',{src:id,refresh:refresh===true?1:0,job:1});const job=await waitJob(j.id,m=>{const el=$('#openMsg');if(el)el.textContent=m});
+    if(job.state==='error')throw new Error(job.error);S.info=await api('/api/open',{src:id});}catch(e){$('#overview').innerHTML=`<div class="alert">Could not open: ${esc(e.message)}</div>`;$('#srcStatus').textContent='';return}
   $('#srcStatus').textContent='';renderOverview();renderVersions();renderFlow();
   if(S.info.readable&&S.info.versions.length){const last=S.info.versions[S.info.versions.length-1];selectVersion(last.id)}}
 function renderOverview(){const i=S.info,t=i.task||{},r=i.ransomware;let h='';
   if(r.locked_files>0||i.problems.length){h+=`<div class="alert"><b>${r.locked_files>0?'Ransomware-encrypted backup.':'Problems.'}</b> ${r.locked_files>0?`${r.locked_files} metadata files carry the <code>${esc(r.examples[0]?.split('.').pop())}</code> suffix and are unreadable (e.g. ${r.examples.slice(0,3).map(esc).join(', ')}).`:''} ${i.problems.map(esc).join(' · ')}</div>`}
   const locked=i.shares.reduce((a,s)=>a+(s.locked||0),0);
-  const shares=`<div><b>${i.shares.length}</b><span>shares: ${i.shares.map(s=>esc(s.name)).join(', ')}${locked?` · <span style="color:var(--bad)">${locked} encrypted snapshots</span>`:''}</span></div>`;
+  const userShares=i.shares.filter(s=>!isAppCfg(s.name));
+  const shares=`<div><b>${userShares.length}</b><span>shares: ${userShares.map(s=>esc(s.name)).join(', ')}${i.shares.some(s=>isAppCfg(s.name))?` <span class="muted">· plus the DSM application settings (not restorable here)</span>`:''}${locked?` · <span style="color:var(--bad)">${locked} encrypted snapshots</span>`:''}</span></div>`;
   const first=i.versions[0],last=i.versions[i.versions.length-1];
   h+=`<h2>Backup of <b>${esc(t.host_name||'?')}</b> <span class="help">· task “${esc(t.name||'?')}”${t.enable_data_encrypt?' · <b style="color:var(--warn)">client-side encryption on (not supported yet)</b>':''}</span></h2>
   <div class="kpi"><div><b>${i.versions.length.toLocaleString()}</b><span>backup runs${first?` · ${dd(first.ts)} → ${dd(last.ts)}`:''}</span></div>${shares}
   <div><b>${i.layout.pool_present?'yes':'no'}</b><span>file data present</span></div></div>
-  <details class="adv"><summary>Details</summary><p class="help">Source: <code>${esc(i.source.remote||'local only')}</code> · cache: <code>${esc(i.source.local)}</code><br>Snapshots per share: ${i.shares.map(s=>`${esc(s.name)} ${s.snapshots.toLocaleString()}`).join(' · ')}<br>Backed-up folders: ${(t.backup_folders||[]).map(x=>`<code>${esc(x)}</code>`).join(' ')||'?'} · compression ${t.data_compress_type??'?'} · version rotation ${t.enable_version_rotation?'on':'off'}</p></details>`;
+  <details class="adv"><summary>Details</summary><p class="help">Source: <code>${esc(i.source.remote||'local only')}</code> · cache: <code>${esc(i.source.local)}</code><br>Snapshots per share: ${i.shares.map(s=>`${esc(shareLabel(s.name))} ${s.snapshots.toLocaleString()}`).join(' · ')}<br>Backed-up folders: ${(t.backup_folders||[]).map(x=>`<code>${esc(x)}</code>`).join(' ')||'?'} · compression ${t.data_compress_type??'?'} · version rotation ${t.enable_version_rotation?'on':'off'}</p></details>`;
   $('#overview').innerHTML=h;}
 
 // ---------- version chart
@@ -301,14 +308,15 @@ async function refreshShares(){const id=S.ver;S.snaps={};const infos=await Promi
   infos.forEach(i=>S.snaps[i.share]=i);
   const allIdx=infos.every(i=>i.indexed);
   $('#snapShares').innerHTML=infos.map(i=>{let dot='',txt='';if(i.error){dot='bad';txt=i.error}else if(i.indexed){dot='ok';txt=`${(i.meta?.files||0).toLocaleString()} files · ${human(i.meta?.bytes||0)}`}else if(i.locked){dot='bad';txt='encrypted'}else if(!i.available){dot='bad';txt='no snapshot'}else if(i.local){dot='warn';txt='downloaded, click to load'}else{dot='dl';txt=`click to download ${human(i.size)} + load`}
-    return `<span class="chip ${i.indexed?'on':''}" data-share="${esc(i.share)}" title="${esc(txt)}"><i class="dot ${dot}"></i>${esc(i.share)} <span class="muted">${esc(txt)}</span></span>`}).join('')+
+    return `<span class="chip ${i.indexed?'on':''}" data-share="${esc(i.share)}" title="${esc(isAppCfg(i.share)?'Hyper Backup\'s application-settings part (DSM package config, users, shared-folder settings). Readable here, not restorable as files. '+txt:txt)}" style="${isAppCfg(i.share)?'opacity:.6':''}"><i class="dot ${dot}"></i>${esc(shareLabel(i.share))} <span class="muted">${esc(txt)}</span></span>`}).join('')+
     (allIdx?'':`<button class="small primary" id="loadAll">Load all shares for this run</button>`)+`<span id="jobStatus" class="status"></span>`;
   $$('#snapShares .chip').forEach(c=>c.onclick=()=>{const i=S.snaps[c.dataset.share];if(!i.indexed&&i.available&&!i.locked)runIndex(c.dataset.share)});
   const la=$('#loadAll');if(la)la.onclick=()=>runIndex('*');}
 async function runIndex(share){const j=await api('/api/index',{src:S.src,share,ver:S.ver});const el=$('#jobStatus');
-  const poll=async()=>{const job=await api('/api/job',{id:j.id});el.innerHTML=`<span class="prog" style="display:inline-block;vertical-align:middle"><i style="width:${Math.round(job.progress*100)}%"></i></span> ${esc(job.message||'')} <span class="muted">${etaText(job.id,job.progress||0)}</span>`;
-    if(job.state==='running')setTimeout(poll,700);else{el.textContent=job.state==='error'?'Error: '+job.error:'';const errs=(job.result||[]).filter(r=>!r.ok);if(errs.length)el.textContent=errs.map(e=>e.share+': '+e.error).join(' · ');
-      S.info=await api('/api/open',{src:S.src});renderVersions();await refreshShares();showTab(S.tab)}};poll();}
+  const show=job=>{el.innerHTML=`<span class="prog" style="display:inline-block;vertical-align:middle"><i style="width:${Math.round((job.progress||0)*100)}%"></i></span> ${esc(job.message||'')} <span class="muted">${etaText(job.id,job.progress||0)}</span>`};
+  const job=await waitJob(j.id,null,700,show);                     // survives errors and a throttled window, like the other waits
+  el.textContent=job.state==='error'?'Error: '+job.error:'';const errs=(job.result||[]).filter(r=>!r.ok);if(errs.length)el.textContent=errs.map(e=>e.share+': '+e.error).join(' · ');
+  S.info=await api('/api/open',{src:S.src});renderVersions();await refreshShares();showTab(S.tab)}
 $$('.tabs button').forEach(b=>b.onclick=()=>showTab(b.dataset.t));
 function showTab(t){S.tab=t;renderFlow();$$('.tabs button').forEach(b=>b.classList.toggle('on',b.dataset.t===t));$$('[id^=tab-]').forEach(d=>d.style.display=d.id==='tab-'+t?'':'none');
   ({changes:tabChanges,timeline:tabTimeline,browse:tabBrowse,search:tabSearch,compare:tabCompare,restore:tabRestore})[t]();}
@@ -367,7 +375,7 @@ async function tabTimeline(){const el=$('#tab-timeline');if(needLoad(el))return;
 
 let BR={share:null,dir:''};
 async function tabBrowse(){const el=$('#tab-browse');if(needLoad(el))return;const shares=indexedShares();if(!shares.includes(BR.share)){BR.share=shares[0];BR.dir=''}
-  el.innerHTML=`<div class="row" style="margin-bottom:8px"><label>Share <select id="brShare">${shares.map(s=>`<option ${s===BR.share?'selected':''}>${esc(s)}</option>`).join('')}</select></label><span class="crumbs" id="crumbs"></span><span style="flex:1"></span><button class="small" id="brBasket">+ Restore this folder</button></div><div id="brTable"></div>`;
+  el.innerHTML=`<div class="row" style="margin-bottom:8px"><label>Share <select id="brShare">${shares.map(s=>`<option value="${esc(s)}" ${s===BR.share?'selected':''}>${esc(shareLabel(s))}</option>`).join('')}</select></label><span class="crumbs" id="crumbs"></span><span style="flex:1"></span><button class="small" id="brBasket">+ Restore this folder</button></div><div id="brTable"></div>`;
   $('#brShare').onchange=e=>{BR.share=e.target.value;BR.dir='';tabBrowse()};$('#brBasket').onclick=()=>addBasket({share:BR.share,path:BR.dir,is_dir:1,name:BR.dir.split('/').pop()||'(share root)'});
   const parts=BR.dir?BR.dir.split('/'):[];let c=`<a data-p="">${esc(BR.share)}</a>`;parts.forEach((p,i)=>c+=`<span>/</span><a data-p="${esc(parts.slice(0,i+1).join('/'))}">${esc(p)}</a>`);$('#crumbs').innerHTML=c;
   $$('#crumbs a').forEach(a=>a.onclick=()=>{BR.dir=a.dataset.p;tabBrowse()});
@@ -390,7 +398,7 @@ async function tabSearch(){const el=$('#tab-search');if(needLoad(el))return;
 
 async function tabCompare(){const el=$('#tab-compare');const vs=S.info.versions.filter(v=>v.indexed.length);
   el.innerHTML=`<p class="help">Compares two loaded snapshots of one share by path (added / removed / size-or-mtime changed). Load more versions from the chart above to compare further back.</p>
-  <div class="row" style="margin-bottom:8px"><label>Share <select id="cpShare">${S.info.shares.map(s=>`<option>${esc(s.name)}</option>`).join('')}</select></label><label>From <select id="cpA"></select></label><label>To <select id="cpB"></select></label><button class="primary" id="cpGo">Compare</button><span id="cpStat" class="muted"></span></div><div id="cpOut"></div>`;
+  <div class="row" style="margin-bottom:8px"><label>Share <select id="cpShare">${S.info.shares.map(s=>`<option value="${esc(s.name)}">${esc(shareLabel(s.name))}</option>`).join('')}</select></label><label>From <select id="cpA"></select></label><label>To <select id="cpB"></select></label><button class="primary" id="cpGo">Compare</button><span id="cpStat" class="muted"></span></div><div id="cpOut"></div>`;
   const fill=()=>{const sh=$('#cpShare').value;const list=vs.filter(v=>v.indexed.includes(sh));const o=list.map(v=>`<option value="${v.id}">v${v.id} · ${dd(v.ts)}</option>`).join('');$('#cpA').innerHTML=o;$('#cpB').innerHTML=o;if(list.length>1){$('#cpA').value=list[list.length-2].id;$('#cpB').value=list[list.length-1].id}};
   $('#cpShare').onchange=fill;fill();
   $('#cpGo').onclick=async()=>{$('#cpStat').textContent='comparing…';const d=await api('/api/diff',{src:S.src,share:$('#cpShare').value,a:$('#cpA').value,b:$('#cpB').value});
@@ -481,7 +489,8 @@ async function tabRestore(){const el=$('#tab-restore');
       $(`.mapSub[data-i="${i}"]`).value=m.sub||'';$(`.mapPath[data-i="${i}"]`).value=m.path||''});updRows()};
   const onEdit=()=>updRows(true);$$('.mapShare,.mapSub,.mapPath').forEach(e=>{e.onchange=onEdit;e.oninput=onEdit});
   $('#wzOne').checked=!!MAP._one;$('#wzOnePath').value=MAP._onePath||'';$('#wzOne').onchange=onEdit;$('#wzOnePath').oninput=onEdit;
-  const loadShares=async()=>{SHARES=[];if(rem()){try{const d=await api('/api/remotes',{remote:rem()});SHARES=d.dirs}catch(e){}}fillRows()};
+  const loadShares=async()=>{SHARES=[];if(rem()){$('#wzRemHelp').innerHTML='<span class="spin"></span> Listing the shares…';$('#wzRem').disabled=true;$$('.mapShare').forEach(s=>s.disabled=true);
+      try{const d=await api('/api/remotes',{remote:rem()});SHARES=d.dirs}catch(e){}finally{$('#wzRem').disabled=false;$$('.mapShare').forEach(s=>s.disabled=false)}}fillRows()};
   updRows();
   try{const r=await api('/api/remotes');const srcRems=((S.info&&S.info.source&&S.info.source.remotes)||[]).map(x=>x.split(':')[0]+':');
     // default connection: a NAS-style remote (SMB, SFTP, WebDAV, FTP) first, then any remote that is not the backup's own, then the first one
@@ -491,7 +500,9 @@ async function tabRestore(){const el=$('#tab-restore');
     $('#wzRem').onchange=()=>{MAP._rem=rem();saveMap();loadShares()};await loadShares()}catch(e){$('#wzRem').innerHTML='<option value="">a mounted share / local path</option>';fillRows()}
   const setCls=(el,c)=>{el.classList.remove('bad','ok');if(c)el.classList.add(c)};
   const showCheck=(st,r)=>{st.textContent=r.inside_source?`✗ ${r.conflict||r.dest} is the backup itself, a folder inside it, or the folder around it`:r.error?'? '+r.error:!r.exists?'✓ new folder, it will be created':r.empty?'✓ empty folder':`! already has ${r.files} entries: files already there are skipped, nothing is deleted`;setCls(st,r.inside_source||r.error?'bad':'ok');return!(r.inside_source||r.error)};
-  const checkAll=async()=>{const out=$('#wzCheckOut');out.textContent='checking…';setCls(out,'');let bad=false,nonEmpty=0;
+  const checkAll=async()=>{const out=$('#wzCheckOut');if(out.dataset.busy)return{bad:true,nonEmpty:0};out.dataset.busy='1';$('#wzCheck').disabled=true;out.innerHTML='<span class="spin"></span> Checking the targets…';setCls(out,'');let bad=false,nonEmpty=0;
+    try{return await checkAllInner(out,bad,nonEmpty)}finally{delete out.dataset.busy;$('#wzCheck').disabled=false}};
+  const checkAllInner=async(out,bad,nonEmpty)=>{
     if(oneMode()){const d=oneDest();if(!d){out.textContent='Enter the folder under Advanced, or untick it.';setCls(out,'bad');return{bad:true,nonEmpty}}
       try{const r=await api('/api/dest/check',{src:S.src,dest:d,shares:JSON.stringify([...new Set(S.basket.map(b=>b.share))])});if(!showCheck(out,r))bad=true;if(r.exists&&r.empty===false)nonEmpty++}catch(e){out.textContent='? '+e.message;bad=true}}
     else for(let i=0;i<ROWS.length;i++){const d=rowDest(i);const st=$(`.mapStat[data-i="${i}"]`);if(!d){st.textContent='choose a target';setCls(st,'bad');bad=true;continue}
@@ -506,7 +517,7 @@ async function tabRestore(){const el=$('#tab-restore');
   $('#wdConnect').onclick=async()=>{const q={kind:'smb',name:$('#wdName').value.trim()||'nas',host:$('#wdHost').value.trim(),user:$('#wdUser').value.trim(),password:$('#wdPass').value};
     if(!q.host||!q.user){$('#wdConn').textContent='Fill in the NAS address and the user.';return}
     $('#wdConnect').disabled=true;$('#wdConn').textContent='Connecting…';
-    try{const j=await post('/api/rclone/connect',q);const job=await new Promise(res=>{const t=async()=>{const x=await api('/api/job',{id:j.id});if(x.state==='running'){$('#wdConn').textContent=x.message||'';setTimeout(t,1000)}else res(x)};t()});
+    try{const j=await post('/api/rclone/connect',q);const job=await waitJob(j.id,m=>{$('#wdConn').textContent=m});
       if(job.state==='error'){$('#wdConn').textContent='Failed: '+job.error;$('#wdConnect').disabled=false;return}
       MAP._rem=job.result.remote;saveMap();
       $('#wdConn').textContent='Connected: '+job.result.remote+(job.result.shares?' · shares: '+job.result.shares.join(', '):'');setTimeout(tabRestore,800)}
@@ -526,11 +537,18 @@ async function tabRestore(){const el=$('#tab-restore');
       pollJob(j.id,$('#rsProg'),job=>{showSaved();$('#rsProg').innerHTML+=`<p><b>${job.result&&job.result.paused?'Paused':'Done'}:</b> ${job.result?`${job.result.restored} restored · ${job.result.skipped} skipped · ${job.result.errors} errors · ${human(job.result.bytes)}`:esc(job.error||'')}</p>`;
         if(job.errors&&job.errors.length)$('#rsErrors').innerHTML=`<h4 style="font-size:12px;color:var(--muted)">Errors (${job.errors.length})</h4><div class="tablewrap"><table>${job.errors.slice(0,500).map(e=>`<tr><td class="mono">${esc(e.path)}</td><td>${esc(e.error)}</td></tr>`).join('')}</table></div>`},true)}
     catch(e){alert(e.message)}};}
-function pollJob(id,el,done,rich,stopLabel){let stopping=false;const t=async()=>{const job=await api('/api/job',{id});
+// Sleep that also ends when the window becomes visible or focused again: while the user is in the browser (Google sign-in) the
+// embedded WebKit view throttles timers, so a plain setTimeout chain may not resume for a long time.
+const sleepOrWake=ms=>new Promise(res=>{let t=null;const done=()=>{clearTimeout(t);document.removeEventListener('visibilitychange',done);window.removeEventListener('focus',done);res()};t=setTimeout(done,ms);document.addEventListener('visibilitychange',done);window.addEventListener('focus',done)});
+// Wait for a job to leave the running state. A failed poll (network hiccup, throttled view) is retried, never left hanging;
+// an unknown job id ends the wait with an error result.
+async function waitJob(id,onMsg,ms=1000,onJob){for(let miss=0;;){let x=null;try{x=await api('/api/job',{id});miss=0}catch(e){if(/no such job/i.test(e.message)||++miss>60)return{state:'error',error:e.message}}
+  if(x&&onJob)onJob(x);if(x&&x.state!=='running')return x;if(x&&onMsg)onMsg(x.message||'');await sleepOrWake(ms)}}
+function pollJob(id,el,done,rich,stopLabel){let stopping=false;const t=async()=>{let job;try{job=await api('/api/job',{id})}catch(e){if(/no such job/i.test(e.message)){el.innerHTML+=`<p style="color:var(--bad)">${esc(e.message)}</p>`;return}await sleepOrWake(2000);return t()}
   const stop=stopLabel&&job.state==='running'?`<button class="small" id="jobStop" ${stopping?'disabled':''}>${stopping?'Stopping…':stopLabel}</button>`:'';
   el.innerHTML=progressHtml(job,rich,stop);
   const b=$('#jobStop');if(b)b.onclick=async()=>{stopping=true;b.disabled=true;b.textContent='Stopping…';await api('/api/job/cancel',{id})};
-  if(job.state==='running')setTimeout(t,800);else{if(job.state==='error')el.innerHTML+=`<p style="color:var(--bad)">${esc(job.error)}</p>`;done&&done(job)}};t();}
+  if(job.state==='running'){await sleepOrWake(800);return t()}else{if(job.state==='error')el.innerHTML+=`<p style="color:var(--bad)">${esc(job.error)}</p>`;done&&done(job)}};t();}
 // ---------- drawer
 $('#closeDrawer').onclick=()=>$('#drawer').classList.remove('open');
 async function openDetail(share,ver,id){const d=await api('/api/file',{src:S.src,share,ver,id});if(!d)return;
@@ -552,25 +570,40 @@ const WS={step:1,remote:'',path:'',kind:'existing'};
 function wsShow(){$('#wzS').textContent=`step ${WS.step} of 3`;[1,2,3].forEach(i=>$('#ws'+i).style.display=WS.step===i?'':'none');$('#wsBack').style.display=WS.step>1?'':'none';$('#wsNext').textContent=WS.step===3?'Add backup':'Next'}
 $('#addSrc').onclick=async()=>{WS.step=1;wsShow();$('#dlgSrc').showModal();try{const r=await api('/api/remotes');$('#wsRem').innerHTML=r.remotes.map(x=>`<option>${esc(x)}</option>`).join('')||'<option value="">(none configured)</option>'}catch(e){}};
 $$('input[name=wsk]').forEach(r=>r.onchange=()=>{WS.kind=r.value;$('#wsDrive').style.display=WS.kind==='drive'?'':'none';$('#wsSmb').style.display=WS.kind==='smb'?'':'none'});
-$('#nCancel').onclick=()=>$('#dlgSrc').close();$('#wsBack').onclick=()=>{WS.step--;wsShow()};
-async function wsList(){const r=await api('/api/rclone/ls',{remote:WS.remote,path:WS.path});if(r.error){$('#wsList').innerHTML=`<p style="color:var(--bad)">${esc(r.error)}</p>`;return}
+$('#nCancel').onclick=()=>{$('#wsNext').disabled=false;$('#dlgSrc').close()};$('#wsBack').onclick=()=>{$('#wsNext').disabled=false;WS.step--;wsShow()};
+const wsInto=d=>(WS.remote?(WS.path?WS.path.replace(/\/$/,'')+'/':''):(WS.path.replace(/\/$/,'')+'/'))+d;   // child folder d of the current path
+async function wsList(){if(WS.busy)return;WS.busy=true;const lst=$('#wsList');lst.style.opacity='.45';lst.style.pointerEvents='none';$('#wsHint').innerHTML='<span class="spin"></span> Listing…';
+  let r;try{r=await api('/api/rclone/ls',{remote:WS.remote,path:WS.path})}catch(e){r={error:e.message}}finally{WS.busy=false;lst.style.opacity='';lst.style.pointerEvents=''}
+  if(r.error){$('#wsList').innerHTML=`<p style="color:var(--bad)">${esc(r.error)}</p>`;$('#wsHint').textContent='';return}
   WS.path=r.path;$('#wsPath').value=WS.path;$('#wsPathShow').textContent=(WS.remote||'')+WS.path;
-  $('#wsList').innerHTML=`<table>${r.dirs.map(d=>`<tr class="f wsd" data-d="${esc(d)}"><td>📁 ${esc(d)}${d.endsWith('.hbk')?' <span class="flag">backup</span>':''}</td></tr>`).join('')||'<tr><td class="muted">no sub-folders</td></tr>'}</table>`;
-  $$('.wsd').forEach(tr=>tr.onclick=()=>{WS.path=(WS.remote?(WS.path?WS.path.replace(/\/$/,'')+'/':''):(WS.path.replace(/\/$/,'')+'/'))+tr.dataset.d;wsList()});
-  $('#wsHint').innerHTML=r.looks_like_hbk?'<b style="color:var(--ok)">This folder looks like a Hyper Backup (has Config and Pool). Click Next.</b>':(r.hbk_dirs.length?`Open the <b>${esc(r.hbk_dirs[0])}</b> folder, then click Next.`:'Navigate into the folder that ends with <code>.hbk</code>.')}
-$('#wsUp').onclick=()=>{const p=WS.path.replace(/\/$/,'');WS.path=p.includes('/')?p.slice(0,p.lastIndexOf('/')):(WS.remote?'':'/');wsList()};$('#wsGoPath').onclick=()=>{WS.path=$('#wsPath').value;wsList()};
+  // Backups found in this folder get a one-click pick; the folder list below stays for navigating elsewhere.
+  const found=r.looks_like_hbk?'':(r.hbk_dirs.length?`<div class="row" style="margin:0 0 8px;flex-wrap:wrap"><b>Backups found here:</b>${r.hbk_dirs.map(d=>`<button class="small primary wsPick" data-d="${esc(d)}">Use ${esc(d)}</button>`).join('')}</div>`:'');
+  $('#wsList').innerHTML=found+`<table>${r.dirs.map(d=>`<tr class="f wsd" data-d="${esc(d)}"><td>📁 ${esc(d)}${d.endsWith('.hbk')?' <span class="flag">backup</span>':''}</td></tr>`).join('')||'<tr><td class="muted">no sub-folders</td></tr>'}</table>`;
+  $$('.wsd').forEach(tr=>tr.onclick=()=>{WS.path=wsInto(tr.dataset.d);if(tr.dataset.d.endsWith('.hbk'))$('#wsNext').click();else wsList()});   // a backup row selects it and goes on
+  $$('.wsPick').forEach(b=>b.onclick=()=>{WS.path=wsInto(b.dataset.d);$('#wsNext').click()});
+  $('#wsHint').innerHTML=r.looks_like_hbk?'<b style="color:var(--ok)">This folder is a Hyper Backup (it has Config and Pool). Click Next.</b>':(r.hbk_dirs.length?'Click a backup above, or open a folder to look elsewhere.':'No Hyper Backup here: open the folder whose name ends in <code>.hbk</code> (it holds <code>Config</code> and <code>Pool</code>), or go up.')}
+$('#wsUp').onclick=()=>{if(WS.busy)return;const p=WS.path.replace(/\/$/,'');WS.path=p.includes('/')?p.slice(0,p.lastIndexOf('/')):(WS.remote?'':'/');wsList()};$('#wsGoPath').onclick=()=>{if(WS.busy)return;WS.path=$('#wsPath').value;wsList()};
 $('#wsNext').onclick=async()=>{
   if(WS.step===1){const k=WS.kind;
     if(k==='existing'){WS.remote=$('#wsRem').value;if(!WS.remote){alert('No remote selected');return}WS.path=''}
     else if(k==='local'){WS.remote='';WS.path='~'}
     else{const q=k==='drive'?{kind:'drive',name:$('#wsDName').value,client_id:$('#wsCid').value.trim(),client_secret:$('#wsCsec').value.trim()}:{kind:'smb',name:$('#wsSName').value,host:$('#wsHost').value.trim(),user:$('#wsUser').value.trim(),password:$('#wsPass').value};
-      $('#wsConn').textContent=k==='drive'?'A Google sign-in page opens in your browser. Approve it, then come back here…':'Connecting…';$('#wsNext').disabled=true;
-      try{const j=await post('/api/rclone/connect',q);const job=await new Promise(res=>{const t=async()=>{const x=await api('/api/job',{id:j.id});if(x.state==='running'){$('#wsConn').textContent=x.message||'';setTimeout(t,1000)}else res(x)};t()});
-        if(job.state==='error'){$('#wsConn').textContent='Failed: '+job.error;$('#wsNext').disabled=false;return}
-        WS.remote=job.result.remote;WS.path='';$('#wsConn').textContent='Connected: '+WS.remote}catch(e){$('#wsConn').textContent=e.message;$('#wsNext').disabled=false;return}
+      $('#wsConn').textContent=k==='drive'?'A browser window opens for the Google sign-in. When it shows “Success! All done”, close it and come back to this window…':'Connecting…';$('#wsNext').disabled=true;
+      const busy=m=>{$('#wsBusy').style.display='inline-flex';$('#wsBusyText').textContent=m||'Working…';$('#wsConn').textContent=m||''};busy(k==='drive'?'Signing in…':'Connecting…');
+      let job;try{const j=await post('/api/rclone/connect',q);job=await waitJob(j.id,busy)}catch(e){job={state:'error',error:e.message}}
+      $('#wsBusy').style.display='none';$('#wsNext').disabled=false;   // whatever happened, the user is never stuck on step 1
+      try{if(job.state==='error'){$('#wsConn').textContent='Failed: '+job.error;return}
+        WS.remote=job.result.remote;WS.path='';const sel=$('#wsRem');if(![...sel.options].some(o=>o.value===WS.remote))sel.add(new Option(WS.remote,WS.remote));sel.value=WS.remote;   // the new connection is the selected one from now on
+        $('#wsConn').textContent='Connected: '+WS.remote+' — now pick the backup folder on it.'}catch(e){$('#wsConn').textContent=e.message;$('#wsNext').disabled=false;return}
       $('#wsNext').disabled=false}
     WS.step=2;wsShow();wsList();return}
-  if(WS.step===2){const r=await api('/api/rclone/ls',{remote:WS.remote,path:WS.path});if(!r.looks_like_hbk){if(!confirm('This folder does not contain Config and Pool. Use it anyway (e.g. a partial copy)?'))return}
+  if(WS.step===2){if(WS.busy)return;$('#wsBusy').style.display='inline-flex';$('#wsBusyText').textContent='Checking the folder…';$('#wsNext').disabled=true;
+    let r;try{r=await api('/api/rclone/ls',{remote:WS.remote,path:WS.path})}catch(e){r={error:e.message}}finally{$('#wsBusy').style.display='none';$('#wsNext').disabled=false}
+    if(r.error){alert(r.error);return}
+    // Standing in the folder above the backup: one backup found means that is the one; several means pick one first.
+    if(!r.looks_like_hbk&&r.hbk_dirs.length===1){WS.path=wsInto(r.hbk_dirs[0]);r=await api('/api/rclone/ls',{remote:WS.remote,path:WS.path});if(r.error){alert(r.error);return}}
+    else if(!r.looks_like_hbk&&r.hbk_dirs.length>1){await wsList();$('#wsHint').innerHTML='<b>Several backups found here: click the one to use.</b>';return}
+    if(!r.looks_like_hbk){if(!confirm('This is not a Hyper Backup folder (no Config and Pool inside). Pick the folder whose name ends in .hbk, or use this folder only if it is a partial copy.\n\nUse this folder anyway?'))return}
     const base=(WS.path.replace(/\/$/,'').split('/').pop()||'backup');$('#nName').value=WS.remote?`${base} on ${WS.remote.replace(':','')}`:base;
     $('#nLocal').value=WS.remote?`~/CallidoRestore/${base}`:WS.path;$('#nLocal').disabled=!WS.remote;
     $('#wsSummary').textContent=WS.remote?`Metadata is fetched on demand from ${WS.remote}${WS.path} into the cache folder; bucket data only when restoring.`:`The backup is read directly from ${WS.path}.`;

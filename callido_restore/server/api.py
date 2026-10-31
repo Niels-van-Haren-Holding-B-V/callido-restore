@@ -26,17 +26,17 @@ def _exit_app(code=0):
     if os.name != "nt": subprocess.run(["pkill", "-P", str(os.getpid())], capture_output=True)
     os._exit(code)
 
-JOB_ID = re.compile(r"^[0-9a-f-]{8,64}$")          # job ids are uuid4 hex (10 chars); the id names a file under paths.JOBS_DIR, so nothing else may pass
+JOB_ID = re.compile(r"[0-9a-f]{8,64}")             # job ids are uuid4 hex (10 chars); the id names a file under paths.JOBS_DIR, so nothing else may pass
 
 def job_file(jid):
     """Path of a persisted restore job, or None when the id is not a job id (never a path)."""
-    return paths.JOBS_DIR / f"{jid}.json" if isinstance(jid, str) and JOB_ID.match(jid) else None
+    return paths.JOBS_DIR / f"{jid}.json" if isinstance(jid, str) and JOB_ID.fullmatch(jid) else None
 
 BACKUPS = {}
 
-def backup_for(sid, refresh=False):
+def backup_for(sid, refresh=False, log=None):
     if sid not in SOURCES: raise KeyError(f"unknown source {sid}")
-    if refresh or sid not in BACKUPS: BACKUPS[sid] = Backup(SOURCES[sid])
+    if refresh or sid not in BACKUPS: BACKUPS[sid] = Backup(SOURCES[sid], log)
     return BACKUPS[sid]
 
 class H(BaseHTTPRequestHandler):
@@ -108,11 +108,11 @@ class H(BaseHTTPRequestHandler):
             if u.path == "/api/rclone/ls":      # browse a remote (or local path when remote == "")
                 rem, path = q.get("remote", ""), q.get("path", "")
                 if rem:
-                    r = subprocess.run([RCLONE, "lsjson", "--no-mimetype", "--dirs-only", rem + path], capture_output=True, text=True)
+                    # one rclone call per click (a Drive listing takes about a second); folders and files are split on IsDir here
+                    r = subprocess.run([RCLONE, "lsjson", "--no-mimetype", "--max-depth", "1", rem + path], capture_output=True, text=True)
                     if r.returncode != 0: return self._json({"error": r.stderr.strip()[-300:]})
-                    dirs = sorted(e["Name"] for e in json.loads(r.stdout or "[]"))
-                    r2 = subprocess.run([RCLONE, "lsjson", "--no-mimetype", "--files-only", "--max-depth", "1", rem + path], capture_output=True, text=True)
-                    files = sorted(e["Name"] for e in json.loads(r2.stdout or "[]")) if r2.returncode == 0 else []
+                    ents = json.loads(r.stdout or "[]")
+                    dirs = sorted(e["Name"] for e in ents if e.get("IsDir")); files = sorted(e["Name"] for e in ents if not e.get("IsDir"))
                 else:
                     pp = Path(os.path.expanduser(path or "~"))
                     try: dirs = sorted(e.name for e in pp.iterdir() if e.is_dir() and not e.name.startswith(".")); files = sorted(e.name for e in pp.iterdir() if e.is_file())[:50]
@@ -139,6 +139,13 @@ class H(BaseHTTPRequestHandler):
             if u.path == "/api/job":
                 j = JOBS.get(q.get("id")); return self._json(j or {"error": "no such job"})
             if u.path == "/api/open":
+                if q.get("job") == "1":          # the first open lists and fetches over rclone: run it as a job with step messages; the UI then GETs the info
+                    sid, refresh = q["src"], q.get("refresh") == "1"
+                    if sid not in SOURCES: return self._json({"error": f"unknown source {sid}"}, 404)
+                    def run(job):
+                        job["message"] = "Opening the backup…"
+                        backup_for(sid, refresh=refresh, log=lambda m: job.__setitem__("message", m)); return {"ok": True}
+                    return self._json(start_job(run, "open backup"))
                 b = backup_for(q["src"], refresh=q.get("refresh") == "1"); return self._json(b.info)
             b = backup_for(q["src"])
             if u.path == "/api/snapshot_info":
@@ -194,24 +201,25 @@ class H(BaseHTTPRequestHandler):
             if u.path == "/api/sources":
                 s = add_source(body["name"], body["local"], body.get("remote"), body.get("extra")); return self._json(s.to_json())
             if u.path == "/api/rclone/connect":  # start an rclone config (opens the browser for Google); body carries the secrets
-                q = body
-                name = re.sub(r"[^A-Za-z0-9_-]", "", q.get("name") or "gdrive") or "gdrive"
-                kind = q.get("kind", "drive")
+                name = re.sub(r"[^A-Za-z0-9_-]", "", body.get("name") or "gdrive") or "gdrive"
+                kind = body.get("kind", "drive")
                 if kind == "drive":
                     args = [RCLONE, "config", "create", name, "drive", "scope=drive.readonly"]
-                    if q.get("client_id"): args += [f"client_id={q['client_id']}", f"client_secret={q.get('client_secret', '')}"]
+                    if body.get("client_id"): args += [f"client_id={body['client_id']}", f"client_secret={body.get('client_secret', '')}"]
                 elif kind == "smb":
                     # the password is handed to rclone over stdin ("-"), so it never appears in a process list; the obscured
                     # form that lands in rclone.conf is the only thing passed as an argument
-                    pw = (q.get("password") or "").replace("\n", "")
+                    pw = (body.get("password") or "").replace("\n", "")
                     obs = subprocess.run([RCLONE, "obscure", "-"], input=pw + "\n", capture_output=True, text=True).stdout.strip()
                     if not obs: return self._json({"error": "rclone could not prepare the password"}, 500)
-                    args = [RCLONE, "config", "create", name, "smb", f"host={q.get('host', '')}", f"user={q.get('user', '')}", f"pass={obs}", "--obscure=false", "--non-interactive"]
+                    args = [RCLONE, "config", "create", name, "smb", f"host={body.get('host', '')}", f"user={body.get('user', '')}", f"pass={obs}", "--obscure=false", "--non-interactive"]
                 else: return self._json({"error": "unknown kind"}, 400)
                 def run(job):
-                    job["message"] = "waiting for Google sign-in in your browser…" if kind == "drive" else "creating remote"
+                    job["message"] = ("Signing in… a browser window opens for the Google sign-in. When it says “Success! All done”, close it and come back to this window."
+                                      if kind == "drive" else "Connecting…")
                     r = subprocess.run(args, capture_output=True, text=True, timeout=600)
                     if r.returncode != 0: raise RuntimeError(r.stderr.strip()[-400:] or "rclone config failed")
+                    job["message"] = "Listing your Drive…" if kind == "drive" else "Listing the shares…"     # the root listing can take a while
                     t = subprocess.run([RCLONE, "lsjson", "--no-mimetype", "--dirs-only", f"{name}:"], capture_output=True, text=True, timeout=60)
                     if t.returncode != 0: raise RuntimeError("remote created but listing failed: " + t.stderr.strip()[-300:])
                     shares = [e["Name"] for e in json.loads(t.stdout or "[]")]
