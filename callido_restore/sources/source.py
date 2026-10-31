@@ -5,6 +5,7 @@ from pathlib import Path
 from callido_restore import paths
 from callido_restore.core.hbkmeta import rev_of
 from callido_restore.paths import RCLONE
+from callido_restore.sources import rclone
 
 def is_remote_path(p):
     """rclone 'remote:path' rather than a local path."""
@@ -128,13 +129,12 @@ class Source:
                 if e.name in ents: continue
                 ents[e.name] = {"size": st.st_size if e.is_file() else 0, "dir": e.is_dir(), "local": True, "remote": False}
         for remote in self.remotes:
-            r = subprocess.run([RCLONE, "lsjson", "--no-modtime", "--no-mimetype", f"{remote}/{rel}" if rel else remote],
-                               capture_output=True, text=True)
-            if r.returncode == 0:
-                for e in json.loads(r.stdout or "[]"):
-                    ent = ents.setdefault(e["Name"], {"size": e["Size"], "dir": e["IsDir"], "local": False, "remote": False})
-                    ent["remote"] = True
-                    if not ent["local"]: ent["size"] = e["Size"]
+            try: entries = rclone.ls(f"{remote}/{rel}" if rel else remote, no_modtime=True)
+            except rclone.RcloneError: continue                 # an unreachable remote adds nothing (as before)
+            for e in entries:
+                ent = ents.setdefault(e["Name"], {"size": e["Size"], "dir": e["IsDir"], "local": False, "remote": False})
+                ent["remote"] = True
+                if not ent["local"]: ent["size"] = e["Size"]
         with self._lock: self._list[rel] = ents
         return ents
 
