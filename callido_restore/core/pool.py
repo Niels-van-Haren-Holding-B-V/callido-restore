@@ -398,7 +398,9 @@ class PoolReader:
         # preparation's own "complete" marker (prepared.json, hbk-2) is a different thing and is added by Backup.pool_status.
         if self.map:
             st["map_complete"] = bool(self.map.get("map_complete")); stats = self.map.get("stats") or {}
-            st["records_placed"] = stats.get("placed"); st["records_total"] = stats.get("records"); st["bytes_pct"] = stats.get("bytes-placed-pct")
+            # records the loaded snapshots describe (sized) and how many of them the map located; bytes_pct is a percentage 0-100
+            st["records_placed"] = stats.get("placed-sized", stats.get("placed")); st["records_total"] = stats.get("sized", stats.get("records"))
+            st["bytes_pct"] = stats.get("bytes-placed-pct")
         if st["listing"]:
             l = load_json(listing); idx = [e for e in l if e["t"] == "index"]
             st["total_buckets"] = len({e["b"] for e in idx})

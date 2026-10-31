@@ -48,7 +48,7 @@ class Placer(unittest.TestCase):
         self.assertEqual(pl[0][0], [(0, 0, 3)]); self.assertEqual(pl[0][1], [(0, 3, 1)]); self.assertEqual(pl[0][2], [(0, 0, 3)])
         self.assertNotIn(3, pl[0]); self.assertEqual(R["size-mismatch"], 1)
         self.assertEqual(flags["aliased"], {(0, 2): (0, 0)}); self.assertEqual(flags["guessed"], set()); self.assertEqual(R["phantom-of-tagged"], 1)
-        self.assertEqual(R["verified"], 2)
+        self.assertEqual(R["verified"], 2); self.assertEqual((R["sized"], R["placed-sized"]), (4, 3))
         pool.tmp.cleanup()
 
     def test_spill_claims_the_interior_by_count_and_bytes(self):
