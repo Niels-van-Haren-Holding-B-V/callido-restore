@@ -114,14 +114,20 @@ class ChunkIndex:
             if len(self._cache) > self.LRU: self._cache.popitem(last=False)
         else: self._cache.move_to_end(k)
         return d
-    def loc(self, g, job=None):
-        """(bucket, entry) of chunk id g; KeyError when the record is missing or not a chunk entry"""
+    def loc(self, g, job=None, depth=0):
+        """(bucket, entry) of chunk id g; KeyError when the record is missing or not a chunk entry. A record whose first byte is
+        1 stores nothing itself: bytes 1-8 are the byte offset of the record it shares (a deduplicated copy); followed."""
         off = self.HEADER + self.REC * g; k, lo = divmod(off, SLICE)
         d = self._slice(k, job)
         if lo + self.REC <= len(d): b = d[lo:lo + self.REC]
         elif len(d) < SLICE: raise KeyError(f"chunk id {g}: beyond Pool/chunk_index")       # the last slice is short
         else: b = d[lo:] + self._slice(k + 1, job)[:lo + self.REC - len(d)]               # a record straddling two slices
         if len(b) != self.REC: raise KeyError(f"chunk id {g}: beyond Pool/chunk_index")
+        if b[0] == 1:                                                         # a reference to another chunk record
+            target = struct.unpack_from(">Q", b, 1)[0]
+            if depth > 8 or target < self.HEADER or (target - self.HEADER) % self.REC: raise KeyError(f"chunk id {g}: bad reference {target}")
+            return self.loc((target - self.HEADER) // self.REC, job, depth + 1)
+        if b[0] != 0: raise KeyError(f"chunk id {g}: unknown record kind {b[0]}")
         bucket, ioff = struct.unpack_from(">II", b, 1)
         if ioff < 64 or (ioff - 64) % 32: raise KeyError(f"chunk id {g}: no chunk record (offset {ioff})")
         return bucket, (ioff - 64) // 32

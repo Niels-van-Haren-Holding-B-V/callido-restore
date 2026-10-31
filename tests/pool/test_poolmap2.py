@@ -175,13 +175,14 @@ class ReaderMaps(unittest.TestCase):
         d = os.path.join(self.pool, "src", "Pool", "chunk_index"); os.makedirs(d)
         recs = [(7, 0), (7, 1), (9, 4)]
         blob = b"\0" * 64 + b"".join(b"\0" + struct.pack(">II", b, 64 + 32 * e) + b"\0" * 15 + b"\1" + b"\0" * 4 for b, e in recs)
+        blob += b"\1" + struct.pack(">Q", 64 + 29 * 2) + b"\0" * 20                 # id 3: a copy, refers to id 2's record
         open(os.path.join(d, "0.idx.2"), "wb").write(blob)
         r = pool.PoolReader(_Src(os.path.join(self.pool, "src")), self.pool)
         r.vf = mock.Mock(); r.vf.entry = lambda off: {"set": 4, "rec_off": 100}; r.recs = mock.Mock(); r.recs.record = lambda s, ro: {"ids": [2, 0, 1]}
         self.assertTrue(r.ci.available()); self.assertEqual(r.plan(64)[0], [(9, 4), (7, 0), (7, 1)])
         self.assertEqual(r.verification(64), ("verified", ""))
-        r.recs.record = lambda s, ro: {"ids": [5]}                               # beyond the table: not located by it
-        self.assertRaises(KeyError, r.ci.loc, 5)
+        self.assertEqual(r.ci.loc(3), (9, 4))                                     # a reference record is followed
+        self.assertRaises(KeyError, r.ci.loc, 5)                                  # beyond the table: not located by it
 
     def test_bucket_names_without_a_listing(self):
         # A backup with its own chunk table is never prepared, so there is no pool/listing.json: bucket file names come from
