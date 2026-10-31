@@ -90,6 +90,15 @@ svg text{fill:var(--muted);font-size:10px}
 dl{display:grid;grid-template-columns:110px 1fr;gap:4px 12px;margin:10px 0}dt{color:var(--muted)}dd{margin:0;word-break:break-all}
 .crumbs a{cursor:pointer;color:var(--accent-ink);text-decoration:none}.crumbs a:hover{text-decoration:underline}.crumbs span{color:var(--faint);margin:0 4px}
 .status{font-size:12px;color:var(--muted)}
+#activity{display:none;align-items:center;gap:8px;font-size:12px;color:var(--muted);padding:4px 10px;border-radius:999px;background:color-mix(in srgb,var(--accent,#7c3aed) 10%,transparent)}#activity.on{display:inline-flex}
+#toasts{position:fixed;right:16px;bottom:16px;display:flex;flex-direction:column;gap:8px;z-index:50;max-width:420px}
+.toast{background:var(--panel,#fff);color:var(--fg,#111);border:1px solid var(--line,#e5e5ea);border-radius:10px;padding:10px 12px;box-shadow:0 8px 24px rgba(0,0,0,.14);font-size:12.5px;display:flex;gap:10px;align-items:center;animation:toastIn .18s ease-out}
+.toast.bad{border-color:var(--bad,#d33)}.toast.warn{border-color:#d9a400}.toast .acts{display:flex;gap:6px;margin-left:auto}.toast button{font-size:12px}
+@keyframes toastIn{from{transform:translateY(8px);opacity:0}to{transform:none;opacity:1}}
+#basketBtn{font-size:12px;padding:4px 10px;border-radius:999px}#basketBtn.pulse{animation:pulse .9s ease-out}
+@keyframes pulse{0%{box-shadow:0 0 0 0 color-mix(in srgb,var(--accent,#7c3aed) 60%,transparent)}100%{box-shadow:0 0 0 14px transparent}}
+#basketPanel{position:fixed;right:16px;top:56px;width:min(520px,calc(100vw - 32px));max-height:70vh;overflow:auto;background:var(--panel,#fff);color:var(--fg,#111);border:1px solid var(--line,#e5e5ea);border-radius:12px;box-shadow:0 12px 32px rgba(0,0,0,.18);padding:12px 14px;z-index:40;display:none}#basketPanel.open{display:block}
+#basketPanel table{width:100%}#basketPanel td{padding:4px 6px;vertical-align:middle}#basketPanel .x{border:0;background:none;color:var(--muted);cursor:pointer;font-size:14px}
 /* progress */
 .prog{height:6px;background:var(--chip);border-radius:3px;overflow:hidden;width:220px;flex:none}.prog i{display:block;height:100%;background:var(--grad);border-radius:3px;transition:width .4s ease}
 .progress{display:grid;gap:6px;padding:10px 12px;background:var(--panel2);border:1px solid var(--line);border-radius:10px}
@@ -133,7 +142,8 @@ footer.madeBy img{width:18px;height:18px;border-radius:5px;vertical-align:middle
   <select id="srcSel"></select>
   <button id="addSrc">+ Add backup</button>
   <button id="refreshSrc" class="ghost" title="Re-scan this backup" aria-label="Re-scan">↻</button>
-  <span id="srcStatus" class="status"></span>
+  <span id="srcStatus" class="status"></span><span id="activity"><span class="spin"></span><span id="activityText">Loading…</span></span><span style="flex:1"></span><button id="basketBtn" class="small ghost" title="What you have selected for the restore">Restore selection · 0 items</button>
+  <div id="basketPanel" aria-label="Restore selection"><div class="row" style="justify-content:space-between;margin-bottom:6px"><b>Restore selection</b><span id="basketSum" class="muted"></span></div><div id="basketRows"></div><div class="row" style="justify-content:flex-end;gap:8px;margin-top:10px"><button class="small ghost" id="basketClear">Clear all</button><button class="small primary" id="basketGo">Continue to restore</button></div></div>
   <span id="jobs" class="row" style="flex:1;justify-content:flex-end;gap:14px"></span>
   <button id="about" class="small ghost" title="Version and bundled tools">About</button>
   <button id="quit" class="small ghost" title="Stop the app">Quit</button>
@@ -141,7 +151,7 @@ footer.madeBy img{width:18px;height:18px;border-radius:5px;vertical-align:middle
 <dialog id="dlgAbout" style="max-width:520px"><h3 style="margin-top:0">Callido Restore</h3><div id="aboutBody" class="help">loading…</div>
   <div class="row" style="justify-content:flex-end;margin-top:10px"><button id="aboutClose" class="small">Close</button></div></dialog>
 <main>
-  <ol id="flow" class="flow" aria-label="Steps"><li data-s="1"><i>1</i>Backup</li><li data-s="2"><i>2</i>Backup run</li><li data-s="3"><i>3</i>Files</li><li data-s="4"><i>4</i>Restore</li></ol>
+  <ol id="flow" class="flow" aria-label="Steps"><li data-s="1"><i>1</i>Backup</li><li data-s="2"><i>2</i>Backup run</li><li data-s="3"><i>3</i>Files</li><li data-s="4"><i>4</i>Restore</li></ol><div id="toasts"></div>
   <div id="overview" class="panel"></div>
   <div id="versions" class="panel">
     <h2>Pick the backup run <span class="help">· each bar is one run: files new / modified / removed (log scale). Click a bar to pick that run; the last clean run before an incident is usually the one you want.</span></h2>
@@ -210,8 +220,30 @@ footer.madeBy img{width:18px;height:18px;border-radius:5px;vertical-align:middle
 <script>
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 const S={src:null,info:null,ver:null,snaps:{},tab:'changes',range:365,basket:JSON.parse(localStorage.getItem('basket')||'[]')};
-const api=async(p,q={})=>{const u=new URL(p,location.origin);Object.entries(q).forEach(([k,v])=>v!==undefined&&v!==null&&v!==''&&u.searchParams.set(k,v));const r=await fetch(u);const j=await r.json();if(j&&j.error)throw new Error(j.error);return j;};
-const post=async(p,b)=>{const r=await fetch(p,{method:'POST',body:JSON.stringify(b)});const j=await r.json();if(j.error)throw new Error(j.error);return j;};
+// Every request goes through track(): an in-flight counter shows the header activity pill once a request runs longer than
+// 200 ms (most waits are a fresh rclone process talking to Google Drive or the NAS), with a text derived from the endpoint, and
+// the button that triggered it is disabled meanwhile. Listings that the Restore tab re-requests on every render are cached 30 s.
+const ACT={n:0,timer:null,label:''};
+function activityLabel(p,q){q=q||{};const rem=String(q.remote||'');const drive=/drive/i.test(rem);
+  if(p==='/api/open'||p==='/api/index'||p==='/api/snapshot_info')return 'Loading from the backup'+(S.info&&S.info.source&&S.info.source.remote?' on '+S.info.source.remote.split(':')[0]:'')+'…';
+  if(p==='/api/rclone/ls'||p==='/api/remotes')return rem?(drive?'Loading from Google Drive…':`Listing ${rem.replace(/:$/,'')} shares…`):(p==='/api/remotes'?'Listing connections…':'Listing folders…');
+  if(p==='/api/restore_count'||p==='/api/restore_plan')return 'Counting files…';if(p==='/api/dest/check')return 'Checking the target…';
+  if(p==='/api/pool'||p==='/api/pool/build')return 'Reading the pool map…';if(p==='/api/children'||p==='/api/query'||p==='/api/diff'||p==='/api/histogram')return 'Reading the file list…';
+  if(p==='/api/rclone/connect')return 'Connecting…';if(p==='/api/restore')return 'Starting the restore…';return 'Working…'}
+async function track(p,q,run){const label=activityLabel(p,q);const btn=document.activeElement&&document.activeElement.tagName==='BUTTON'?document.activeElement:null;
+  ACT.n++;ACT.label=label;if(!ACT.timer)ACT.timer=setTimeout(()=>{ACT.timer=null;if(ACT.n>0){$('#activity').classList.add('on');$('#activityText').textContent=ACT.label}},200);
+  if(btn&&!btn.disabled){btn.disabled=true;btn.dataset.trk='1'}
+  try{return await run()}finally{ACT.n--;if(btn&&btn.dataset.trk){btn.disabled=false;delete btn.dataset.trk}if(ACT.n<=0){ACT.n=0;clearTimeout(ACT.timer);ACT.timer=null;$('#activity').classList.remove('on')}}}
+const CACHE_TTL=30000;const CACHEABLE=new Set(['/api/remotes']);const CACHE=new Map();
+const api=async(p,q={})=>{const u=new URL(p,location.origin);Object.entries(q).forEach(([k,v])=>v!==undefined&&v!==null&&v!==''&&u.searchParams.set(k,v));
+  const key=u.toString();if(CACHEABLE.has(p)){const c=CACHE.get(key);if(c&&Date.now()-c.t<CACHE_TTL)return c.v}
+  return track(p,q,async()=>{const r=await fetch(u);const j=await r.json();if(j&&j.error)throw new Error(j.error);if(CACHEABLE.has(p))CACHE.set(key,{t:Date.now(),v:j});return j})};
+const post=async(p,b)=>track(p,b,async()=>{const r=await fetch(p,{method:'POST',body:JSON.stringify(b)});const j=await r.json();if(j.error)throw new Error(j.error);if(p==='/api/rclone/connect')CACHE.clear();return j});
+// Toasts: bottom-right, stacking, 4 s (6 s with actions); used for basket changes and for errors that were modal boxes before.
+function toast(msg,o={}){const box=$('#toasts');const el=document.createElement('div');el.className='toast '+(o.kind||'');el.innerHTML=`<span>${esc(msg)}</span>`;
+  if(o.actions&&o.actions.length){const a=document.createElement('span');a.className='acts';o.actions.forEach(([label,fn])=>{const b=document.createElement('button');b.className='small';b.textContent=label;b.onclick=()=>{fn();el.remove()};a.appendChild(b)});el.appendChild(a)}
+  box.appendChild(el);while(box.children.length>4)box.firstChild.remove();setTimeout(()=>el.remove(),o.ms||(o.actions?6000:4000));return el}
+const toastError=e=>toast(typeof e==='string'?e:(e&&e.message)||String(e),{kind:'bad'});
 const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const human=n=>{if(n==null)return'';const u=['B','KB','MB','GB','TB'];let i=0;while(n>=1024&&i<u.length-1){n/=1024;i++}return (i?n.toFixed(1):n)+' '+u[i]};
 const dt=t=>t?new Date(t*1000).toISOString().replace('T',' ').slice(0,19):'';
@@ -220,8 +252,9 @@ $('#aboutClose').onclick=()=>$('#dlgAbout').close();
 $('#quit').onclick=async()=>{if(!confirm('Stop Callido Restore? Running restore jobs are saved and can be resumed later.'))return;try{await api('/api/quit')}catch(e){}document.body.innerHTML='<p style="padding:30px;font-family:sans-serif">Callido Restore has stopped. You can close this tab.</p>'};
 const dd=t=>t?new Date(t*1000).toISOString().slice(0,10):'';
 // ---------- flow bar (1 backup → 2 run → 3 files → 4 restore)
-function renderFlow(){const cur=!S.info?1:!S.ver?2:S.tab==='restore'?4:3;
-  $$('#flow li').forEach(li=>{const n=+li.dataset.s;li.classList.toggle('done',n<cur||(n===3&&S.basket.length>0&&cur>=3));li.classList.toggle('on',n===cur)})}
+function renderFlow(bump){const cur=!S.info?1:!S.ver?2:S.tab==='restore'?4:3;
+  $$('#flow li').forEach(li=>{const n=+li.dataset.s;li.classList.toggle('done',n<cur||(n===3&&S.basket.length>0&&cur>=3));li.classList.toggle('on',n===cur)});
+  if(typeof renderBasketBtn==='function'){renderBasketBtn(bump);if(bump)renderBasketPanel()}}
 $$('#flow li').forEach(li=>li.onclick=()=>{const n=+li.dataset.s;if(n===1)$('#overview').scrollIntoView({behavior:'smooth'});else if(n===2)$('#versions').scrollIntoView({behavior:'smooth'});else if(S.ver){showTab(n===4?'restore':'browse');$('#snap').scrollIntoView({behavior:'smooth'})}else $('#versions').scrollIntoView({behavior:'smooth'})});
 const LOGO=$('#logo').src;$('#favicon').href=LOGO;
 // "@AppConfig" is Hyper Backup's application-settings part (DSM package config, users/groups, shared-folder settings), not files.
@@ -427,7 +460,29 @@ function renderTree(){const el=$('#rsTree');if(!el||!S.info)return;const showFil
 let sumTimer=null;function treeSummary(){const el=$('#rsSelSum');if(!el)return;if(!S.basket.length){el.textContent='Nothing selected yet.';return}el.textContent='counting…';clearTimeout(sumTimer);
   sumTimer=setTimeout(async()=>{try{const r=await api('/api/restore_count',{src:S.src,items:JSON.stringify(S.basket),skip_meta:$('#rsMeta')&&$('#rsMeta').checked?1:0});el.textContent=`Selected: ${r.files.toLocaleString()} files · ${human(r.bytes)}`}catch(e){el.textContent='Selected: '+S.basket.length+' item(s)'}},300)}
 function shareRows(){const rows=[];S.basket.forEach(b=>{let r=rows.find(x=>x.share===b.share);if(!r){r={share:b.share,paths:[]};rows.push(r)}r.paths.push(b.path)});return rows}
-function addBasket(r){const it={share:r.share,ver:S.ver,path:r.path,is_dir:r.is_dir?1:0,name:r.name||r.path.split('/').pop()};if(S.basket.some(b=>b.share===it.share&&b.ver===it.ver&&b.path===it.path))return;S.basket.push(it);localStorage.setItem('basket',JSON.stringify(S.basket));renderFlow();if(S.tab==='restore')tabRestore();}
+const itemLabel=it=>`${it.share}/${it.path||''}`;
+function addBasket(r){const it={share:r.share,ver:S.ver,path:r.path,is_dir:r.is_dir?1:0,name:r.name||r.path.split('/').pop()};
+  if(S.basket.some(b=>b.share===it.share&&b.ver===it.ver&&b.path===it.path)){toast(`${itemLabel(it)} is already in the restore selection.`,{actions:[['View selection',()=>openBasket(true)]]});return}
+  S.basket.push(it);localStorage.setItem('basket',JSON.stringify(S.basket));renderFlow(true);if(S.tab==='restore')tabRestore();
+  toast(`${itemLabel(it)} added to the restore · ${S.basket.length} item${S.basket.length===1?'':'s'} selected`,{actions:[['View selection',()=>openBasket(true)],['Undo',()=>removeBasket(it)]]})}
+function removeBasket(it,quiet){const i=S.basket.findIndex(b=>b.share===it.share&&b.ver===it.ver&&b.path===it.path);if(i<0)return;S.basket.splice(i,1);localStorage.setItem('basket',JSON.stringify(S.basket));renderFlow(true);if(S.tab==='restore')tabRestore();
+  if(!quiet)toast(`${itemLabel(it)} removed from the restore · ${S.basket.length} item${S.basket.length===1?'':'s'} selected`,{actions:[['Undo',()=>addBasket(it)]]})}
+// Header button + panel: always visible, lists every selected item with its count and size (per item from /api/restore_count, cached).
+const STATS={};const statKey=it=>`${it.share}|${it.ver}|${it.path}`;
+async function itemStats(it){const k=statKey(it);if(STATS[k])return STATS[k];try{STATS[k]=await api('/api/restore_count',{src:S.src,items:JSON.stringify([it]),skip_meta:1})}catch(e){STATS[k]={files:null,bytes:null}}return STATS[k]}
+function renderBasketBtn(bump){const b=$('#basketBtn');if(!b)return;const n=S.basket.length;const tot=S.basket.reduce((a,it)=>{const s=STATS[statKey(it)];return s&&s.bytes!=null?a+s.bytes:a},0);const known=S.basket.every(it=>STATS[statKey(it)]&&STATS[statKey(it)].bytes!=null);
+  b.textContent=`Restore selection · ${n} item${n===1?'':'s'}`+(n&&known?` · ${human(tot)}`:'');b.classList.toggle('primary',n>0);b.classList.toggle('ghost',n===0);if(bump){b.classList.remove('pulse');void b.offsetWidth;b.classList.add('pulse')}}
+async function renderBasketPanel(){const rows=$('#basketRows');if(!$('#basketPanel').classList.contains('open'))return;
+  if(!S.basket.length){rows.innerHTML='<p class="muted" style="margin:6px 0">Nothing selected yet. Use the + buttons under Folders or Search, or the tree in the Restore tab.</p>';$('#basketSum').textContent='';return}
+  rows.innerHTML=`<table>${S.basket.map((it,i)=>`<tr><td class="mono">${esc(itemLabel(it))}${it.is_dir?'':' <span class="muted">(file)</span>'}</td><td class="muted" id="bst${i}">…</td><td><button class="x" data-i="${i}" title="Remove">✕</button></td></tr>`).join('')}</table>`;
+  $$('#basketRows .x').forEach(b=>b.onclick=()=>removeBasket(S.basket[+b.dataset.i]));
+  const snap=S.basket.slice();let files=0,bytes=0,all=true;
+  for(let i=0;i<snap.length;i++){const s=await itemStats(snap[i]);const el=$(`#bst${i}`);if(el)el.textContent=s.files==null?'?':`${s.files.toLocaleString()} files · ${human(s.bytes)}`;if(s.files==null)all=false;else{files+=s.files;bytes+=s.bytes}}
+  $('#basketSum').textContent=all?`${files.toLocaleString()} files · ${human(bytes)}`:'';renderBasketBtn()}
+function openBasket(open){const p=$('#basketPanel');p.classList.toggle('open',open===undefined?!p.classList.contains('open'):open);if(p.classList.contains('open'))renderBasketPanel()}
+$('#basketBtn').onclick=()=>openBasket();$('#basketClear').onclick=()=>{if(!S.basket.length)return;const old=S.basket.slice();S.basket=[];localStorage.setItem('basket','[]');renderFlow(true);if(S.tab==='restore')tabRestore();renderBasketPanel();toast('Restore selection cleared',{actions:[['Undo',()=>{S.basket=old;localStorage.setItem('basket',JSON.stringify(S.basket));renderFlow(true);if(S.tab==='restore')tabRestore();renderBasketPanel()}]]})};
+$('#basketGo').onclick=()=>{openBasket(false);showTab('restore');const s=$('#snap');if(s)s.scrollIntoView({behavior:'smooth'})};
+document.addEventListener('click',e=>{const p=$('#basketPanel');if(p.classList.contains('open')&&!p.contains(e.target)&&e.target!==$('#basketBtn')&&!e.target.closest('.toast'))p.classList.remove('open')});
 async function tabRestore(){const el=$('#tab-restore');
   let pool={};try{pool=await api('/api/pool',{src:S.src})}catch(e){pool={error:e.message}}
   const mapped=pool.mapped_buckets||0,total=pool.total_buckets||0;const pct=total?Math.round(100*mapped/total):0;const mapOk=total&&mapped>=total;
@@ -529,14 +584,14 @@ async function tabRestore(){const el=$('#tab-restore');
   showSaved();
   $('#rsPlan').onclick=async()=>{$('#rsPlanOut').textContent='counting…';await checkAll()};
   $('#rsGo').onclick=async()=>{const its=items();const dest=oneMode()?oneDest():'';
-    if(!oneMode()&&its.some(x=>!x.dest)){alert('Choose a target for every shared folder in step 4.');return}
-    const chk=await checkAll();if(chk.bad){alert('Fix the marked targets in step 4 first.');return}
+    if(!oneMode()&&its.some(x=>!x.dest)){toast('Choose a target for every shared folder in step 4.',{kind:'warn'});return}
+    const chk=await checkAll();if(chk.bad){toast('Fix the marked targets in step 4 first.',{kind:'warn'});return}
     if(chk.nonEmpty&&!confirm(`${chk.nonEmpty} target folder${chk.nonEmpty>1?'s':''} already ${chk.nonEmpty>1?'have':'has'} files. Files already there are skipped and nothing is deleted. Continue?`))return;
     try{const j=await post('/api/restore',{src:S.src,dest,items:its,skip_meta:$('#rsMeta').checked});
       showSaved();
       pollJob(j.id,$('#rsProg'),job=>{showSaved();$('#rsProg').innerHTML+=`<p><b>${job.result&&job.result.paused?'Paused':'Done'}:</b> ${job.result?`${job.result.restored} restored · ${job.result.skipped} skipped · ${job.result.errors} errors · ${human(job.result.bytes)}`:esc(job.error||'')}</p>`;
         if(job.errors&&job.errors.length)$('#rsErrors').innerHTML=`<h4 style="font-size:12px;color:var(--muted)">Errors (${job.errors.length})</h4><div class="tablewrap"><table>${job.errors.slice(0,500).map(e=>`<tr><td class="mono">${esc(e.path)}</td><td>${esc(e.error)}</td></tr>`).join('')}</table></div>`},true)}
-    catch(e){alert(e.message)}};}
+    catch(e){toastError(e)}};}
 // Sleep that also ends when the window becomes visible or focused again: while the user is in the browser (Google sign-in) the
 // embedded WebKit view throttles timers, so a plain setTimeout chain may not resume for a long time.
 const sleepOrWake=ms=>new Promise(res=>{let t=null;const done=()=>{clearTimeout(t);document.removeEventListener('visibilitychange',done);window.removeEventListener('focus',done);res()};t=setTimeout(done,ms);document.addEventListener('visibilitychange',done);window.addEventListener('focus',done)});
@@ -585,7 +640,7 @@ async function wsList(){if(WS.busy)return;WS.busy=true;const lst=$('#wsList');ls
 $('#wsUp').onclick=()=>{if(WS.busy)return;const p=WS.path.replace(/\/$/,'');WS.path=p.includes('/')?p.slice(0,p.lastIndexOf('/')):(WS.remote?'':'/');wsList()};$('#wsGoPath').onclick=()=>{if(WS.busy)return;WS.path=$('#wsPath').value;wsList()};
 $('#wsNext').onclick=async()=>{
   if(WS.step===1){const k=WS.kind;
-    if(k==='existing'){WS.remote=$('#wsRem').value;if(!WS.remote){alert('No remote selected');return}WS.path=''}
+    if(k==='existing'){WS.remote=$('#wsRem').value;if(!WS.remote){toast('Choose a connection first.',{kind:'warn'});return}WS.path=''}
     else if(k==='local'){WS.remote='';WS.path='~'}
     else{const q=k==='drive'?{kind:'drive',name:$('#wsDName').value,client_id:$('#wsCid').value.trim(),client_secret:$('#wsCsec').value.trim()}:{kind:'smb',name:$('#wsSName').value,host:$('#wsHost').value.trim(),user:$('#wsUser').value.trim(),password:$('#wsPass').value};
       $('#wsConn').textContent=k==='drive'?'A browser window opens for the Google sign-in. When it shows “Success! All done”, close it and come back to this window…':'Connecting…';$('#wsNext').disabled=true;
@@ -599,9 +654,9 @@ $('#wsNext').onclick=async()=>{
     WS.step=2;wsShow();wsList();return}
   if(WS.step===2){if(WS.busy)return;$('#wsBusy').style.display='inline-flex';$('#wsBusyText').textContent='Checking the folder…';$('#wsNext').disabled=true;
     let r;try{r=await api('/api/rclone/ls',{remote:WS.remote,path:WS.path})}catch(e){r={error:e.message}}finally{$('#wsBusy').style.display='none';$('#wsNext').disabled=false}
-    if(r.error){alert(r.error);return}
+    if(r.error){toastError(r.error);return}
     // Standing in the folder above the backup: one backup found means that is the one; several means pick one first.
-    if(!r.looks_like_hbk&&r.hbk_dirs.length===1){WS.path=wsInto(r.hbk_dirs[0]);r=await api('/api/rclone/ls',{remote:WS.remote,path:WS.path});if(r.error){alert(r.error);return}}
+    if(!r.looks_like_hbk&&r.hbk_dirs.length===1){WS.path=wsInto(r.hbk_dirs[0]);r=await api('/api/rclone/ls',{remote:WS.remote,path:WS.path});if(r.error){toastError(r.error);return}}
     else if(!r.looks_like_hbk&&r.hbk_dirs.length>1){await wsList();$('#wsHint').innerHTML='<b>Several backups found here: click the one to use.</b>';return}
     if(!r.looks_like_hbk){if(!confirm('This is not a Hyper Backup folder (no Config and Pool inside). Pick the folder whose name ends in .hbk, or use this folder only if it is a partial copy.\n\nUse this folder anyway?'))return}
     const base=(WS.path.replace(/\/$/,'').split('/').pop()||'backup');$('#nName').value=WS.remote?`${base} on ${WS.remote.replace(':','')}`:base;
@@ -609,7 +664,7 @@ $('#wsNext').onclick=async()=>{
     $('#wsSummary').textContent=WS.remote?`Metadata is fetched on demand from ${WS.remote}${WS.path} into the cache folder; bucket data only when restoring.`:`The backup is read directly from ${WS.path}.`;
     WS.step=3;wsShow();return}
   try{const body=WS.remote?{name:$('#nName').value||'backup',local:$('#nLocal').value,remote:WS.remote+WS.path}:{name:$('#nName').value||'backup',local:WS.path,remote:null};
-    const s=await post('/api/sources',body);$('#dlgSrc').close();localStorage.setItem('src',s.id);loadSources()}catch(e){alert(e.message)}};
+    const s=await post('/api/sources',body);$('#dlgSrc').close();localStorage.setItem('src',s.id);loadSources()}catch(e){toastError(e)}};
 loadSources();
 </script>
 </body>
