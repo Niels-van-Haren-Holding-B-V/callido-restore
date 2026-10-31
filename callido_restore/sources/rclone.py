@@ -312,6 +312,28 @@ def ls(path, dirs_only=False, files_only=False, recurse=False, max_depth=None, n
     return json.loads(_run(args + [path], timeout=timeout) or "[]")
 
 
+def smb_host(raw):
+    """The NAS host from what a person types: "nas", "192.0.2.10", or the Windows / Finder forms "\\\\nas", "\\\\nas\\share",
+    "//nas/share", "smb://nas/share" (Windows users copy the address from File Explorer). rclone's smb backend wants the bare host;
+    the share is picked afterwards from the listing. "" when nothing usable is left."""
+    h = (raw or "").strip()
+    if h.lower().startswith("smb://"): h = h[6:]
+    h = h.lstrip("\\/")
+    for sep in ("\\", "/"): h = h.split(sep, 1)[0]
+    if "@" in h: h = h.rsplit("@", 1)[1]                  # smb://user@nas: the user has its own field
+    return h.strip()
+
+def with_elapsed(job, message, fn, every=1.0):
+    """Run ``fn()`` while ``job["message"]`` shows ``message`` plus the seconds so far ("Listing the shares on nas… 7 s"), so a
+    slow first rclone start (a clean Windows install scans the exe) or a slow NAS never looks like a hang. Returns fn's result."""
+    t0 = time.time(); done = threading.Event()
+    def tick():
+        while not done.wait(every): job["message"] = f"{message} {int(time.time() - t0)} s"
+    job["message"] = message
+    threading.Thread(target=tick, daemon=True).start()
+    try: return fn()
+    finally: done.set()
+
 def remotes(cache=False):
     """[(name_with_colon, type)] of the configured remotes. ``cache=True``: a repeat within CACHE_TTL seconds is free."""
     if cache: return _cached(("remotes",), lambda: remotes())
