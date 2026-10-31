@@ -378,12 +378,15 @@ def resolve_and_place(writers, anchors, counts, log=print, max_bucket=None):
 
 def export_map(writers, owner, placements, counts, outdir, mapped_upto, flags=None, report=None):
     """poolmap2.json for PoolReader: owners, entry counts, per-record placement segments and id ranges; ``guessed`` lists
-    the records placed without a byte check and ``aliased`` the copies restored from another record's entries (both
-    keyed by set -> [rec_off]); ``stats`` is the placer's report."""
+    the records placed without a byte check (set -> [rec_off]) and ``aliased`` the copies restored from another record's
+    entries (set -> [[rec_off, source set, source rec_off], ...], the source null for a copy of an untagged original);
+    ``stats`` is the placer's report."""
     out = {"buckets": {str(b): w for b, w in owner.items()}, "counts": {str(b): counts[b] for b in owner}, "placements": {}, "ranges": {}, "mapped_upto": mapped_upto}
     flags = flags or {}
-    for key in ("guessed", "aliased"):
-        out[key] = {str(SET_OF_WRITER[w]): sorted(writers[w][ri].off for (ww, ri) in flags.get(key, ()) if ww == w) for w in range(4)}
+    out["guessed"] = {str(SET_OF_WRITER[w]): sorted(writers[w][ri].off for (ww, ri) in flags.get("guessed", ()) if ww == w) for w in range(4)}
+    al = flags.get("aliased", {}); al = al if isinstance(al, dict) else {k: None for k in al}
+    out["aliased"] = {str(SET_OF_WRITER[w]): sorted([writers[w][ri].off] + ([SET_OF_WRITER[src[0]], writers[src[0]][src[1]].off] if src else [None, None])
+                                                     for (ww, ri), src in al.items() if ww == w) for w in range(4)}
     if report is not None: out["stats"] = {k: v for k, v in dict(report).items()}
     for w in range(4):
         s = SET_OF_WRITER[w]; recs = writers[w]

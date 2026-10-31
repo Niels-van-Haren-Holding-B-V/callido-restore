@@ -19,6 +19,8 @@ from callido_restore.restore.destination import restore_roots
 from callido_restore.sources.source import Source
 from callido_restore.sources.source import is_remote_path
 
+UNVERIFIED_MAX = 2000        # unverified files listed per job (like errors); the counts are complete
+
 class Backup:
     def __init__(self, src: Source, log=None):
         """log(message) is called at every step of the scan, so a job can show progress (the first open of a remote backup
@@ -479,6 +481,7 @@ class Backup:
             jf.write_text(json.dumps({"id": job["id"], "src": self.src.id, "items": items, "dest": dest, "roots": roots, "skip_meta": skip_meta,
                                       "next_index": job.get("next_index", 0), "done_files": job.get("done_files", 0), "skipped": job.get("skipped", 0),
                                       "errors": job.get("errors", [])[-200:], "total_files": job.get("total_files"), "total_bytes": job.get("total_bytes"),
+                                      "verified": job.get("verified", 0), "identical_copy": job.get("identical_copy", 0), "unverified": job.get("unverified", [])[:UNVERIFIED_MAX],
                                       "done_bytes": job.get("done_bytes", 0), "state": state, "label": job["label"], "started": job["started"], "updated": time.time()}))
         roots = restore_roots(items, dest)                       # every folder written into, local paths or rclone remotes
         existing = {}                                            # remote root -> files already there (never written over)
@@ -491,7 +494,24 @@ class Backup:
         files = self.restore_plan(items, skip_meta)
         total_bytes = sum(f["size"] for f in files); done_bytes = 0
         job["total_files"] = len(files); job["total_bytes"] = total_bytes; job["done_files"] = 0; job["errors"] = []; job["skipped"] = 0
+        job["verified"] = 0; job["identical_copy"] = 0; job["unverified"] = []      # per restored file: how its placement was established
         pool = self.pool; fh_cache = {}
+        def restored(f):
+            """count the file as restored by how the map established its placement (PoolReader.verification): "verified" = the
+            placement of every record the file reads from matched the file sizes when the map was built and each chunk's md5 was
+            checked on read (not a file-level checksum); "identical_copy" = restored from an identical record's entries;
+            "unverified" = listed with the reason"""
+            job["done_files"] += 1
+            st, why = ("verified", "") if f["off"] is not None and f["off"] < 0 else ("unverified", "the pool map gives no status")
+            if f["off"] is not None and f["off"] >= 0 and hasattr(pool, "verification"):
+                try: st, why = pool.verification(f["off"])
+                except Exception as e: st, why = "unverified", f"status check failed: {e}"
+            if st == "verified": job["verified"] += 1
+            elif st == "identical_copy": job["identical_copy"] += 1
+            elif len(job["unverified"]) < UNVERIFIED_MAX: job["unverified"].append({"path": f"{f['share']}/{f['path']}", "reason": why})
+        def result(**extra):
+            return {**extra, "restored": job["done_files"], "skipped": job["skipped"], "errors": len(job["errors"]), "verified": job["verified"],
+                    "identical_copy": job["identical_copy"], "unverified": len(job["unverified"])}
         # --- bucket prefetch (parallel downloads ahead of the extractor) + LRU eviction of downloaded bucket data
         import concurrent.futures, threading
         cache_limit = int(os.environ.get("HBK_CACHE_GB", "20")) * (1 << 30)
@@ -546,7 +566,7 @@ class Backup:
             for i, f in enumerate(files):
                 if i < start_at: done_bytes += f["size"]; continue
                 if job.get("cancel"):
-                    job["message"] = "paused"; persist("paused"); return {"paused": True, "next_index": i, "restored": job["done_files"], "skipped": job["skipped"], "errors": len(job["errors"]), "bytes": done_bytes}
+                    job["message"] = "paused"; persist("paused"); return result(paused=True, next_index=i, bytes=done_bytes)
                 if i % 10 == 0:
                     for bk in [k for k, fut in pending.items() if fut.done()]: pending.pop(bk)
                     prefetch_from(i); evict()
@@ -574,14 +594,14 @@ class Backup:
                         if r.returncode != 0: raise RuntimeError("upload failed: " + r.stderr.strip()[-200:])
                         if os.path.exists(out):      # not moved: the target already had it
                             os.unlink(out); job["skipped"] += 1; job["done_files"] += 1; break
-                        job["done_files"] += 1; break
+                        restored(f); break
                     if os.path.lexists(out):         # anything already there is kept as is, whatever its size or date
                         job["skipped"] += 1; job["done_files"] += 1; break
                     tmp = os.path.join(stage[root], rel); os.makedirs(os.path.dirname(tmp), exist_ok=True)
                     pool.extract(f["off"], tmp, size=f["size"], mtime=f["mtime"], job=None, fh_cache=fh_cache)
                     if not place_file(tmp, out):     # appeared since the check above: kept, counted as skipped
                         job["skipped"] += 1; job["done_files"] += 1; break
-                    job["done_files"] += 1; break
+                    restored(f); break
                   except Exception as e:
                     if attempt < 2 and not isinstance(e, KeyError):      # KeyError = chunk not in pool map: retrying will not help
                         job["message"] = f"{f['share']}/{f['path']}: {e} — retrying"; time.sleep([2, 10][attempt]); continue
@@ -599,7 +619,7 @@ class Backup:
                 if not is_remote_path(root): shutil.rmtree(st, ignore_errors=True)
             if remote_stage: shutil.rmtree(remote_stage, ignore_errors=True)
         job["progress"] = 1.0; job["next_index"] = len(files); persist("done")
-        return {"files": len(files), "restored": job["done_files"], "skipped": job["skipped"], "errors": len(job["errors"]), "bytes": done_bytes}
+        return result(files=len(files), bytes=done_bytes)
 
     # --- content extraction (small files stored in Pool/file_pool/<n>.file)
     def extract(self, share, ver, fid, job=None):

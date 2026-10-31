@@ -47,6 +47,7 @@ except Exception:  # pure python fallback (slow)
 SLICE = 8388608
 BLOCK = 2260
 REC_MAGIC = 0xa93b0200
+TAGK = 9                                        # version_list.tag covers a file's first TAGK chunks at most
 SET_OF_WRITER = {0: 4, 1: 3, 2: 1, 3: 2}      # writer w's records live in file_chunk<set>.index
 WRITER_OF_SET = {v: k for k, v in SET_OF_WRITER.items()}
 
@@ -362,7 +363,7 @@ class PoolReader:
     def __init__(self, source, pool_dir, log=None):
         self.src, self.pool_dir = source, pool_dir
         self.vf = VirtualFileIndex(source); self.recs = ChunkRecords(source)
-        self.map = None; self.idx_cache = collections.OrderedDict(); self.names = None; self.v1 = self.v2 = False; self.counts = {}
+        self.map = None; self.idx_cache = collections.OrderedDict(); self.names = None; self.v1 = self.v2 = False; self.counts = {}; self.guessed = {}; self.aliased = {}
         self.load_map()
     # --- map
     def load_map(self):
@@ -419,9 +420,45 @@ class PoolReader:
             lst = sorted(lst); self.rng2[int(s)] = ([x[0] for x in lst], [x[1] for x in lst], [x[2] for x in lst])
             rr = self.recrng[int(s)] = {}
             for a, L, ro in lst: rr.setdefault(ro, []).append((a, L))
-        self.guessed = {int(s): set(v) for s, v in d.get("guessed", {}).items()}     # records placed without tag evidence
+        self.guessed = {int(s): set(v) for s, v in d.get("guessed", {}).items()}     # records placed without a size check
+        # copies restored from another record's entries: rec_off -> (source set, source rec_off) or None (untagged original)
+        self.aliased = {int(s): {(x[0] if isinstance(x, list) else x): ((x[1], x[2]) if isinstance(x, list) and x[1] is not None else None) for x in v}
+                        for s, v in d.get("aliased", {}).items()}
         self.map = d; self.mapped_upto = d.get("mapped_upto", 0)
         return True
+    def _rec_status(self, s, ro, n_chunks, seen):
+        """status of one record's placement: "verified" (its entries matched its size when the map was built, chunk md5s are
+        checked on read), "identical_copy" (stored nothing; the tag covers all its chunks and the record it copies is verified),
+        else "unverified" with a reason"""
+        if (s, ro) in seen: return "verified", ""
+        seen.add((s, ro))
+        if ro in self.aliased.get(s, {}):
+            src = self.aliased[s][ro]
+            if src is None or n_chunks > TAGK: return "unverified", "partial copy"       # same start and size as another record; the rest unchecked
+            st, why = self._rec_status(src[0], src[1], n_chunks, seen)
+            return ("identical_copy", "") if st == "verified" else ("unverified", "restored from a copy that is itself " + (why or "unverified"))
+        if ro in self.guessed.get(s, ()) or ro not in self.place2.get(s, {}): return "unverified", "placed without a size check"
+        return "verified", ""
+    def verification(self, off):
+        """(status, reason) for a pooled file: how the map established the placement of its own record and of every record it
+        reads chunks from through dedup references (the worst one wins). "verified" means the placement matched the file size
+        when the map was built and every chunk's md5 is checked when read; it is not a file-level checksum. "identical_copy":
+        the record stored nothing, the tag covers all its chunks and the record it copies is verified. Files in the file pool
+        are stored whole."""
+        if off < 0: return "verified", ""
+        if not self.v2: return "unverified", "located through the v1 map"
+        e = self.vf.entry(off); s, ro = e["set"], e["rec_off"]; ids = self.recs.record(s, ro)["ids"]
+        seen = set(); st, why = self._rec_status(s, ro, len(ids), seen)
+        if st == "unverified": return st, why
+        own = self.recrng.get(s, {}).get(ro, []); starts = [a for a, L in own]; lens = [L for a, L in own]
+        for g in ids:
+            i = bisect.bisect_right(starts, g) - 1
+            if i >= 0 and g < starts[i] + lens[i]: continue                   # the record's own chunk
+            x = self._rec_of_id(g)
+            if x is None: return "unverified", "reads a chunk that no record stores"
+            st2, why2 = self._rec_status(x[0], x[1], TAGK + 1, seen)         # a referenced record is never an identical copy
+            if st2 != "verified": return "unverified", "reads chunks from a record that is " + (why2 or "unverified")
+        return st, why
     def _rec_of_id(self, g):
         for s, (st, ln, ro) in self.rng2.items():
             i = bisect.bisect_right(st, g) - 1

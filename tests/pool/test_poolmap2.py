@@ -1,5 +1,6 @@
 """Pool map v2: new_range, the tag-anchored mapper (try_assign / probe undo / guessed records) and PoolReader's v2 map with v1 fallback."""
 import hashlib, json, os, struct, tempfile, unittest
+from unittest import mock
 from pathlib import Path
 
 from callido_restore.pool import poolmap2
@@ -132,6 +133,26 @@ class ReaderMaps(unittest.TestCase):
         self.assertEqual(r.locate(1001), (7, 1))                 # served by v2
         self.assertEqual(r.locate(5000), (9, 5000 - 2 * BLOCK))  # not in v2, served by v1
         self.assertEqual(r.counts, {7: 2, 8: 5, 9: 1000})
+
+    def test_verification_covers_every_record_the_file_reads_from(self):
+        # records (set 4): 100 clean (ids 1000-1002), 110 clean but reads id 1001 from 100, 120 reads id 2001 from the guessed record 200,
+        # 300 a copy of 100 (3 chunks, tag covers all), 310 a copy of 400 which reads from 200, 320 a long copy (10 chunks), 330 copy of an untagged original
+        v2 = dict(self.v2)
+        v2["ranges"] = {"4": [[1000, 3, 100], [1100, 1, 110], [1200, 1, 120], [2000, 3, 200], [1400, 1, 400]]}
+        v2["placements"] = {"4": {"100": [[7, 0, 3]], "110": [[8, 0, 1]], "120": [[8, 1, 1]], "200": [[8, 2, 3]], "300": [[7, 0, 3]], "310": [[8, 1, 1]], "320": [[7, 0, 3]], "330": [[7, 1, 2]], "400": [[8, 1, 1]]}}
+        v2["guessed"] = {"4": [200]}; v2["aliased"] = {"4": [[300, 4, 100], [310, 4, 400], [320, 4, 100], [330, None, None]]}
+        pool.dump_json(os.path.join(self.pool, "poolmap2.json"), v2)
+        r = pool.PoolReader(_Src(self.pool), self.pool); r.load_map2(os.path.join(self.pool, "poolmap2.json"))
+        ids = {100: [1000, 1001, 1002], 110: [1100, 1001], 120: [1200, 2001], 200: [2000, 2001, 2002], 300: [1000, 1001, 1002], 310: [1400, 2001], 320: list(range(10)), 330: [5, 6], 400: [1400, 2001]}
+        r.vf = mock.Mock(); r.vf.entry = lambda off: {"set": 4, "rec_off": off}; r.recs = mock.Mock(); r.recs.record = lambda s, ro: {"ids": ids.get(ro, [9999])}
+        self.assertEqual(r.verification(100), ("verified", "")); self.assertEqual(r.verification(110), ("verified", ""))
+        self.assertEqual(r.verification(120), ("unverified", "reads chunks from a record that is placed without a size check"))
+        self.assertEqual(r.verification(200), ("unverified", "placed without a size check"))
+        self.assertEqual(r.verification(300), ("identical_copy", ""))
+        self.assertEqual(r.verification(310), ("unverified", "reads chunks from a record that is placed without a size check"))   # its source reads from the guessed one
+        self.assertEqual(r.verification(320), ("unverified", "partial copy")); self.assertEqual(r.verification(330), ("unverified", "partial copy"))
+        self.assertEqual(r.verification(-5), ("verified", "")); self.assertEqual(r.verification(999)[0], "unverified")
+        r.v2 = False; self.assertEqual(r.verification(100), ("unverified", "located through the v1 map"))      # a v1-only map
 
     def test_dump_json_atomic(self):
         p = os.path.join(self.pool, "x.json"); pool.dump_json(p, [1]); self.assertEqual(pool.load_json(p), [1]); self.assertEqual(os.listdir(self.pool), ["x.json"])

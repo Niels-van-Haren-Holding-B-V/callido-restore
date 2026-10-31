@@ -131,6 +131,38 @@ class RestoreLoopLocal(unittest.TestCase):
         self.assertEqual(sorted(os.listdir(self.dest)), ["share"])
 
 
+class RestoreVerification(RestoreLoopLocal):
+    """Every restored file is counted by how the map established its placement: verified, identical_copy or unverified (listed
+    with a reason, capped like errors); skipped files are not counted; the counts go to the result and the persisted job."""
+    def test_statuses_counted_and_listed(self):
+        b = _fake_backup(self.dest, [("v.txt", 3, 1700000000), ("c.txt", 2, 1700000001), ("u.txt", 4, 1700000002), ("p.txt", 1, 1700000003), ("s.txt", 1, 1700000004)])
+        files = b.restore_plan(None); files[0]["off"] = 10; files[1]["off"] = 20; files[2]["off"] = 30; files[4]["off"] = 50     # p.txt stays in the file pool (off < 0)
+        b.restore_plan = lambda items, skip_meta=True: [dict(f) for f in files]
+        b._fake_pool.verification = lambda off: {10: ("verified", ""), 20: ("identical_copy", ""), 30: ("unverified", "placed without a size check"), 50: ("verified", "")}[off]
+        Path(self.dest, "share", "s.txt").write_bytes(b"OLD")                          # skipped: no status
+        job = {"id": "t9", "label": "restore", "started": 0.0}
+        res = b.restore([{"share": "share", "ver": 1, "path": "", "is_dir": True}], self.dest, job)
+        self.assertEqual((res["restored"], res["skipped"], res["verified"], res["identical_copy"], res["unverified"]), (5, 1, 2, 1, 1))
+        self.assertEqual(job["unverified"], [{"path": "share/u.txt", "reason": "placed without a size check"}])
+        saved = json.loads((Path(self.d) / "jobs" / "t9.json").read_text())
+        self.assertEqual((saved["verified"], saved["identical_copy"], saved["unverified"]), (2, 1, job["unverified"]))
+
+    def test_pool_without_verification_counts_unverified(self):
+        b = _fake_backup(self.dest, [("a.txt", 5, 1700000000), ("f.txt", 1, 1700000001)])      # _FakePool has no verification(): nothing is claimed
+        files = b.restore_plan(None); files[0]["off"] = 7; b.restore_plan = lambda items, skip_meta=True: [dict(f) for f in files]
+        job = {"id": "t8", "label": "restore", "started": 0.0}
+        res = b.restore([{"share": "share", "ver": 1, "path": "", "is_dir": True}], self.dest, job)
+        self.assertEqual((res["verified"], res["identical_copy"], res["unverified"]), (1, 0, 1)); self.assertEqual(job["unverified"][0], {"path": "share/a.txt", "reason": "the pool map gives no status"})
+
+    def test_status_check_failure_is_reported_not_hidden(self):
+        b = _fake_backup(self.dest, [("a.txt", 5, 1700000000)]); files = b.restore_plan(None); files[0]["off"] = 7
+        b.restore_plan = lambda items, skip_meta=True: [dict(f) for f in files]
+        def boom(off): raise KeyError("record 7 not placed")
+        b._fake_pool.verification = boom
+        res = b.restore([{"share": "share", "ver": 1, "path": "", "is_dir": True}], self.dest, {"id": "t7", "label": "restore", "started": 0.0})
+        self.assertEqual((res["restored"], res["unverified"], res["errors"]), (1, 1, 0))
+
+
 class RestoreLoopTwoLocalRoots(unittest.TestCase):
     """H8 on the restore-loop path: two shares to two local roots. Each root gets its own staging folder (same filesystem for
     place_file), files land at <root>/<path in share> with no wrapper folder, existing files are kept per root, and only this
