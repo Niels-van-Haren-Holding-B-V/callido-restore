@@ -19,8 +19,9 @@ def start_job(fn, label, **extra):
             job["result"] = fn(job); job["state"] = "done"
             if not (isinstance(job["result"], dict) and job["result"].get("stopped")): job["progress"] = 1.0
         except Exception as e:
-            job["state"] = "error"; job["error"] = f"{e}"; job["trace"] = traceback.format_exc()
-            # app.log (stdout in the packaged app): a failed connect or open used to leave no trace there at all
+            # app.log (stdout in the packaged app): a failed connect or open used to leave no trace there at all.
+            # Logged before the state flips, so whoever sees "error" also finds the line.
             _log(f"job {label!r} failed after {time.time() - job['started']:.0f} s: {e}")
+            job["error"] = f"{e}"; job["trace"] = traceback.format_exc(); job["state"] = "error"
     threading.Thread(target=run, daemon=True).start()
     return job
