@@ -266,8 +266,12 @@ function etaText(id,frac,doneBytes,totalBytes){const now=Date.now();const e=ETA[
   const [t1,f1,b1]=e.s[0],[t2,f2,b2]=e.s[e.s.length-1];if(t2-t1<4000)return '';let left=null;
   if(totalBytes&&b2>b1)left=(totalBytes-b2)/((b2-b1)/((t2-t1)/1000));else if(f2>f1)left=(1-f2)/((f2-f1)/((t2-t1)/1000));
   if(left==null||!isFinite(left)||left<0)return '';if(left<60)return 'less than a minute left';if(left<3600)return `about ${Math.round(left/60)} min left`;return `about ${(left/3600).toFixed(1)} h left`}
+// Download speed from the done_bytes deltas of the last ~10 s of polls (client-side only); '' until two samples 3 s apart exist.
+function speedText(id){const e=ETA[id];if(!e||e.s.length<2)return '';const now=Date.now();const recent=e.s.filter(x=>now-x[0]<=10000);if(recent.length<2)return '';
+  const [t1,,b1]=recent[0],[t2,,b2]=recent[recent.length-1];if(t2-t1<3000||b2<=b1)return '';return human((b2-b1)/((t2-t1)/1000))+'/s'}
 function progressHtml(job,rich,extra){const pct=Math.round((job.progress||0)*100);const eta=job.state==='running'?etaText(job.id,job.progress||0,job.done_bytes,job.total_bytes):'';
-  const moved=!rich&&job.total_bytes?` · ${human(job.done_bytes||0)} of ${human(job.total_bytes)} downloaded`:'';
+  const spd=job.state==='running'&&job.total_bytes?speedText(job.id):'';
+  const moved=!rich&&job.total_bytes?` · ${human(job.done_bytes||0)} of ${human(job.total_bytes)} downloaded${spd?' · '+spd:''}`:'';
   return `<div class="progress"><div class="meta"><span>${esc(job.message||'')}</span><span class="eta">${pct}%${moved}${eta?' · '+eta:''}${extra?' ':''}${extra||''}</span></div><div class="prog"><i style="width:${pct}%"></i></div>${rich&&job.total_files!=null?`<div class="meta muted"><span>${(job.done_files||0).toLocaleString()} / ${(job.total_files||0).toLocaleString()} files · ${human(job.done_bytes||0)} of ${human(job.total_bytes||0)}</span><span>${job.errors&&job.errors.length?`<b style="color:var(--bad)">${job.errors.length} errors</b>`:''}</span></div>`:''}</div>`}
 const octal=m=>m==null?'':(m&0o7777).toString(8).padStart(4,'0');
 const tip=$('#tip');
@@ -536,7 +540,7 @@ async function tabRestore(){const el=$('#tab-restore');
      </details>
      <details class="adv"><summary>Advanced: everything under one folder</summary><div class="row"><label><input type="checkbox" id="wzOne"> put all selected folders under one folder, as <code>&lt;folder&gt;/&lt;share&gt;/&lt;path&gt;</code></label><input id="wzOnePath" placeholder="nas:Restore/restore-${S.ver} or /Volumes/Restore/restore-${S.ver}" style="width:380px"></div></details>
      <details class="adv"><summary>How the data flows</summary><p class="help">Google Drive → this Mac (decompress and verify) → NAS. The Drive download speed is the limit; data blocks are fetched 4 in parallel ahead of the writer and deleted from the Mac after use (cache ≤ 20 GB).</p></details>`,false)+
-  step(5,'Check and start',`<div class="row"><button class="small" id="rsPlan">Count files and size</button><button class="${S.basket.length&&mapOk&&!restoreRun?'primary':''}" id="rsGo" ${S.basket.length&&mapOk&&!restoreRun?'':'disabled'}>${restoreRun?'Restoring…':'Start restore'}</button><span class="help">${mapOk?'':'available once steps 2 and 3 are done · '}nothing at the target is ever overwritten or deleted: files already there are skipped, so an interrupted restore can simply be started again</span></div>
+  step(5,'Check and start',`<div class="row"><button class="small" id="rsPlan">Count files and size</button><button class="${S.basket.length&&mapOk&&!restoreRun?'primary':''}" id="rsGo" ${S.basket.length&&mapOk&&!restoreRun?'':'disabled'}>${restoreRun?'Restoring…':'Start restore'}</button><span class="help">counting needs no preparation, only the restore does${mapOk?'':' (available once steps 2 and 3 are done)'} · nothing at the target is ever overwritten or deleted: files already there are skipped, so an interrupted restore can simply be started again</span></div>
      <div id="rsPlanOut" class="muted" style="margin:6px 0"></div><div id="rsProg"></div><div id="rsErrors"></div><div id="rsSaved" style="margin-top:8px"></div>`,false);
   // wiring
   const wl=$('#wzLatest');if(wl)wl.onclick=()=>selectVersion(latest.id);
