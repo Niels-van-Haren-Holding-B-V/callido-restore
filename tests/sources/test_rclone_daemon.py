@@ -6,13 +6,6 @@ from unittest import mock
 from callido_restore.sources import rclone as rc
 
 
-class SplitPath(unittest.TestCase):
-    def test_remote_and_local(self):
-        self.assertEqual(rc.split_path("gdrive:Synology/x.hbk"), ("gdrive:", "Synology/x.hbk"))
-        self.assertEqual(rc.split_path("nas:"), ("nas:", ""))
-        self.assertEqual(rc.split_path("/Volumes/Backup/x.hbk"), ("/Volumes/Backup/x.hbk", ""))
-
-
 class Fallback(unittest.TestCase):
     """Without a daemon the helpers run the same rclone command lines as before."""
     def setUp(self):
@@ -92,13 +85,16 @@ class ViaDaemon(unittest.TestCase):
             out = rc.ls("gdrive:Synology", files_only=True, max_depth=1)
         self.assertEqual(out[0]["Name"], "x")
         m, p = calls[0]
-        self.assertEqual(m, "operations/list"); self.assertEqual((p["fs"], p["remote"]), ("gdrive:", "Synology"))
+        # the listed folder is the fs and remote is "", so Path is relative to the folder like rclone lsjson (list_destination relies on it)
+        self.assertEqual(m, "operations/list"); self.assertEqual((p["fs"], p["remote"]), ("gdrive:Synology", ""))
         self.assertTrue(p["opt"]["filesOnly"]); self.assertEqual(p["_config"], {"MaxDepth": 1})
 
     def test_remotes_and_version_via_rc(self):
-        answers = {"config/listremotes": {"remotes": ["nas", "gdrive"]}, "config/dump": {"nas": {"type": "smb"}, "gdrive": {"type": "drive"}}, "core/version": {"version": "v1.75.2"}}
+        types = {"nas": {"type": "smb"}, "gdrive": {"type": "drive"}}
+        answers = {"config/listremotes": {"remotes": ["nas", "gdrive"]}, "core/version": {"version": "v1.75.2"}}
+        def fake_rc(m, timeout=None, **p): return types[p["name"]] if m == "config/get" else answers[m]
         with mock.patch.object(type(rc.DAEMON), "running", new_callable=mock.PropertyMock, return_value=True), \
-             mock.patch.object(rc.DAEMON, "rc", side_effect=lambda m, timeout=None, **p: answers[m]):
+             mock.patch.object(rc.DAEMON, "rc", side_effect=fake_rc):
             self.assertEqual(rc.remotes(), [("nas:", "smb"), ("gdrive:", "drive")])
             self.assertEqual(rc.version(), "rclone v1.75.2")
 
@@ -108,12 +104,15 @@ class RealDaemon(unittest.TestCase):
     """Start the real daemon once, list a temp folder through it, stop it."""
     def test_round_trip_on_a_local_folder(self):
         d = tempfile.mkdtemp(); self.addCleanup(shutil.rmtree, d, True)
-        os.makedirs(os.path.join(d, "sub")); open(os.path.join(d, "f.txt"), "w").write("hi")
+        os.makedirs(os.path.join(d, "sub")); open(os.path.join(d, "f.txt"), "w").close()
         self.assertTrue(rc.start(timeout=15)); self.addCleanup(rc.stop)
         self.assertTrue(rc.DAEMON.running)
         names = sorted(e["Name"] for e in rc.ls(d))
         self.assertEqual(names, ["f.txt", "sub"])
         self.assertEqual([e["Name"] for e in rc.ls(d, dirs_only=True)], ["sub"])
+        open(os.path.join(d, "sub", "deep.txt"), "w").close()
+        self.assertEqual([(e["Path"], e["Name"]) for e in rc.ls(os.path.join(d, "sub"))], [("deep.txt", "deep.txt")])   # Path relative to the listed folder
+        self.assertEqual(sorted(e["Path"] for e in rc.ls(d, recurse=True, files_only=True)), ["f.txt", "sub/deep.txt"])
         self.assertTrue(rc.version().startswith("rclone v"))
         with self.assertRaises(rc.RcloneError): rc.ls(os.path.join(d, "nonexistent"))
         rc.stop(); self.assertFalse(rc.DAEMON.running)
