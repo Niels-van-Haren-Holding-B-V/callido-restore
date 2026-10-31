@@ -30,6 +30,8 @@ CLOCK_SLACK = 1.02           # ... and a record counts as too new for a bucket b
 CLOCK_MARGIN = 1000
 PHANTOM_TRIES = 6            # untagged records of a gap tried as "stored nothing" when the gap has no exact solution
 PERIOD_WINDOW, PERIOD_MAX, PERIOD_MIN_PAIRS, PERIOD_AGREE, PERIOD_STEPS = 400, 40, 30, 0.95, 6   # owner-sequence period detection
+MAX_CHUNK = 131072            # largest chunk (ulen) Hyper Backup writes (measured)
+RANGE_MAX_REFS = 16          # a count-only spill may reference at most this many chunks it does not store
 QUAD_CYCLES = (4, 3, 2)      # writers taking quads in turn: four, three or two of them active
 ROUNDS = 6                   # placement rounds: dedup references resolve as the records they point at get placed
 
@@ -318,8 +320,10 @@ def resolve_and_place_v3(writers, anchors, index, log=print, max_bucket=None):
     def search(b, bB, need_c, need_b):
         cands = [(x, counts[x], index.total(x)) for x in window(b, bB)]
         P_ = local_period(b) if bB is not None else None
-        if P_:
-            w_ = claimed.get(b)
+        w_ = claimed.get(b)
+        if P_ and isinstance(w_, int):
+            # Unique within the turn-predicted subset, not over every candidate: "verified" for such a spill means its size
+            # matches exactly under the turn model; a wrong pick would still fail the per-chunk md5 check when it is read.
             sub = [c for c in cands if predicted_owner(c[0], P_) == w_]
             if sub and (need_c or need_b):
                 us, _, nsol, over = _claim_search(sub, need_c, need_b)
@@ -343,6 +347,39 @@ def resolve_and_place_v3(writers, anchors, index, log=print, max_bucket=None):
             c2 = [(x, counts[x], index.total(x)) for x in band(b, bB)]
             if len(cands) < len(c2) <= MAX_CANDIDATES: sol, _, nsol, over = _claim_search(c2, need_c, need_b)
         return sol, nsol, over
+    range_placed = set()
+    def place_by_count(w, ri, b, e, segs, rem):
+        """A spill whose dedup references are not placed yet has no exact own-byte target. Its interior is searched by exact
+        chunk count among the free buckets the writers' turn assigns to it (unique solutions only), and accepted when its bytes
+        lie within what its few references can weigh (size - nd * MAX_CHUNK .. size). Flagged unverified until the end, when
+        the references may be placed and the bytes are checked exactly."""
+        r = W[w][ri]; riB = nxt_anchor.get((w, ri))
+        if riB is None or r.nd > RANGE_MAX_REFS: return False
+        bB, eB = anchor[(w, riB)]
+        if tpos[bB] <= tpos[b] or any(phys[w][x] > 0 and (w, x) not in anchor for x in range(ri + 1, riB)): return False
+        need_c = rem - eB
+        if need_c <= 0: return False
+        cands = [(x, counts[x], index.total(x)) for x in window(b, bB)]
+        subsets = []
+        if quad_rev.get(rev.get(b, 0)) and rev.get(bB) == rev.get(b):
+            must, units = quad_units(b, bB); nc = need_c - sum(counts[x] for x in must)
+            for cyc in QUAD_CYCLES:
+                sub = [(k, c, by) for k, (xs, c, by) in enumerate(units) if (xs[0] // 4 - b // 4) % cyc == 0]
+                us, _, nsol, over = _claim_search(sub, nc, None)
+                if us is not None and nsol == 1 and not over: subsets.append(must + [x for k in us for x in units[k][0]]); break
+        if not subsets:
+            P_ = local_period(b)
+            if P_:
+                sub = [c for c in cands if predicted_owner(c[0], P_) == w]
+                us, _, nsol, over = _claim_search(sub, need_c, None)
+                if us is not None and nsol == 1 and not over: subsets.append(us)
+        if not subsets: return False
+        sol = subsets[0]; full = list(segs) + [(x, 0, counts[x]) for x in sorted(sol, key=tpos.get)] + ([(bB, 0, eB)] if eB else [])
+        by = index.seg_bytes(full)
+        if not (r.size - r.nd * MAX_CHUNK <= by <= r.size): return False
+        for x in sol: claimed[x] = w
+        placements[w][ri] = full; flags["guessed"].add((w, ri)); range_placed.add((w, ri)); R["placed-by-count"] += 1; R["claimed"] += len(sol)
+        return True
     deferred = []
     def place_anchored(w, ri, b, e, final=False):
         n = phys[w][ri]; size = W[w][ri].size
@@ -351,6 +388,7 @@ def resolve_and_place_v3(writers, anchors, index, log=print, max_bucket=None):
         ob = own_bytes(w, ri)
         if size is not None and ob is None:
             if not final: deferred.append((w, ri, b, e)); return
+            if rem and place_by_count(w, ri, b, e, segs, rem): return
             R["dedup-unresolved"] += 1; return
         if rem == 0:
             if ob is not None and index.seg_bytes(segs) != ob: R["size-mismatch"] += 1; return
@@ -405,6 +443,34 @@ def resolve_and_place_v3(writers, anchors, index, log=print, max_bucket=None):
     for (t, e), w, ri in order: place_anchored(w, ri, torder[t], e)
     # ---- D. gaps: records between two placed anchored records of a writer (untagged, tagged with dedup heads, or
     # anchored ones that could not spill) laid out along the writer's buckets when the entries match; verified by bytes.
+    def slide(w, between, seq, sp, b0, e0, bB, eB, avail, need):
+        """Lay out the records between two placed anchors when the writer's buckets there hold `avail - need` leftover entries
+        too: in stream order, each record takes the start in its window [lower bound, avail - what the later records need] where
+        the ulen sum of its entries equals its own bytes; it is placed only when that start is unique. Returns records placed."""
+        path = []; cur, ce = b0, e0
+        while len(path) < avail:
+            room = (eB if cur == bB else counts[cur]); p = index.prefix(cur)
+            for e in range(ce, room): path.append((cur, e, p[e + 1] - p[e]))
+            if cur == bB: break
+            nxt = sp[cur] + 1
+            if nxt >= len(seq): break
+            cur = seq[nxt]; ce = 0
+        if len(path) != avail: return 0
+        cum = [0]
+        for _, _, u in path: cum.append(cum[-1] + u)
+        lo = 0; left = need; n_ok = 0
+        for x in between:
+            n = phys[w][x]; left -= n; ob = own_bytes(w, x)
+            hi = avail - left - n                                           # the latest start that leaves room for the rest
+            if ob is None: lo += n; continue
+            starts = [s0 for s0 in range(lo, hi + 1) if cum[s0 + n] - cum[s0] == ob]
+            if len(starts) != 1: lo = (starts[0] if starts else lo) + n; continue
+            s0 = starts[0]; sg = []
+            for b, e, _ in path[s0:s0 + n]:
+                if sg and sg[-1][0] == b and sg[-1][1] + sg[-1][2] == e: sg[-1] = (b, sg[-1][1], sg[-1][2] + 1)
+                else: sg.append((b, e, 1))
+            placements[w][x] = sg; n_ok += 1; lo = s0 + n
+        return n_ok
     def gap_pass():
         placed_n = 0
         seqs = {w: [b for b in torder if claimed.get(b) == w] for w in W}; spos = {w: {b: i for i, b in enumerate(seqs[w])} for w in W}
@@ -420,7 +486,13 @@ def resolve_and_place_v3(writers, anchors, index, log=print, max_bucket=None):
                 avail = (eB - (e0 + n0)) if i0 == i1 else (counts[b0] - (e0 + n0)) + sum(counts[seqs[w][k]] for k in range(i0 + 1, i1)) + eB
                 need = sum(phys[w][x] for x in between)
                 if avail != need:
-                    if avail > need: R["gap-count-mismatch"] += 1; continue
+                    if avail > need:
+                        # leftover chunks of deleted files sit between records (buckets are never rewritten): slide each record
+                        # to the position where its own bytes match exactly, the only one in its window
+                        n_ok = slide(w, between, seqs[w], spos[w], b0, e0 + n0, bB, eB, avail, need)
+                        placed_n += n_ok; R["gap-slid"] += n_ok
+                        if not n_ok: R["gap-count-mismatch"] += 1
+                        continue
                     obs = [own_bytes(w, x) for x in between]; known = not any(o is None for o in obs)
                     have_b = (index.prefix(b0)[counts[b0]] - index.prefix(b0)[e0 + n0]) + sum(index.total(seqs[w][k]) for k in range(i0 + 1, i1)) + index.prefix(bB)[eB] if i0 != i1 else index.prefix(bB)[eB] - index.prefix(b0)[e0 + n0]
                     win = window(b0, bB); nb = (sum(obs) - have_b) if known else None
@@ -455,7 +527,7 @@ def resolve_and_place_v3(writers, anchors, index, log=print, max_bucket=None):
                     if own_bytes(w, x) is None: flags["guessed"].add((w, x))
         return placed_n
     for rnd in range(ROUNDS):
-        todo, deferred = deferred, []
+        todo, deferred = deferred, []; period_cache.clear()             # owners change between rounds
         for w, ri, b, e in todo: place_anchored(w, ri, b, e, final=(rnd == ROUNDS - 1))
         guard("claims")
         if not gap_pass() and not deferred: break
@@ -494,6 +566,19 @@ def resolve_and_place_v3(writers, anchors, index, log=print, max_bucket=None):
             placements[w][ri] = [(ok[0][0], ok[0][1], n)]; R["placed-multi-by-size"] += 1
             if n > 9 and len(ok) > 1: flags["guessed"].add((w, ri))
         else: R["multi-unplaced"] += 1
+    # spills placed by count: exact bytes now, if their references got placed meanwhile
+    for (w, ri) in sorted(range_placed):
+        ob = own_bytes(w, ri)
+        if ob is not None and index.seg_bytes(placements[w][ri]) == ob: flags["guessed"].discard((w, ri)); R["by-count-verified-later"] += 1
+        elif ob is not None: del placements[w][ri]; flags["guessed"].discard((w, ri)); R["by-count-rejected-later"] += 1
+    # ---- G0. records without chunks of their own (a later version whose every chunk is shared with earlier ones): nothing to
+    # place; the reader takes each chunk from the record that stores it. Counted as placed (an empty segment list) when every
+    # referenced chunk is placed and their bytes add up to the file size exactly.
+    for w in W:
+        for r in W[w]:
+            if r.n or r.idx in placements[w] or r.size is None or not r.dedup: continue
+            if own_bytes(w, r.idx) == 0: placements[w][r.idx] = []; R["placed-all-shared"] += 1
+            else: R["all-shared-unresolved"] += 1
     # ---- G. copies alias their stored record
     for (w, ri), (w2, ri2) in alias.items():
         if ri2 in placements[w2] and W[w][ri].size == W[w2][ri2].size: placements[w][ri] = placements[w2][ri2]; flags["aliased"][(w, ri)] = (w2, ri2); R["aliased"] += 1
