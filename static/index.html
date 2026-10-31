@@ -110,6 +110,7 @@ details.adv summary::-webkit-details-marker{display:none}details.adv summary::be
 details.adv>*:not(summary){margin-top:8px}
 /* restore wizard steps */
 .basket li{display:flex;gap:8px;align-items:center;padding:4px 0}
+.spin{display:inline-block;width:14px;height:14px;border:2px solid var(--line,#d0d0d5);border-top-color:var(--accent,#7c3aed);border-radius:50%;animation:spin .8s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
 .tree{max-height:420px;overflow:auto;border:1px solid var(--line,#e5e5ea);border-radius:8px;padding:6px 8px}
 .tn{display:flex;align-items:center;gap:6px;padding:2px 0;white-space:nowrap}.tn .tog{display:inline-block;width:14px;text-align:center;cursor:pointer;color:var(--muted);user-select:none}.tn .tog.leaf{cursor:default}.tn input{margin:0}.basket{padding-left:0;list-style:none}
 .step{position:relative;padding:14px 18px 14px 56px;border:1px solid var(--line);border-radius:var(--r);background:var(--panel);margin-bottom:10px}
@@ -204,7 +205,7 @@ footer.madeBy img{width:18px;height:18px;border-radius:5px;vertical-align:middle
     <details class="adv"><summary>Advanced</summary><label class="f">Local cache folder on this Mac (metadata and temporarily fetched bucket data land here) <input id="nLocal"></label></details>
     <p class="help" id="wsSummary"></p>
   </div>
-  <div class="row" style="justify-content:flex-end;margin-top:10px"><button id="nCancel" class="ghost">Cancel</button><button id="wsBack" style="display:none">Back</button><button id="wsNext" class="primary">Next</button></div>
+  <div class="row" style="justify-content:flex-end;margin-top:10px"><span id="wsBusy" class="muted" style="display:none;align-items:center;gap:8px"><span class="spin"></span><span id="wsBusyText">Signing in…</span></span><button id="nCancel" class="ghost">Cancel</button><button id="wsBack" style="display:none">Back</button><button id="wsNext" class="primary">Next</button></div>
 </dialog>
 <script>
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
@@ -576,8 +577,9 @@ $('#wsNext').onclick=async()=>{
     else if(k==='local'){WS.remote='';WS.path='~'}
     else{const q=k==='drive'?{kind:'drive',name:$('#wsDName').value,client_id:$('#wsCid').value.trim(),client_secret:$('#wsCsec').value.trim()}:{kind:'smb',name:$('#wsSName').value,host:$('#wsHost').value.trim(),user:$('#wsUser').value.trim(),password:$('#wsPass').value};
       $('#wsConn').textContent=k==='drive'?'A browser window opens for the Google sign-in. When it shows “Success! All done”, close it and come back to this window…':'Connecting…';$('#wsNext').disabled=true;
-      let job;try{const j=await post('/api/rclone/connect',q);job=await waitJob(j.id,m=>{$('#wsConn').textContent=m})}catch(e){job={state:'error',error:e.message}}
-      $('#wsNext').disabled=false;                                   // whatever happened, the user is never stuck on step 1
+      const busy=m=>{$('#wsBusy').style.display='inline-flex';$('#wsBusyText').textContent=m||'Working…';$('#wsConn').textContent=m||''};busy(k==='drive'?'Signing in…':'Connecting…');
+      let job;try{const j=await post('/api/rclone/connect',q);job=await waitJob(j.id,busy)}catch(e){job={state:'error',error:e.message}}
+      $('#wsBusy').style.display='none';$('#wsNext').disabled=false;   // whatever happened, the user is never stuck on step 1
       try{if(job.state==='error'){$('#wsConn').textContent='Failed: '+job.error;return}
         WS.remote=job.result.remote;WS.path='';const sel=$('#wsRem');if(![...sel.options].some(o=>o.value===WS.remote))sel.add(new Option(WS.remote,WS.remote));sel.value=WS.remote;   // the new connection is the selected one from now on
         $('#wsConn').textContent='Connected: '+WS.remote+' — now pick the backup folder on it.'}catch(e){$('#wsConn').textContent=e.message;$('#wsNext').disabled=false;return}

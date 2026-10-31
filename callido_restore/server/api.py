@@ -208,10 +208,11 @@ class H(BaseHTTPRequestHandler):
                     args = [RCLONE, "config", "create", name, "smb", f"host={body.get('host', '')}", f"user={body.get('user', '')}", f"pass={obs}", "--obscure=false", "--non-interactive"]
                 else: return self._json({"error": "unknown kind"}, 400)
                 def run(job):
-                    job["message"] = ("Waiting for the Google sign-in in your browser. When the page says “Success! All done”, close it and come back to this window…"
-                                      if kind == "drive" else "creating the connection…")
+                    job["message"] = ("Signing in… a browser window opens for the Google sign-in. When it says “Success! All done”, close it and come back to this window."
+                                      if kind == "drive" else "Connecting…")
                     r = subprocess.run(args, capture_output=True, text=True, timeout=600)
                     if r.returncode != 0: raise RuntimeError(r.stderr.strip()[-400:] or "rclone config failed")
+                    job["message"] = "Listing your Drive…" if kind == "drive" else "Listing the shares…"     # the root listing can take a while
                     t = subprocess.run([RCLONE, "lsjson", "--no-mimetype", "--dirs-only", f"{name}:"], capture_output=True, text=True, timeout=60)
                     if t.returncode != 0: raise RuntimeError("remote created but listing failed: " + t.stderr.strip()[-300:])
                     shares = [e["Name"] for e in json.loads(t.stdout or "[]")]
