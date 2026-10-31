@@ -261,6 +261,23 @@ const api=async(p,q={})=>{const u=new URL(p,location.origin);Object.entries(q).f
   const key=u.toString();if(CACHEABLE.has(p)){const c=CACHE.get(key);if(c&&Date.now()-c.t<CACHE_TTL)return c.v}
   return track(p,q,async()=>{const r=await fetch(u);const j=await r.json();if(j&&j.error)throw new Error(j.error);if(CACHEABLE.has(p))CACHE.set(key,{t:Date.now(),v:j});return j})};
 const post=async(p,b)=>track(p,b,async()=>{const r=await fetch(p,{method:'POST',body:JSON.stringify(b)});const j=await r.json();if(j.error)throw new Error(j.error);if(p==='/api/rclone/connect')CACHE.clear();return j});
+// Per-file check of a restore (pool map placer v3). "verified" in the result means: the file's place in the backup was confirmed by
+// its size and every block's checksum matched while reading (not a checksum of the whole file). "identical_copy": restored from an
+// identical copy's entries. "unverified": its place in the backup could not be confirmed. Shown only when the result has the counts.
+const CHECKED_HELP='Checked = the file’s place in the backup was confirmed by its size, and every block’s checksum matched while it was read. It is not a checksum of the whole file.';
+// The reasons come from the restore job (callido_restore/restore); every known one gets plain words, an unknown one is shown as is.
+const REASONS={'placed without a size check':'Its location in the backup couldn’t be confirmed','partial copy':'Restored from a matching copy; not fully checked',
+  'reads chunks from a record that is placed without a size check':'Part of it comes from data whose location couldn’t be confirmed','located through the v1 map':'Found with the older, less precise map',
+  'the pool map gives no status':'The map has no check result for it'};
+const plainReason=r=>{if(!r)return 'Its location in the backup couldn’t be confirmed';if(REASONS[r])return REASONS[r];if(r.startsWith('status check failed:'))return 'The check itself failed: '+r.slice('status check failed:'.length).trim();return r};
+function verifyText(r){
+  if(!r)return '';
+  if(r.verified==null&&r.unverified==null&&r.identical_copy==null)return '';
+  const parts=[];
+  if(r.verified!=null)parts.push(`<span title="${esc(CHECKED_HELP)}">${(r.verified||0).toLocaleString()} checked</span>`);
+  if(r.identical_copy)parts.push(`${r.identical_copy.toLocaleString()} from an identical copy`);
+  if(r.unverified)parts.push(`<b style="color:var(--warn)">${r.unverified.toLocaleString()} couldn’t be verified</b>`);
+  return parts.length?' · '+parts.join(' · '):'';}
 // Shown the moment a job-starting button is clicked, before the server answers: a slow first request is not a dead click.
 function pendingBar(el,text){if(el)el.innerHTML=progressHtml({state:'running',progress:0,message:text,started:Date.now()/1000})}
 // Toasts: bottom-right, stacking, 4 s (6 s with actions); used for basket changes and for errors that were modal boxes before.
@@ -587,7 +604,7 @@ async function tabRestore(){const el=$('#tab-restore');
      <details class="adv"><summary>Advanced: everything under one folder</summary><div class="row"><label><input type="checkbox" id="wzOne"> put all selected folders under one folder, as <code>&lt;folder&gt;/&lt;share&gt;/&lt;path&gt;</code></label><input id="wzOnePath" placeholder="nas:Restore/restore-${S.ver} or /Volumes/Restore/restore-${S.ver}" style="width:380px"></div></details>
      <details class="adv"><summary>How the data flows</summary><p class="help">Google Drive → this Mac (decompress and verify) → NAS. The Drive download speed is the limit; data blocks are fetched 4 in parallel ahead of the writer and deleted from the Mac after use (cache ≤ 20 GB).</p></details>`,false)+
   step(5,'Check and start',`<div class="row"><button class="small" id="rsPlan">Count files and size</button><button class="${S.basket.length&&mapOk&&!restoreRun?'primary':''}" id="rsGo" ${S.basket.length&&mapOk&&!restoreRun?'':'disabled'}>${restoreRun?'Restoring…':'Start restore'}</button><span class="help">counting needs no preparation, only the restore does${mapOk?'':' (available once steps 2 and 3 are done)'} · nothing at the target is ever overwritten or deleted: files already there are skipped, so an interrupted restore can simply be started again</span></div>
-     <div id="rsPlanOut" class="muted" style="margin:6px 0"></div><div id="rsProg"></div><div id="rsErrors"></div><div id="rsSaved" style="margin-top:8px"></div>`,false);
+     <div id="rsPlanOut" class="muted" style="margin:6px 0"></div><div id="rsProg"></div><div id="rsUnverified"></div><div id="rsErrors"></div><div id="rsSaved" style="margin-top:8px"></div>`,false);
   // wiring
   const wl=$('#wzLatest');if(wl)wl.onclick=()=>selectVersion(latest.id);
   $('#rsAddAll').onclick=()=>{S.info.shares.filter(x=>x.name!=='@AppConfig').forEach(x=>{if(!S.basket.some(b=>b.share===x.name&&b.ver===S.ver&&b.path===''))S.basket.push({share:x.name,ver:S.ver,path:'',is_dir:1,name:'(share root)'})});localStorage.setItem('basket',JSON.stringify(S.basket));tabRestore()};
@@ -649,7 +666,7 @@ async function tabRestore(){const el=$('#tab-restore');
       $('#wdConn').textContent='Connected: '+job.result.remote+(job.result.shares?' · shares: '+job.result.shares.join(', '):'');setTimeout(tabRestore,800)}
     catch(e){$('#wdConn').textContent=e.message;$('#wdConnect').disabled=false}};
   const showSaved=async()=>{try{const js=await api('/api/jobs/saved');const un=js.filter(j=>j.state!=='done');if(!un.length){$('#rsSaved').innerHTML='';return}
-    $('#rsSaved').innerHTML=`<h4 style="font-size:12.5px;color:var(--muted);margin:6px 0">Earlier restores you can continue</h4><table>${un.map(j=>`<tr><td>${esc(j.state)}</td><td class="mono">${esc((j.roots&&j.roots.length?j.roots:[j.dest]).join(', '))}</td><td class="num">${(j.done_files||0).toLocaleString()} / ${(j.total_files||0).toLocaleString()} files · ${human(j.done_bytes||0)} of ${human(j.total_bytes||0)}${j.errors?` · ${j.errors} errors`:''}</td><td>${new Date((j.updated||j.started)*1000).toLocaleString()}</td><td>${j.state==='running'?`<button class="small jc" data-i="${esc(j.id)}">Pause</button>`:`<button class="small jr" data-i="${esc(j.id)}">Continue</button>`}</td></tr>`).join('')}</table>`;
+    $('#rsSaved').innerHTML=`<h4 style="font-size:12.5px;color:var(--muted);margin:6px 0">Earlier restores you can continue</h4><table>${un.map(j=>`<tr><td>${esc(j.state)}</td><td class="mono">${esc((j.roots&&j.roots.length?j.roots:[j.dest]).join(', '))}</td><td class="num">${(j.done_files||0).toLocaleString()} / ${(j.total_files||0).toLocaleString()} files · ${human(j.done_bytes||0)} of ${human(j.total_bytes||0)}${j.errors?` · ${j.errors} errors`:''}${j.unverified?` · <b style="color:var(--warn)">needs checking: ${j.unverified.toLocaleString()} file${j.unverified===1?'':'s'}</b>`:''}${j.identical_copy?` · ${j.identical_copy.toLocaleString()} from an identical copy`:''}</td><td>${new Date((j.updated||j.started)*1000).toLocaleString()}</td><td>${j.state==='running'?`<button class="small jc" data-i="${esc(j.id)}">Pause</button>`:`<button class="small jr" data-i="${esc(j.id)}">Continue</button>`}</td></tr>`).join('')}</table>`;
     if(S.jobs&&S.jobs.some(j=>j.label.startsWith('restore')))$$('.jr').forEach(b=>{b.disabled=true;b.title='A restore is already running'});
     $$('.jr').forEach(b=>b.onclick=async()=>{b.disabled=true;b.textContent='Resuming…';try{const j=await post('/api/restore/resume',{id:b.dataset.i});pollJob(j.id,$('#rsProg'),()=>tabRestore(),true)}catch(e){toastError(e);b.disabled=false;b.textContent='Continue'}tabRestore()});
     $$('.jc').forEach(b=>b.onclick=async()=>{await api('/api/job/cancel',{id:b.dataset.i});setTimeout(showSaved,1500)})}catch(e){}};
@@ -662,7 +679,9 @@ async function tabRestore(){const el=$('#tab-restore');
     $('#rsGo').disabled=true;$('#rsGo').textContent='Starting…';pendingBar($('#rsProg'),'Starting the restore…');
     try{const j=await post('/api/restore',{src:S.src,dest,items:its,skip_meta:$('#rsMeta').checked});
       $('#rsGo').textContent='Restoring…';showSaved();
-      pollJob(j.id,$('#rsProg'),job=>{$('#rsGo').disabled=false;$('#rsGo').textContent='Start restore';showSaved();$('#rsProg').innerHTML+=`<p><b>${job.result&&job.result.paused?'Paused':'Done'}:</b> ${job.result?`${job.result.restored} restored · ${job.result.skipped} skipped · ${job.result.errors} errors · ${human(job.result.bytes)}`:esc(job.error||'')}</p>`;
+      pollJob(j.id,$('#rsProg'),job=>{$('#rsGo').disabled=false;$('#rsGo').textContent='Start restore';showSaved();$('#rsProg').innerHTML+=`<p><b>${job.result&&job.result.paused?'Paused':'Done'}:</b> ${job.result?`${job.result.restored} restored · ${job.result.skipped} skipped · ${job.result.errors} errors · ${human(job.result.bytes)}${verifyText(job.result)}`:esc(job.error||'')}</p>`;
+        // Files whose place in the backup could not be confirmed are listed (the job carries the capped list) so the user can check them by hand.
+        const unv=job.unverified||[];if(unv.length)$('#rsUnverified').innerHTML=`<h4 style="font-size:12px;color:var(--warn)">Couldn’t be verified: check these ${unv.length}${(job.result&&job.result.unverified)>unv.length?' of '+job.result.unverified.toLocaleString():''} files before you rely on them</h4><p class="help" style="margin:0 0 4px">${esc(CHECKED_HELP)}</p><div class="tablewrap"><table>${unv.slice(0,500).map(e=>`<tr><td class="mono">${esc(e.path)}</td><td>${esc(plainReason(e.reason))}</td></tr>`).join('')}</table></div>`;
         if(job.errors&&job.errors.length)$('#rsErrors').innerHTML=`<h4 style="font-size:12px;color:var(--muted)">Errors (${job.errors.length})</h4><div class="tablewrap"><table>${job.errors.slice(0,500).map(e=>`<tr><td class="mono">${esc(e.path)}</td><td>${esc(e.error)}</td></tr>`).join('')}</table></div>`},true)}
     catch(e){$('#rsProg').innerHTML='';$('#rsGo').disabled=false;$('#rsGo').textContent='Start restore';toastError(e)}};}
 // Sleep that also ends when the window becomes visible or focused again: while the user is in the browser (Google sign-in) the
