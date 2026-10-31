@@ -129,6 +129,20 @@ class Placer(unittest.TestCase):
         self.assertEqual(pl[0][0], [(0, 1, 2), (2, 0, 2), (4, 0, 2), (6, 0, 1)]); self.assertEqual((owner[2], owner[4]), (0, 0))
         pool.tmp.cleanup()
 
+    def test_spill_with_unplaced_references_is_placed_by_count_and_flagged(self):
+        # As the turn test, but C also references one chunk no record stores (its bytes can never be known): the interior is
+        # found by exact count within the turn, the bytes lie within one chunk of the size, and C stays flagged unverified.
+        pool = Pool({0: (2, [10, 20, 30]), 1: (2, [100, 100]), 2: (2, [100, 110]), 3: (2, [100, 111]), 4: (2, [100, 120]), 5: (2, [100, 100]), 6: (2, [5, 6])})
+        C = _rec(0, 100, 7, size=20 + 30 + 210 + 220 + 5 + 4096, tag="c", dedup=[(5000, 5001)]); D = _rec(1, 107, 1, size=6, tag="d")
+        E = [_rec(0, 1000, 2, size=200, tag="e0"), _rec(1, 1002, 2, size=211), _rec(2, 1004, 2, size=200, tag="e2")]
+        anchors = {(0, 0): [(0, 1, 2)], (0, 1): [(6, 1, 1)], (1, 0): [(1, 0, 2)], (1, 2): [(5, 0, 2)]}
+        old = place.PERIOD_MIN_PAIRS; place.PERIOD_MIN_PAIRS = 1
+        try: owner, pl, R, flags = self.run_placer(pool, {0: [C, D], 1: E, 2: [], 3: []}, anchors)
+        finally: place.PERIOD_MIN_PAIRS = old
+        self.assertEqual(R["placed-by-count"], 1); self.assertEqual(pl[0][0], [(0, 1, 2), (2, 0, 2), (4, 0, 2), (6, 0, 1)])
+        self.assertIn((0, 0), flags["guessed"])
+        pool.tmp.cleanup()
+
     def test_gap_with_leftover_chunks_slides_records_to_their_bytes(self):
         # A (1 chunk), then two leftover entries of a deleted file (77, 88), then U (2 chunks, 30+40), then B anchored. The count
         # between A and B is 4 for 2 needed: U is placed where its own bytes match, the only such start.
