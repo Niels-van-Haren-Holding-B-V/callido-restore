@@ -444,7 +444,7 @@ class Backup:
         res, upto = poolmap.build_poolmap_detached(self.src, str(pool_dir), mlog, max_bucket=max_bucket, cancelled=lambda: bool(job.get("cancel")))
         self._pool = None
         if job.get("cancel"): return stopped("mapping")
-        self.mark_prepared(len(res), self.pool_status().get("total_buckets", 0))     # finished: the auto-start leaves it alone now
+        if max_bucket is None: self.mark_prepared(len(res), self.pool_status().get("total_buckets", 0))   # finished: the auto-start leaves it alone (a max_bucket test run is not a finished preparation)
         return {"mapped": len(res), "upto": upto}
     def restore_plan(self, items, skip_meta=True):
         """items: [{share, ver, path, is_dir}] -> list of file rows (dicts) to restore."""
