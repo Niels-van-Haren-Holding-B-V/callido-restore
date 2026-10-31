@@ -60,23 +60,30 @@ class Detached(unittest.TestCase):
 class AnchorFirst(unittest.TestCase):
     """The app's mapper is the anchor-first pipeline; v1 only on request."""
     def test_pipeline_and_export(self):
-        from callido_restore.pool import anchor, poolmap2
-        out = tempfile.mkdtemp(); json.dump([{"b": 0, "t": "index"}], open(os.path.join(out, "listing.json"), "w"))
-        calls = []
+        """v3 placer by default: scan -> place.resolve_and_place_v3 (with an Index over the listing) -> export with flags and stats."""
+        from callido_restore.pool import anchor, poolmap2, place
+        out = tempfile.mkdtemp(); json.dump([{"b": 0, "t": "index", "name": "0.index.2", "rev": 2, "size": 64 + 32 * 5}], open(os.path.join(out, "listing.json"), "w"))
+        json.dump({"positions": {}, "records": {}, "ubytes": {"0": 1234}}, open(os.path.join(out, "anchors.json"), "w"))
+        calls = []; flags = {"guessed": set(), "aliased": set()}
         with mock.patch.object(poolmap2, "build_writers", return_value="W"), \
              mock.patch.object(anchor, "scan_anchors", return_value=("A", {0: 5, 1: 5, 2: 5})) as scan, \
-             mock.patch.object(anchor, "resolve_and_place", return_value=({0: 1, 1: 2, 2: 0}, "P", {"placed": 3})) as place, \
+             mock.patch.object(place, "resolve_and_place_v3", return_value=({0: 1, 1: 2, 2: 0}, "P", {"placed": 3}, flags)) as placer, \
              mock.patch.object(anchor, "export_map", side_effect=lambda *a, **k: calls.append(k)) as export:
             res, upto = poolmap.build_poolmap_anchor(Src(), out, log=lambda m: None)
         self.assertEqual((res, upto), ({0: 1, 1: 2, 2: 0}, 3)); self.assertEqual(calls[0]["mapped_upto"], 3)
-        self.assertEqual(scan.call_args[0][:2], (scan.call_args[0][0], out)); place.assert_called_once()
+        self.assertIs(calls[0]["flags"], flags); self.assertEqual(calls[0]["report"], {"placed": 3})
+        self.assertEqual(scan.call_args[0][:2], (scan.call_args[0][0], out)); placer.assert_called_once()
+        index = placer.call_args[0][2]
+        self.assertEqual((index.counts, index.revs, index.ubytes), ({0: 5, 1: 5, 2: 5}, {0: 2}, {0: 1234}))   # totals from anchors.json
 
-    def test_partial_owner_set_is_a_partial_map(self):
+    def test_v2_placer_on_request(self):
         from callido_restore.pool import anchor, poolmap2
         out = tempfile.mkdtemp(); json.dump([], open(os.path.join(out, "listing.json"), "w"))
         with mock.patch.object(poolmap2, "build_writers", return_value="W"), mock.patch.object(anchor, "scan_anchors", return_value=("A", {0: 5, 1: 5, 2: 5})), \
-             mock.patch.object(anchor, "resolve_and_place", return_value=({0: 1}, "P", {})), mock.patch.object(anchor, "export_map"):
-            self.assertEqual(poolmap.build_poolmap_anchor(Src(), out, log=lambda m: None)[1], 1)
+             mock.patch.object(anchor, "resolve_and_place", return_value=({0: 1}, "P", {})) as v2, mock.patch.object(anchor, "export_map"), \
+             mock.patch.dict(os.environ, {"HBK_PLACER": "v2"}):
+            self.assertEqual(poolmap.build_poolmap_anchor(Src(), out, log=lambda m: None)[1], 1)       # partial owner set: partial map
+        v2.assert_called_once()
 
     def test_build_map_picks_v1_only_on_request(self):
         with mock.patch.object(poolmap, "build_poolmap_anchor", return_value=({}, 0)) as a, mock.patch.object(poolmap, "build_poolmap", return_value=({}, 0)) as v1:
