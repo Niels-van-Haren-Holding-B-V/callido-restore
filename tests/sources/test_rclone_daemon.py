@@ -85,6 +85,15 @@ class StaleDaemon(unittest.TestCase):
              mock.patch.object(os, "kill") as kill:
             self.assertEqual(rc.kill_stale(), 1); kill.assert_called_once_with(4242, 15)
 
+    def test_rcd_that_ignores_terminate_is_killed(self):
+        self._pidfile("rclone-rcd-777.pid", 4242, 777)
+        alive = lambda pid: pid == 4242                        # parent gone, the daemon survives SIGTERM
+        with mock.patch.object(rc, "_alive", side_effect=alive), mock.patch.object(rc.time, "sleep"), \
+             mock.patch.object(rc, "_cmdline", return_value="/Applications/X.app/Contents/Frameworks/rclone rcd --rc-addr 127.0.0.1:5"), \
+             mock.patch.object(os, "kill") as kill:
+            self.assertEqual(rc.kill_stale(), 1)
+        self.assertEqual(kill.call_args_list, [mock.call(4242, 15), mock.call(4242, 9)])
+
     def test_old_format_file_is_dropped(self):
         (self.dir / "rclone-rcd-1.pid").write_text("4242")
         with mock.patch.object(os, "kill") as kill:
@@ -96,6 +105,25 @@ class StaleDaemon(unittest.TestCase):
         self.assertTrue(rc.start(timeout=15)); self.addCleanup(rc.stop)
         f = rc.PIDFILE(); self.assertTrue(f.exists()); self.assertEqual(json.loads(f.read_text())["parent"], os.getpid())
         rc.stop(); self.assertFalse(f.exists())
+
+
+class Orphans(unittest.TestCase):
+    """rclone processes of a crashed app: the bundled binary with a dead parent is stopped, anything else is left alone."""
+    ROWS = [(500, 1, "/Volumes/Callido Restore/Callido Restore.app/Contents/Frameworks/rclone copyto gdrive:x/f /tmp/f.part"),
+            (501, 1, "/Volumes/Callido Restore/Callido Restore.app/Contents/Frameworks/rclone rcd --rc-addr 127.0.0.1:59619"),
+            (502, 300, "/Applications/Callido Restore.app/Contents/Frameworks/rclone rcd --rc-addr 127.0.0.1:61940"),   # another running app
+            (503, 1, "/opt/homebrew/bin/rclone copy a: b"),                                                                 # not ours
+            (504, 1, "/Applications/Other.app/Contents/Frameworks/rclone rcd")]
+    def test_only_bundled_rclone_with_dead_parent_is_stopped(self):
+        with mock.patch.object(rc, "_ps", return_value=self.ROWS), mock.patch.object(rc, "_alive", return_value=False), \
+             mock.patch.object(os, "kill") as kill:
+            self.assertEqual(rc.kill_orphans(), 2)
+        self.assertEqual(kill.call_args_list, [mock.call(500, 15), mock.call(501, 15)])
+
+    def test_ps_rows_are_parsed(self):
+        out = subprocess.CompletedProcess([], 0, stdout="  500     1 /Applications/Callido Restore.app/Contents/Frameworks/rclone rcd --x\n  bad line\n", stderr="")
+        with mock.patch.object(subprocess, "run", return_value=out):
+            self.assertEqual(rc._ps(), [(500, 1, "/Applications/Callido Restore.app/Contents/Frameworks/rclone rcd --x")])
 
 
 class DeadDaemon(unittest.TestCase):
@@ -233,7 +261,7 @@ class StartFlags(unittest.TestCase):
         proc = mock.Mock(); proc.poll.return_value = None; proc.pid = 4242
         daemon = rc._Daemon()
         with mock.patch.object(rc, "RCLONE", "/fake/rclone"), mock.patch.object(rc.paths, "CONF_DIR", __import__("pathlib").Path(d)), \
-             mock.patch.object(rc, "kill_stale"), mock.patch.object(subprocess, "Popen", return_value=proc) as popen, \
+             mock.patch.object(rc, "kill_stale"), mock.patch.object(rc, "kill_orphans"), mock.patch.object(subprocess, "Popen", return_value=proc) as popen, \
              mock.patch.object(daemon, "_call", return_value={"version": "v1.75.2"}):
             self.assertTrue(daemon.start(timeout=1))
         args = popen.call_args[0][0]

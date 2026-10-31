@@ -6,6 +6,7 @@ here uses it when it runs and otherwise falls back to the same ``rclone`` comman
 an async job polled for bytes and speed); config changes still run as separate rclone processes, which share the config file."""
 import base64, json, os, secrets, socket, subprocess, threading, time, urllib.error, urllib.request
 from callido_restore import paths
+from callido_restore.about import APP_NAME
 from callido_restore.paths import RCLONE
 
 
@@ -43,7 +44,7 @@ class _Daemon:
             if self.running: return True
             if self.failed or not RCLONE: return False
             self.last_start = time.time()
-            kill_stale()
+            kill_stale(); kill_orphans()
             with socket.socket() as s:
                 s.bind(("127.0.0.1", 0)); port = s.getsockname()[1]
             user, pw = secrets.token_hex(8), secrets.token_hex(16)
@@ -121,6 +122,42 @@ def _alive(pid):
     except ProcessLookupError: return False
     except OSError: return True
 
+def _terminate(pid, grace=2.0):
+    """SIGTERM, and SIGKILL when the process is still there after ``grace`` seconds: an rclone whose app died with its disk image
+    (force-unmounted volume) kept spinning at full CPU for hours and ignored a plain terminate. True when a signal was sent."""
+    try: os.kill(pid, 15)
+    except OSError: return False
+    deadline = time.time() + grace
+    while time.time() < deadline:
+        if not _alive(pid): return True
+        time.sleep(0.1)
+    try: os.kill(pid, 9)
+    except OSError: pass
+    return True
+
+def _ps():
+    """[(pid, ppid, command)] of every process (patched in tests); [] where ``ps`` is not available."""
+    if os.name == "nt": return []
+    try: r = subprocess.run(["ps", "-axo", "pid=,ppid=,command="], capture_output=True, text=True)
+    except OSError: return []
+    rows = []
+    for line in r.stdout.splitlines():
+        parts = line.split(None, 2)
+        if len(parts) == 3 and parts[0].isdigit() and parts[1].isdigit(): rows.append((int(parts[0]), int(parts[1]), parts[2]))
+    return rows
+
+def kill_orphans():
+    """Stop rclone processes of this app that outlived it: the bundled rclone (``<app>.app/Contents/Frameworks/rclone``, any
+    install location) whose parent is gone (re-parented to pid 1). A crashed app leaves its daemon and the copy it was running
+    behind; they keep using the user's Google Drive quota, so the live app's downloads crawl. Processes with a living parent
+    (another running copy of the app) and rclone binaries from elsewhere are never touched. Returns the number stopped."""
+    marker = f"{APP_NAME}.app/Contents/Frameworks/rclone"
+    stopped = 0
+    for pid, ppid, cmd in _ps():
+        if ppid != 1 or pid == os.getpid() or marker not in cmd: continue
+        if _terminate(pid): stopped += 1
+    return stopped
+
 def kill_stale():
     """Stop daemons left behind by app runs that did not exit cleanly (force quit, crash): every ``rclone-rcd-*.pid`` whose
     recorded parent process is gone names one; it is killed only when that pid still runs an ``rclone rcd``. Files of running
@@ -139,8 +176,7 @@ def kill_stale():
         try: f.unlink()
         except OSError: pass
         if pid <= 1 or "rclone" not in _cmdline(pid) or " rcd" not in _cmdline(pid): continue
-        try: os.kill(pid, 15); stopped += 1
-        except OSError: pass
+        if _terminate(pid): stopped += 1
     return stopped
 
 
