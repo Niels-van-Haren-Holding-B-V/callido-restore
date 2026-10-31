@@ -93,7 +93,6 @@ class CrossBucketTags(unittest.TestCase):
 
 
 
-    @unittest.expectedFailure
     def test_a_straddling_tag_with_an_identical_copy(self):
         """hbk-6 finding E7: at scale 0.5 with 512 KiB buckets thesis.docx starts at bucket 2 entry 41/49 with K=9, so its tag
         straddles into bucket 7 and the anchor scan finds no position for it. Without positions the phantom pass never sees

@@ -240,6 +240,7 @@ footer.madeBy img{width:18px;height:18px;border-radius:5px;vertical-align:middle
   <div class="row" style="justify-content:flex-end;margin-top:10px"><span id="wsBusy" class="muted" style="display:none;align-items:center;gap:8px"><span class="spin"></span><span id="wsBusyText">Signing in…</span></span><button id="nCancel" class="ghost">Cancel</button><button id="wsBack" style="display:none">Back</button><button id="wsNext" class="primary">Next</button></div>
 </dialog>
 <script>
+const WD={msg:'',cls:''};   // last result of the NAS connect in the restore wizard (kept across re-renders)
 const LOCAL_EG=/^Win/.test(navigator.platform)?'Z:':'/Volumes';   // example local path in placeholders: a mapped drive on Windows
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 const S={src:null,info:null,ver:null,snaps:{},indexing:{},tab:'changes',range:365,basket:JSON.parse(localStorage.getItem('basket')||'[]')};
@@ -641,10 +642,10 @@ async function tabRestore(){const el=$('#tab-restore');
          <li><b>Shared folder</b>: in DSM open Control Panel → Shared Folder → Create, for example <code>Restore</code>. Keep it empty; the restore only adds files to it.</li>
          <li><b>User and permissions</b>: Control Panel → User &amp; Group → Create a user (for example <code>restore</code>) and give it Read/Write on that shared folder, or use an administrator account.</li>
          <li><b>SMB</b>: Control Panel → File Services → SMB → Enable SMB service. Then connect below with the NAS address, that user and its password.</li>
-         <li><b>Another protocol</b> (SFTP, WebDAV, NFS): enable it under File Services, then either mount the share in Finder (Go → Connect to Server) and choose “a mounted share / local path” above, or create the connection with <code>rclone config</code> in Terminal; any rclone connection appears in the list.</li>
+         <li><b>Another protocol</b> (SFTP, WebDAV, NFS): enable it under File Services, then either mount the share in Finder (Go → Connect to Server) and choose “a mounted share / local path” above, or create the connection with <code>rclone config</code> in Terminal; any rclone connection appears in the list. On Windows: map the share as a network drive in File Explorer and use that drive letter.</li>
        </ol>
        <div class="row"><label class="f">connection name <input id="wdName" value="nas" style="width:90px"></label><label class="f">NAS address (IP or name) <input id="wdHost" style="width:160px"></label><label class="f">user <input id="wdUser" style="width:120px"></label><label class="f">password <input id="wdPass" type="password" style="width:140px"></label><button class="small" id="wdConnect">Connect</button></div>
-       <div id="wdConn" class="status"></div>
+       <div id="wdConn" class="status ${WD.cls}">${esc(WD.msg)}</div>
        <p class="help" style="margin:4px 0 0">The app never deletes anything on the NAS. It creates the target folder and writes the restored files; a target inside the backup itself is refused.</p>
      </details>
      <details class="adv"><summary>Advanced: everything under one folder</summary><div class="row"><label><input type="checkbox" id="wzOne"> put all selected folders under one folder, as <code>&lt;folder&gt;/&lt;share&gt;/&lt;path&gt;</code></label><input id="wzOnePath" placeholder="nas:Restore/restore-${S.ver} or ${LOCAL_EG}/Restore/restore-${S.ver}" style="width:380px"></div></details>
@@ -712,14 +713,16 @@ async function tabRestore(){const el=$('#tab-restore');
     catch(e){const m=/(.+?) v(\d+) not indexed/.exec(e.message);const why=m?`The file list of ${m[1]} for run ${m[2]} is not loaded yet: load it in the run row above (or tick "Load all shares for this run").`:e.message;out.textContent='? '+why;setCls(out,'bad');bad=true;reason=why}
     return{bad,nonEmpty,reason}};
   $('#wzCheck').onclick=checkAll;
+  // The outcome is kept in WD so it survives the re-render of the tab that follows a successful connect (it used to vanish after 0.8 s).
+  const wdShow=(msg,cls,busy)=>{WD.msg=msg;WD.cls=cls||'';const el=$('#wdConn');if(!el)return;setCls(el,cls);el.innerHTML=(busy?'<span class="spin"></span> ':'')+esc(msg)};
   $('#wdConnect').onclick=async()=>{const q={kind:'smb',name:$('#wdName').value.trim()||'nas',host:$('#wdHost').value.trim(),user:$('#wdUser').value.trim(),password:$('#wdPass').value};
-    if(!q.host||!q.user){$('#wdConn').textContent='Fill in the NAS address and the user.';return}
-    $('#wdConnect').disabled=true;$('#wdConn').textContent='Connecting…';
-    try{const j=await post('/api/rclone/connect',q);const job=await waitJob(j.id,m=>{$('#wdConn').textContent=m});
-      if(job.state==='error'){$('#wdConn').textContent='Failed: '+job.error;$('#wdConnect').disabled=false;return}
-      MAP._rem=job.result.remote;saveMap();
-      $('#wdConn').textContent='Connected: '+job.result.remote+(job.result.shares?' · shares: '+job.result.shares.join(', '):'');setTimeout(tabRestore,800)}
-    catch(e){$('#wdConn').textContent=e.message;$('#wdConnect').disabled=false}};
+    if(!q.host||!q.user){wdShow('Fill in the NAS address and the user.','bad');return}
+    $('#wdConnect').disabled=true;wdShow('Connecting…','',true);
+    try{const j=await post('/api/rclone/connect',q);const job=await waitJob(j.id,m=>wdShow(m||'Connecting…','',true));
+      if(job.state==='error'){wdShow('Not connected: '+job.error,'bad');$('#wdConnect').disabled=false;return}
+      MAP._rem=job.result.remote;saveMap();const sh=job.result.shares||[];
+      wdShow(`Connected to ${job.result.remote} · ${sh.length} share${sh.length===1?'':'s'}${sh.length?': '+sh.join(', '):''}. Pick the share for each folder below.`,'ok');setTimeout(tabRestore,800)}
+    catch(e){wdShow('Not connected: '+e.message,'bad');$('#wdConnect').disabled=false}};
   const showSaved=async()=>{try{const js=await api('/api/jobs/saved');const un=js.filter(j=>j.state!=='done');if(!un.length){$('#rsSaved').innerHTML='';return}
     $('#rsSaved').innerHTML=`<h4 style="font-size:12.5px;color:var(--muted);margin:6px 0">Earlier restores you can continue</h4><table>${un.map(j=>`<tr><td>${esc(j.state)}</td><td class="mono">${esc((j.roots&&j.roots.length?j.roots:[j.dest]).join(', '))}</td><td class="num">${(j.done_files||0).toLocaleString()} / ${(j.total_files||0).toLocaleString()} files · ${human(j.done_bytes||0)} of ${human(j.total_bytes||0)}${j.errors?` · ${j.errors} errors`:''}${j.unverified?` · <b style="color:var(--warn)">needs checking: ${j.unverified.toLocaleString()} file${j.unverified===1?'':'s'}</b>`:''}${j.identical_copy?` · ${j.identical_copy.toLocaleString()} from an identical copy`:''}</td><td>${new Date((j.updated||j.started)*1000).toLocaleString()}</td><td>${j.state==='running'?`<button class="small jc" data-i="${esc(j.id)}">Pause</button>`:`<button class="small jr" data-i="${esc(j.id)}">Continue</button>`}</td></tr>`).join('')}</table>`;
     if(S.jobs&&S.jobs.some(j=>j.label.startsWith('restore')))$$('.jr').forEach(b=>{b.disabled=true;b.title='A restore is already running'});
