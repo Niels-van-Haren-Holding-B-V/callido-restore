@@ -3,6 +3,7 @@ atomically, ``file_target``/``restore_roots`` map backup folders to destinations
 import json, os, subprocess
 from pathlib import Path
 from callido_restore.paths import RCLONE
+from callido_restore.sources import rclone
 from callido_restore.sources.source import is_remote_path
 
 def place_file(tmp, out):
@@ -77,7 +78,7 @@ def restore_roots(items, dest):
 def list_destination(dest):
     """Paths of every file already at a remote destination (recursive). Raises when the listing fails: an unknown
     destination must never be treated as empty, because the restore never writes over what is there."""
-    r = subprocess.run([RCLONE, "lsjson", "-R", "--files-only", "--no-mimetype", dest], capture_output=True, text=True)
-    if r.returncode != 0:
-        raise RuntimeError(f"cannot list the destination {dest}: {r.stderr.strip()[-300:] or 'rclone failed'}; nothing was written")
-    return {e["Path"] for e in json.loads(r.stdout or "[]")}
+    try: entries = rclone.ls(dest, recurse=True, files_only=True)
+    except rclone.RcloneError as e:
+        raise RuntimeError(f"cannot list the destination {dest}: {e}; nothing was written")
+    return {e["Path"] for e in entries}

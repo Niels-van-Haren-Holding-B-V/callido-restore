@@ -8,6 +8,7 @@ from callido_restore.about import APP_NAME, VERSION
 from callido_restore.paths import RCLONE, _bundled, _resource_roots
 from callido_restore.restore.jobs import JOBS
 from callido_restore.server.api import H, _exit_app
+from callido_restore.sources import rclone
 from callido_restore.sources.source import load_sources
 
 def _verify_frozen():
@@ -81,6 +82,7 @@ def main():
         except OSError as e: _log(f"warning: cannot write {paths.CONF_DIR / 'app.log'} ({e}); logging to the console instead")
     _verify_frozen()
     load_sources()
+    rclone.start_in_background()                               # one rclone daemon for all listings (fast wizard, fast scans)
     windowed = not a.no_window and not a.browser
     try: srv = ThreadingHTTPServer(("127.0.0.1", a.port), H)
     except OSError as e:
