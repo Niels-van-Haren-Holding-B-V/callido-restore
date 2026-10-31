@@ -522,3 +522,26 @@ class BuildPoolWiringTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ProgressBytes(unittest.TestCase):
+    """The fetch job carries total_bytes (listing sizes of all index files) and done_bytes (bytes complete so far) for the UI."""
+    def test_bytes_follow_the_downloads(self):
+        import tempfile, shutil
+        from callido_restore.pool import indexfetch as F
+        root = Path(tempfile.mkdtemp()); self.addCleanup(shutil.rmtree, root, True)
+        listing = [{"b": 0, "t": "index", "rev": 1, "size": 10, "name": "0.index.1"}, {"b": 1, "t": "index", "rev": 1, "size": 20, "name": "1.index.1"},
+                   {"b": 2048, "t": "index", "rev": 1, "size": 30, "name": "0.index.1"}]
+        seen = []
+        def run(cmd, on_line, should_stop):
+            d = int(str(cmd[-1]).rstrip("/").split("/")[-1]) if False else None
+            for e in listing:                       # "download": write every expected file of the directory the command names
+                dest = F._bucket_dir(root, e["b"] // 2048)
+                if str(dest) in " ".join(map(str, cmd)): (dest / e["name"]).write_bytes(b"x" * e["size"])
+            seen.append(cmd); return 0
+        job = {}
+        res = F.fetch_bucket_indexes(root, ["r:"], listing, job, run=run, pause=lambda *_: None)
+        self.assertFalse(res.get("error")); self.assertEqual(job["total_bytes"], 60); self.assertEqual(job["done_bytes"], 60)
+        job2 = {}
+        F.fetch_bucket_indexes(root, ["r:"], listing, job2, run=lambda *a: 0, pause=lambda *_: None)      # everything already there
+        self.assertEqual((job2["total_bytes"], job2["done_bytes"]), (60, 60))

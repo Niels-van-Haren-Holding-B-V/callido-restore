@@ -269,31 +269,41 @@ def fetch_bucket_indexes(cache_root, remotes, listing, job, run=None, attempts=2
     skipped = 0
     mismatch_count = 0
     failed = []
+    # Bytes for the UI ("1.2 of 6.9 GB downloaded"): the listing sizes of every index file, and the bytes of those complete so far.
+    job["total_bytes"] = sum(int(size or 0) for expected in by_dir.values() for size in expected.values())
+    done_before = 0                      # complete bytes of the directories handled so far
+    done_dir = {}                        # complete bytes of the directory in progress
 
-    def tally(directory, expected, park=False):
-        """Return (complete_count, cache_mismatch_count, missing_count).
+    def set_done(directory, bytes_complete):
+        done_dir[directory] = bytes_complete
+        job["done_bytes"] = done_before + bytes_complete
+
+    def tally(directory, expected, park=False, track=True):
+        """Return (complete_count, cache_mismatch_count, missing_count); records the complete bytes for the progress text
+        (``track=False`` for the final sweep over every directory, which must not move the counters).
 
         ``park`` renames a wrong-size cache file aside. Read-only roots are never changed.
         A correct file in a read-only root counts as complete even when the cache has no copy.
         """
-        comp = mis = miss = 0
+        comp = mis = miss = 0; have = 0
         for name, size in expected.items():
             cache_state, source_ok = _name_states(cache_root, readonly_roots, directory, name, size)
             if park and cache_state == "mismatch":
                 park_cache_mismatch(_bucket_dir(cache_root, directory), name)
                 cache_state = index_file_state(_bucket_dir(cache_root, directory), name, size)
             if cache_state == "complete" or source_ok:
-                comp += 1
+                comp += 1; have += int(size or 0)
             elif cache_state == "mismatch":
                 mis += 1
             else:
                 miss += 1
+        if track: set_done(directory, have)
         return comp, mis, miss
 
     def satisfied():
         ok = 0
         for d, expected in by_dir.items():
-            comp, mis, miss = tally(d, expected, park=False)
+            comp, mis, miss = tally(d, expected, park=False, track=False)
             if mis == 0 and miss == 0 and comp == len(expected):
                 ok += 1
         return ok
@@ -319,11 +329,13 @@ def fetch_bucket_indexes(cache_root, remotes, listing, job, run=None, attempts=2
         total = len(expected)
         if mis == 0 and miss == 0:
             skipped += 1
+            done_before += done_dir.pop(d, 0)
             job["message"] = describe_dir(i, n, d, None, comp, total, "already complete")
             job["progress"] = _progress(progress_base, progress_span, i, n, 1.0)
             continue
         if not remotes:
             failed.append(d)
+            done_before += done_dir.pop(d, 0)
             mismatch_count += mis
             job["message"] = describe_dir(i, n, d, None, comp, total, f"{miss + mis} not usable")
             continue
@@ -365,6 +377,7 @@ def fetch_bucket_indexes(cache_root, remotes, listing, job, run=None, attempts=2
                 got = True
                 break
         comp, mis, miss = tally(d, expected, park=False)
+        done_before += done_dir.get(d, 0); done_dir.pop(d, None)          # this directory is settled; the next one adds to it
         mismatch_count += mis
         if mis == 0 and miss == 0:
             job["message"] = describe_dir(i, n, d, None, comp, total, "done")
