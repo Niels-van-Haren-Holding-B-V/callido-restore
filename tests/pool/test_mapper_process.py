@@ -117,6 +117,7 @@ class ScanWorkers(unittest.TestCase):
         self.assertNotIn('1 if getattr(sys, "frozen"', src); self.assertIn("MAX_WORKERS", src)
 
 
+@unittest.skipIf(os.name == "nt", "POSIX process groups; the Windows stop (taskkill /T) is in tests/test_windows_compat.py")
 class StopKillsTheGroup(unittest.TestCase):
     def test_child_runs_in_its_own_session_and_cancel_kills_the_group(self):
         seen = {}

@@ -4,7 +4,7 @@ import fnmatch, json, os, re, subprocess, threading, time, uuid
 from pathlib import Path
 from callido_restore import paths
 from callido_restore.core.hbkmeta import rev_of
-from callido_restore.paths import RCLONE, is_local_abs, is_remote_path  # noqa: F401  (is_remote_path is re-exported)
+from callido_restore.paths import RCLONE, WINDOWS, is_local_abs, is_remote_path  # noqa: F401  (is_remote_path is re-exported)
 from callido_restore.sources import rclone
 
 class Source:
@@ -76,7 +76,8 @@ class Source:
             if remote:
                 rem, _, path = base.partition(":"); path = path.strip("/")
                 return f"{rem}:{path}/{share}" if path else f"{rem}:{share}"
-            return os.path.join(base, share)
+            j = os.path.join(base, share)
+            return os.path.normpath(j) if WINDOWS else j                 # one kind of separator in the message on Windows
         roots = [join(d, sh) for sh in shares if sh and sh.strip("/")] if shares else [d]
         for w in roots:
             if self._writes_into_source(w, remote, both_ways=bool(shares)): return w

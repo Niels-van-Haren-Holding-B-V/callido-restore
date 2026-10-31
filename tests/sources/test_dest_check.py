@@ -197,7 +197,7 @@ class DestCheckApiTests(SourceFixture):
         check.assert_called_once_with("123-abc.apps.googleusercontent.com", "GOCSPX-x")                  # the pair is checked with Google before the browser opens
         self.assertIn('token={"access_token":"t"}', create); self.assertIn("--non-interactive", create)      # the token from the sign-in, no questions
         self.assertEqual(auth.call_args[0][:2], ("123-abc.apps.googleusercontent.com", "GOCSPX-x"))
-        self.assertTrue(str(auth.call_args[1]["template"]).endswith("static/oauth.html"))
+        self.assertTrue(Path(auth.call_args[1]["template"]).as_posix().endswith("static/oauth.html"))
         forget.assert_called_once(); clear.assert_called_once()
 
     def _connect(self, body, remotes, check=""):
