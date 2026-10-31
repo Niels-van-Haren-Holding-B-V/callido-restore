@@ -74,6 +74,32 @@ class StaleDaemon(unittest.TestCase):
             self.assertTrue(rc.kill_stale()); kill.assert_called_once_with(4242, 15)
 
 
+class DeadDaemon(unittest.TestCase):
+    """A daemon that was killed: the helpers fall back to a plain rclone process instead of failing, and it is restarted later."""
+    def test_connection_refused_falls_back_to_subprocess(self):
+        import urllib.error
+        ok = subprocess.CompletedProcess([], 0, stdout=json.dumps([{"Path": "a", "Name": "a", "IsDir": True, "Size": -1}]), stderr="")
+        with mock.patch.object(type(rc.DAEMON), "running", new_callable=mock.PropertyMock, return_value=True), \
+             mock.patch.object(rc.DAEMON, "_call", side_effect=urllib.error.URLError("[Errno 61] Connection refused")), \
+             mock.patch.object(rc.DAEMON, "stop") as stop, mock.patch.object(subprocess, "run", return_value=ok) as run:
+            self.assertEqual(rc.ls("nas:share", dirs_only=True)[0]["Name"], "a")
+            rc.version()                                       # no exception: answered by the fallback
+            stop.assert_called(); self.assertGreaterEqual(run.call_count, 2)
+
+    def test_available_restarts_a_dead_daemon_at_most_once_a_minute(self):
+        d = rc._Daemon(); d.proc = mock.Mock(); d.proc.poll.return_value = 1; d.last_start = 1.0    # started once, died long ago
+        with mock.patch.object(d, "start", return_value=True) as start:
+            self.assertTrue(d.available()); start.assert_called_once()
+        d.last_start = __import__("time").time()
+        with mock.patch.object(d, "start", return_value=True) as start:
+            self.assertFalse(d.available()); start.assert_not_called()
+
+    def test_never_started_daemon_is_not_started_by_a_call(self):
+        d = rc._Daemon()
+        with mock.patch.object(d, "start") as start:
+            self.assertFalse(d.available()); start.assert_not_called()
+
+
 class ViaDaemon(unittest.TestCase):
     """With the daemon 'running', calls go to operations/list etc. (rc() is faked here)."""
     def test_ls_uses_operations_list_with_max_depth(self):

@@ -1,5 +1,12 @@
 **Callido Restore** restores files from a Synology Hyper Backup (`.hbk`) without Hyper Backup or a working NAS. It reads the backup's own metadata, shows every backup run on a timeline, and restores the folders you pick to a NAS share or a local folder. Files already at the destination are never overwritten or deleted, and the backup source is only read.
 
+## What's new in 0.2.1
+
+Two fixes on top of 0.2.0, found in the first hours of use:
+
+- If the app's internal rclone helper process dies or is killed, the app no longer shows "Could not open: connection refused"; it falls back to running rclone directly and restarts the helper on the next action.
+- On a NAS target, files that are already there are again recognised before the restore starts (0.2.0 still never overwrote them, but counted and re-processed them).
+
 ## What's new in 0.2.0
 
 A bugfix release from the first real test run of the app.

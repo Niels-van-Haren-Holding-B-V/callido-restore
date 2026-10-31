@@ -13,9 +13,14 @@ class RcloneError(RuntimeError):
     """rclone refused or failed a request; the message is rclone's own text."""
 
 
+class DaemonGone(RcloneError):
+    """The daemon is not running or stopped answering; helpers fall back to a plain rclone process."""
+
+
 class _Daemon:
     def __init__(self):
         self.proc = None; self.url = None; self.auth = None; self.lock = threading.Lock(); self.failed = ""
+        self.last_start = 0.0                                  # a daemon that died is restarted, but not more than once a minute
 
     @property
     def running(self):
@@ -27,6 +32,7 @@ class _Daemon:
         with self.lock:
             if self.running: return True
             if self.failed or not RCLONE: return False
+            self.last_start = time.time()
             kill_stale()
             with socket.socket() as s:
                 s.bind(("127.0.0.1", 0)); port = s.getsockname()[1]
@@ -70,9 +76,21 @@ class _Daemon:
             raise RcloneError(msg) from None
 
     def rc(self, method, timeout=None, **params):
-        """One remote-control call; raises RcloneError with rclone's message."""
-        if not self.running: raise RcloneError("rclone daemon is not running")
-        return self._call(method, params, timeout=timeout)
+        """One remote-control call; raises RcloneError with rclone's message, DaemonGone when the daemon cannot be reached
+        (it was killed or crashed): the caller then falls back to a plain rclone process and the next call restarts it."""
+        if not self.running: raise DaemonGone("rclone daemon is not running")
+        try: return self._call(method, params, timeout=timeout)
+        except urllib.error.HTTPError: raise
+        except (urllib.error.URLError, ConnectionError, TimeoutError, OSError) as e:
+            self.stop()
+            raise DaemonGone(f"rclone daemon unreachable: {e}") from None
+
+    def available(self):
+        """True when the daemon runs; restarts a daemon that died (not one that failed to start), at most once a minute."""
+        if self.running: return True
+        if self.failed or not RCLONE or self.last_start == 0.0: return False
+        if time.time() - self.last_start < 60: return False
+        return self.start(timeout=5.0)
 
 
 def PIDFILE(): return paths.CONF_DIR / "rclone-rcd.pid"
@@ -138,13 +156,14 @@ def ls(path, dirs_only=False, files_only=False, recurse=False, max_depth=None, n
     if cache:
         key = ("ls", path, dirs_only, files_only, recurse, max_depth, no_modtime)
         return _cached(key, lambda: ls(path, dirs_only, files_only, recurse, max_depth, no_modtime, timeout))
-    if DAEMON.running:
+    if DAEMON.available():
         # The listed folder itself is the "fs" and remote is "", so every Path comes back relative to that folder exactly like
         # ``rclone lsjson <path>`` (with fs="nas:" remote="x" rclone would return "x/..." and list_destination's skip check would miss).
         opt = {"noMimeType": True, "dirsOnly": bool(dirs_only), "filesOnly": bool(files_only), "recurse": bool(recurse), "noModTime": bool(no_modtime)}
         params = {"fs": path, "remote": "", "opt": opt}
         if max_depth is not None: params["_config"] = {"MaxDepth": int(max_depth)}
-        return DAEMON.rc("operations/list", timeout=timeout, **params).get("list") or []
+        try: return DAEMON.rc("operations/list", timeout=timeout, **params).get("list") or []
+        except DaemonGone: pass                                 # killed or crashed daemon: plain rclone below
     args = ["lsjson", "--no-mimetype"]
     if no_modtime: args.append("--no-modtime")
     if dirs_only: args.append("--dirs-only")
@@ -157,14 +176,17 @@ def ls(path, dirs_only=False, files_only=False, recurse=False, max_depth=None, n
 def remotes(cache=False):
     """[(name_with_colon, type)] of the configured remotes. ``cache=True``: a repeat within CACHE_TTL seconds is free."""
     if cache: return _cached(("remotes",), lambda: remotes())
-    if DAEMON.running:
-        names = DAEMON.rc("config/listremotes").get("remotes") or []
-        out = []
-        for n in names:                                   # config/get per remote: only its type, not the whole config with tokens
-            try: typ = (DAEMON.rc("config/get", name=n) or {}).get("type", "")
-            except RcloneError: typ = ""
-            out.append((n + ":", typ))
-        return out
+    if DAEMON.available():
+        try:
+            names = DAEMON.rc("config/listremotes").get("remotes") or []
+            out = []
+            for n in names:                               # config/get per remote: only its type, not the whole config with tokens
+                try: typ = (DAEMON.rc("config/get", name=n) or {}).get("type", "")
+                except DaemonGone: raise
+                except RcloneError: typ = ""
+                out.append((n + ":", typ))
+            return out
+        except DaemonGone: pass
     out = _run(["listremotes", "--long"])
     res = []
     for line in out.splitlines():                         # "name: type"
@@ -175,6 +197,8 @@ def remotes(cache=False):
 
 def version():
     """'rclone v1.75.2' (first line of ``rclone version``)."""
-    if DAEMON.running:
-        v = DAEMON.rc("core/version").get("version", ""); return f"rclone {v}" if v else ""
+    if DAEMON.available():
+        try:
+            v = DAEMON.rc("core/version").get("version", ""); return f"rclone {v}" if v else ""
+        except DaemonGone: pass
     return _run(["version"]).splitlines()[0].strip()
