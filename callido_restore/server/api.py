@@ -185,7 +185,11 @@ class H(BaseHTTPRequestHandler):
                 share, ver = q.get("share", "*"), int(q["ver"])
                 # `share` is one name or "*"; `shares` (JSON list) loads just those, e.g. the unloaded shares of a selection
                 shares = json.loads(q["shares"]) if q.get("shares") else b.shares if share == "*" else [share]
-                shares = [s for s in shares if s in b.shares] or shares
+                # names end up in Config/@Share/{name} paths: only shares of this backup, nothing else
+                if not isinstance(shares, list) or not shares or not all(isinstance(s, str) for s in shares):
+                    return self._json({"error": "shares must be a non-empty list of share names"}, 400)
+                unknown = [s for s in shares if s not in b.shares]
+                if unknown: return self._json({"error": f"no such share in this backup: {', '.join(unknown)}"}, 400)
                 share = share if len(shares) == 1 else f"{len(shares)} shares"
                 def run(job):
                     out = []

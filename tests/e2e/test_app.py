@@ -8,6 +8,7 @@ Port: HBK_SMOKE_PORT if set, else a free one (never 8765, the running app's defa
 import json, os, shutil, socket, subprocess, sys, tempfile, time, unittest
 from pathlib import Path
 from urllib.parse import urlencode
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from tests.e2e import flow, hbkgen
@@ -86,6 +87,10 @@ class AppFlow(unittest.TestCase):
         self.assertEqual([x["share"] for x in j["result"]], ["Photos", "homes"]); self.assertTrue(all(x["ok"] for x in j["result"]), j["result"])
         j = self.wait_job(self.get("/api/index", src=src, share="*", ver=ver)["id"])
         self.assertTrue(all(x["ok"] for x in j["result"]), j["result"])
+        # unknown or malformed share names are refused before any path is built
+        for bad in ({"share": "../etc"}, {"shares": json.dumps(["Documents", "nope"])}, {"shares": json.dumps("Documents")}, {"shares": "[]"}):
+            with self.assertRaises(HTTPError) as cm: self.get("/api/index", src=src, ver=ver, **bad)
+            self.assertEqual(cm.exception.code, 400, bad); self.assertIn("error", json.loads(cm.exception.read()))
         st = self.get("/api/pool", src=src); self.assertTrue(st["running"] or st["complete"], f"preparation did not start: {st}")
         if st["running"]: pj = self.wait_job(st["running"], timeout=600); self.assertEqual(pj["state"], "done", pj.get("error") or pj)
         st = self.get("/api/pool", src=src); self.assertTrue(st["complete"] and st["map"], st)
