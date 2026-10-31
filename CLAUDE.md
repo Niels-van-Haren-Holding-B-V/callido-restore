@@ -15,6 +15,6 @@ Conventions
   "Photos", "homes", host "nas", `backup_1.hbk`, version 1234, IPs 192.0.2.x); `scripts/check_private.sh` enforces a denylist in CI.
 * Long operations are jobs (`start_job`) with `progress`/`message`; the UI polls `/api/job`. Restore jobs are persisted in `~/.hbk-explorer/jobs/`.
 * All rclone calls go through the `RCLONE` constant (bundled binary in the app, else PATH).
-* Format assumptions are documented in `hbk_pool.py` docstring and `docs/FORMAT.md`; if something in a backup does not match, extend the
+* Format assumptions are documented in the `callido_restore/core/pool.py` docstring and `docs/FORMAT.md`; if something in a backup does not match, extend the
   detection rather than special-casing a path.
 * Packaging: `./build_app.sh` (PyInstaller + hdiutil), CI in `.github/workflows/build.yml` (macos-15 arm64 + macos-15-intel).

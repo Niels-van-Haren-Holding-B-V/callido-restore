@@ -1,7 +1,7 @@
 """Tests for the tag-based file-start locator (hbk_pool.find_file_start) on synthetic bucket index entries."""
 import hashlib, struct, unittest
 
-import hbk_pool
+from callido_restore.core import pool as hbk_pool
 
 
 def _entry(ulen, seed):

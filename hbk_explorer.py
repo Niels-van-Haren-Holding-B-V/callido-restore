@@ -70,7 +70,8 @@ RCLONE = _find_rclone()
 def _verify_frozen():
     """Fail fast when a packaged build is missing modules or bundled files."""
     if not getattr(sys, "frozen", False): return
-    import hbk_pool, hbk_poolmap, lz4.block, webview  # noqa: F401
+    import hbk_poolmap, lz4.block, webview  # noqa: F401
+    from callido_restore.core import pool  # noqa: F401
     if _bundled("static/index.html") is None:
         roots = ", ".join(str(r) for r in _resource_roots())
         raise SystemExit("bundled static/index.html not found in: " + roots)
@@ -687,7 +688,7 @@ class Backup:
     # --- pool access
     @property
     def pool(self):
-        import hbk_pool
+        from callido_restore.core import pool as hbk_pool
         mp = self.src.index_dir / "pool" / "poolmap.json"
         mt = mp.stat().st_mtime if mp.is_file() else 0
         if getattr(self, "_pool", None) is None or getattr(self, "_pool_mtime", None) != mt:
@@ -699,7 +700,8 @@ class Backup:
         except Exception: st["lz4"] = False
         return st
     def build_pool(self, job, max_bucket=None):
-        import hbk_pool, hbk_poolmap, hbk_indexfetch
+        import hbk_poolmap, hbk_indexfetch
+        from callido_restore.core import pool as hbk_pool
         pool_dir = self.src.index_dir / "pool"; pool_dir.mkdir(parents=True, exist_ok=True)
         log = lambda m: job.__setitem__("message", str(m))
         def stopped(stage):

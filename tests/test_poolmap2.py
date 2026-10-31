@@ -2,9 +2,10 @@
 import hashlib, json, os, struct, tempfile, unittest
 from pathlib import Path
 
-import hbk_pool, hbk_poolmap2
+import hbk_poolmap2
+from callido_restore.core import pool as hbk_pool
 from hbk_poolmap import new_range
-from hbk_pool import BLOCK
+from callido_restore.core.pool import BLOCK
 
 
 def _entry(ulen, seed):

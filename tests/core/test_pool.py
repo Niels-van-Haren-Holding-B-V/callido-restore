@@ -24,7 +24,7 @@ silent (asserted against the current code):
 import hashlib, struct, tempfile, unittest, zlib
 from pathlib import Path
 
-import hbk_pool
+from callido_restore.core import pool as hbk_pool
 
 # Single-token literal block (token high nibble = length, no match). Valid for
 # both the lz4 package and lz4_decompress_py.

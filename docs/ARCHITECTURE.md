@@ -1,7 +1,13 @@
 # Architecture
 
+Package layout (H16, in progress): `callido_restore/core/` holds the .hbk format (pure parsing and file reconstruction);
+`pool/` (pool map v1/v2, index fetch), `restore/` (plan, destinations, no-overwrite writer, jobs), `sources/` (local folders and
+rclone remotes, read-only), `server/` (HTTP API) and `app/` (desktop window, entry point) follow, one layer per PR; `tests/`
+mirrors the packages. Lower layers never import higher ones. Until a layer has moved, its code still lives in the root modules below.
+
 * `hbk_explorer.py` — HTTP server (stdlib `http.server`), JSON API, static UI, sources, snapshot indexing, jobs, restore.
-* `hbk_pool.py` — pool format: sliced streams, virtual file index, chunk records, buckets, LZ4, `PoolReader` (reconstructs files).
+* `callido_restore/core/pool.py` — pool format: sliced streams, virtual file index, chunk records, buckets, LZ4, `PoolReader` (reconstructs files).
+  (`hbk_pool.py` at the root is a shim that returns this module; it goes away with the last H16 step.)
 * `hbk_poolmap.py` — offline mapping of chunk ids to buckets (see `docs/FORMAT.md`).
 * `static/index.html` — single-page UI, no build step, no external dependencies. Shown in a native window (pywebview, WebKit on macOS)
   by `run_window`; the HTTP server listens on 127.0.0.1 only and the process exits when the window closes (`_exit_app`).

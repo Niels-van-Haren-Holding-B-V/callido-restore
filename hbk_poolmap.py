@@ -1,7 +1,7 @@
 """Build the bucket -> writer map for a Hyper Backup pool (see hbk_pool.py for the format notes)."""
 import os, json, struct, bisect, collections, time
 from array import array
-from hbk_pool import BLOCK, WRITER_OF_SET, SET_OF_WRITER, load_runs
+from callido_restore.core.pool import BLOCK, WRITER_OF_SET, SET_OF_WRITER, load_runs
 
 class WriterModel:
     """One writer's stored chunk sequence = its file pieces (runs of newly stored chunks) in allocation order."""
