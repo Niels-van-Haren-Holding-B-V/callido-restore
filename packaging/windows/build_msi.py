@@ -42,7 +42,11 @@ def about():
 
 def run(cmd, **kw):
     print("+", " ".join(f'"{c}"' if " " in str(c) else str(c) for c in cmd), flush=True)
-    subprocess.run([str(c) for c in cmd], check=True, **kw)
+    r = subprocess.run([str(c) for c in cmd], **kw)
+    if r.returncode != 0:
+        out = (r.stdout or b"") + (r.stderr or b"") if kw.get("capture_output") else b""
+        die(f"exit {r.returncode}: {cmd[0]}\n" + (out.decode("utf-8", "replace") if isinstance(out, bytes) else out))
+    return r
 
 
 # ---- rclone: always the pinned release, signature and checksum verified (a cached binary is not trusted) ----
@@ -55,9 +59,13 @@ def find_gpg():
     die("gpg is required to verify rclone's SHA256SUMS (install Git for Windows or Gpg4win)")
 
 
-def gpg_path(p):
-    """Git for Windows' gpg is an MSYS program: give it forward slashes, which both it and a native gpg accept."""
-    return str(p).replace("\\", "/")
+def gpg_path(p, gpg=""):
+    """Git for Windows' gpg is an MSYS program: it wants /c/Users/... (a "C:/..." home dir is read as a relative path).
+    A native gpg (Gpg4win, or any gpg on macOS/Linux) gets the path as it is."""
+    p = str(p).replace("\\", "/")
+    if os.name == "nt" and "/usr/bin/" in gpg.replace("\\", "/").lower() and re.match(r"[A-Za-z]:/", p):
+        return f"/{p[0].lower()}{p[2:]}"
+    return p
 
 
 def download(url, out):
@@ -70,16 +78,16 @@ def verified_sums(dl):
     """The body of the clearsigned SHA256SUMS, only after gpg says it was signed by the rclone release key."""
     gpg, home = find_gpg(), dl / "gnupg"
     home.mkdir(mode=0o700)
-    base = ["--batch", "--homedir", gpg_path(home)]
-    run([gpg, *base, "--import", gpg_path(ROOT / "packaging" / "rclone-release-signing-key.asc")], capture_output=True)
+    base = ["--batch", "--homedir", gpg_path(home, gpg)]
+    run([gpg, *base, "--import", gpg_path(ROOT / "packaging" / "rclone-release-signing-key.asc", gpg)], capture_output=True)
     fp = subprocess.run([gpg, *base, "--with-colons", "--fingerprint", RCLONE_SIGNING_FPR], capture_output=True, text=True).stdout
     got = next((ln.split(":")[9] for ln in fp.splitlines() if ln.startswith("fpr:")), "")
     if got != RCLONE_SIGNING_FPR: die(f"signing key fingerprint is {got or 'missing'}")
-    v = subprocess.run([gpg, *base, "--status-fd", "1", "--verify", gpg_path(dl / "SHA256SUMS")], capture_output=True, text=True)
+    v = subprocess.run([gpg, *base, "--status-fd", "1", "--verify", gpg_path(dl / "SHA256SUMS", gpg)], capture_output=True, text=True)
     if v.returncode != 0 or f"VALIDSIG {RCLONE_SIGNING_FPR}" not in v.stdout:
         die("SHA256SUMS signature check failed:\n" + v.stderr)
     out = dl / "SHA256SUMS.clear"
-    run([gpg, *base, "--yes", "--output", gpg_path(out), "--decrypt", gpg_path(dl / "SHA256SUMS")], capture_output=True)
+    run([gpg, *base, "--yes", "--output", gpg_path(out, gpg), "--decrypt", gpg_path(dl / "SHA256SUMS", gpg)], capture_output=True)
     return out.read_text()
 
 
