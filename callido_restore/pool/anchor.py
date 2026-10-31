@@ -15,6 +15,9 @@ WORKER_RSS_MB = int(os.environ.get("HBK_SCAN_WORKER_RSS_MB", "1024"))  # a worke
 PARENT_RSS_MB = int(os.environ.get("HBK_SCAN_RSS_MB", "6144"))         # the parent (holds `writers`) likewise
 
 def _rss_mb():
+    """Peak resident memory of this process in MB (the H9 guards compare it with the limits above)."""
+    from callido_restore import oscompat
+    if oscompat.WINDOWS: return oscompat.peak_rss_mb()        # no `resource` module on Windows: the peak working set
     import resource, sys
     r = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
     return r / (1 << 20) if sys.platform == "darwin" else r / 1024
@@ -81,7 +84,8 @@ def _run_worker(job, tmpdir, n, progress=None):
     jp = os.path.join(tmpdir, f"job{n}.pkl"); op = os.path.join(tmpdir, f"out{n}.pkl")
     with open(jp, "wb") as f: pickle.dump(job, f)
     argv, kw = _worker_command(jp, op)
-    p = subprocess.Popen(argv, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL, text=True, **kw)
+    from callido_restore.oscompat import popen_kw
+    p = subprocess.Popen(argv, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL, text=True, **kw, **popen_kw())
     tail = ""
     for line in p.stderr:
         line = line.rstrip("\n")

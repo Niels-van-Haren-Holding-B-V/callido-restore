@@ -7,7 +7,9 @@ an async job polled for bytes and speed); config changes still run as separate r
 import base64, json, os, re, secrets, socket, subprocess, threading, time, urllib.error, urllib.request
 from callido_restore import paths
 from callido_restore.about import APP_NAME
-from callido_restore.paths import RCLONE
+from callido_restore import oscompat
+from callido_restore.oscompat import popen_kw
+from callido_restore.paths import RCLONE, is_remote_path
 from callido_restore.sources import transfer
 
 
@@ -50,7 +52,7 @@ class _Daemon:
             try:
                 self.proc = subprocess.Popen([RCLONE, "rcd", "--rc-addr", f"127.0.0.1:{port}", "--rc-user", user, "--rc-pass", pw,
                                               "--rc-serve=false", "--rc-web-gui=false", "--log-level", "ERROR", *THROTTLE],
-                                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL)
+                                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL, **popen_kw())
             except OSError as e:
                 self.failed = str(e); self.proc = None; return False
             try:
@@ -116,14 +118,16 @@ def _cmdline(pid):
     return r.stdout.strip() if r.returncode == 0 else ""
 
 def _alive(pid):
-    """True when a process with this pid exists (patched in tests)."""
+    """True when a process with this pid exists (patched in tests). Windows has no signal 0 (it is CTRL_C_EVENT there)."""
+    if oscompat.WINDOWS: return oscompat.pid_alive(pid)
     try: os.kill(pid, 0); return True
     except ProcessLookupError: return False
     except OSError: return True
 
 def _terminate(pid, grace=2.0):
     """SIGTERM, and SIGKILL when the process is still there after ``grace`` seconds: an rclone whose app died with its disk image
-    (force-unmounted volume) kept spinning at full CPU for hours and ignored a plain terminate. True when a signal was sent."""
+    (force-unmounted volume) kept spinning at full CPU for hours and ignored a plain terminate. True when a signal was sent.
+    On Windows any signal number is TerminateProcess, so the first call already ends it."""
     try: os.kill(pid, 15)
     except OSError: return False
     deadline = time.time() + grace
@@ -216,7 +220,7 @@ def authorize_drive(client_id="", client_secret="", on_url=None, template=None, 
     if client_id: args += [client_id, client_secret or ""]
     args += ["--drive-scope", scope, "--auth-no-open-browser"]
     if template: args += ["--template", str(template)]
-    p = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, text=True)
+    p = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, text=True, **popen_kw())
     lines, token, grab, opened = [], [], False, False
     timer = threading.Timer(timeout, p.kill); timer.start()
     try:
@@ -255,7 +259,7 @@ def _config(verb, params, timeout):
     state = None
     for _ in range(10):
         args = base if state is None else base + ["--continue", "--state", state, "--result", "false"]
-        r = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
+        r = subprocess.run(args, capture_output=True, text=True, timeout=timeout, **popen_kw())
         if r.returncode != 0: raise RcloneError(r.stderr.strip()[-400:] or f"rclone config {verb[0]} {verb[1]} failed")
         try: out = json.loads(r.stdout or "{}")
         except ValueError: out = {}
@@ -279,7 +283,7 @@ def start_in_background():
 
 def _run(args, timeout=None, **kw):
     if timeout is not None: kw["timeout"] = timeout
-    r = subprocess.run([RCLONE, *args], capture_output=True, text=True, **kw)
+    r = subprocess.run([RCLONE, *args], capture_output=True, text=True, **{**popen_kw(), **kw})
     if r.returncode != 0: raise RcloneError(r.stderr.strip()[-300:] or f"rclone {args[0]} failed")
     return r.stdout
 
@@ -373,7 +377,7 @@ def copyfile(src, dst, progress=None, cancelled=None, poll=0.5, timeout=None):
     dst = str(dst)
     if not DAEMON.available():
         return _fallback_copy(src, dst, timeout)
-    if ":" in src and not src.startswith("/"): fs, remote = src.split(":", 1)[0] + ":", src.split(":", 1)[1]
+    if is_remote_path(src): fs, remote = src.split(":", 1)[0] + ":", src.split(":", 1)[1]
     else: fs, remote = os.path.split(src)                        # a local file: its folder is the fs, the name the remote part
     dst_dir, dst_name = os.path.split(dst)
     group = f"job/{secrets.token_hex(4)}"

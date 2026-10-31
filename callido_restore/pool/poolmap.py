@@ -1,6 +1,7 @@
 """Build the bucket -> writer map for a Hyper Backup pool (see core/pool.py for the format notes)."""
 import os, json, struct, bisect, collections, subprocess, sys, threading, time
 from array import array
+from callido_restore import oscompat
 from callido_restore.core.pool import BLOCK, WRITER_OF_SET, SET_OF_WRITER, load_runs
 
 class WriterModel:
@@ -243,8 +244,15 @@ MAPPER_VERSION = "anchor+place-v3"               # bump when the map's meaning c
 RUNNING = set()                                  # mapper children alive right now (Quit kills them with their workers)
 
 def _kill_group(p, grace=3.0):
-    """SIGTERM to the child's whole process group (the mapper and its scan workers), SIGKILL after ``grace`` seconds."""
+    """SIGTERM to the child's whole process group (the mapper and its scan workers), SIGKILL after ``grace`` seconds.
+    Windows has no process-group signals and the child has no console for a Ctrl-Break: taskkill /T ends the tree at once
+    (the mapper writes its outputs atomically, so a hard stop leaves nothing half-written)."""
     import signal
+    if oscompat.WINDOWS:
+        if not oscompat.kill_tree(p.pid): p.kill()
+        try: p.wait(grace)
+        except subprocess.TimeoutExpired: pass
+        return
     try: os.killpg(p.pid, signal.SIGTERM)
     except (ProcessLookupError, PermissionError, AttributeError): p.terminate()
     try: p.wait(grace)
@@ -353,8 +361,8 @@ def build_poolmap_detached(source, outdir, log=print, max_bucket=None, cancelled
     child's last lines when it fails. ``DETACHED = False`` (tests) runs in-process instead."""
     if not DETACHED: return build_map(source, outdir, log, max_bucket)
     cmd, env = _mapper_command(source.id, outdir, max_bucket)
-    # Its own session: the child's scan workers are in the same process group, so Stop (or Quit) ends all of them at once.
-    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, text=True, env=env, start_new_session=True)
+    # Its own session (Windows: process group): the child's scan workers are in the same process group, so Stop (or Quit) ends all of them at once.
+    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, text=True, env=env, **oscompat.popen_kw(new_group=True))
     RUNNING.add(p)
     tail = collections.deque(maxlen=8)
     def reader():

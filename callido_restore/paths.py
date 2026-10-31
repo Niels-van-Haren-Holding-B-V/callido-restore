@@ -1,7 +1,24 @@
 """Where things live: the user's settings folder and the bundled resources (static UI, rclone). Bottom layer, imports nothing
 from the package. Code reads these through the module (``paths.INDEX_DIR``), so tests can point them at a temp folder."""
-import os, sys
+import os, re, sys
 from pathlib import Path
+
+WINDOWS = os.name == "nt"
+_DRIVE = re.compile(r"[A-Za-z]:(?:[\\/]|$)")
+
+def is_local_abs(p, windows=None):
+    """An absolute local path: "/..." everywhere; on Windows also a drive ("C:\\x", "C:/x", "C:") or a UNC path ("\\\\nas\\share").
+    rclone reads a single letter before ":" as a drive on Windows too, so a remote can never be named like that there."""
+    w = WINDOWS if windows is None else windows
+    return p.startswith("/") or (w and (bool(_DRIVE.match(p)) or p.startswith(("\\\\", "//"))))
+
+def is_remote_path(p, windows=None):
+    """rclone 'remote:path' rather than a local path."""
+    return ":" in p and not is_local_abs(p, windows)
+
+def ui_path(p):
+    """A local path as the UI shows and joins it: forward slashes on Windows too ("C:/Users/x"), which Windows accepts."""
+    return Path(p).as_posix() if WINDOWS else str(p)
 
 def _resource_roots():
     """Directories that may hold bundled files (static/, rclone).

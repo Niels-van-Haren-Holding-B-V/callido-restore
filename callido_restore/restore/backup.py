@@ -11,6 +11,7 @@ from callido_restore.core.hbkmeta import ROOT_PARENT
 from callido_restore.core.hbkmeta import SCRIPT_EXT
 from callido_restore.core.hbkmeta import is_sqlite
 from callido_restore.core.hbkmeta import rev_of
+from callido_restore.oscompat import popen_kw
 from callido_restore.paths import RCLONE
 from callido_restore.restore.destination import file_target
 from callido_restore.restore.destination import list_destination
@@ -616,7 +617,7 @@ class Backup:
                         out = os.path.join(stage[root], rel); os.makedirs(os.path.dirname(out), exist_ok=True)
                         pool.extract(f["off"], out, size=f["size"], mtime=f["mtime"], job=None, fh_cache=fh_cache)
                         # --ignore-existing: if the file appeared at the target since the listing, rclone leaves it alone
-                        r = subprocess.run([RCLONE, "moveto", out, f"{root}/{rel}", "--ignore-existing", "--retries", "5", "--low-level-retries", "20", "--retries-sleep", "5s"], capture_output=True, text=True)
+                        r = subprocess.run([RCLONE, "moveto", out, f"{root}/{rel}", "--ignore-existing", "--retries", "5", "--low-level-retries", "20", "--retries-sleep", "5s"], capture_output=True, text=True, **popen_kw())
                         if r.returncode != 0: raise RuntimeError("upload failed: " + r.stderr.strip()[-200:])
                         if os.path.exists(out):      # not moved: the target already had it
                             os.unlink(out); job["skipped"] += 1; job["done_files"] += 1; break

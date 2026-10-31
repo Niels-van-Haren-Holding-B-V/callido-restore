@@ -4,12 +4,8 @@ import fnmatch, json, os, re, subprocess, threading, time, uuid
 from pathlib import Path
 from callido_restore import paths
 from callido_restore.core.hbkmeta import rev_of
-from callido_restore.paths import RCLONE
+from callido_restore.paths import RCLONE, is_local_abs, is_remote_path  # noqa: F401  (is_remote_path is re-exported)
 from callido_restore.sources import rclone
-
-def is_remote_path(p):
-    """rclone 'remote:path' rather than a local path."""
-    return ":" in p and not p.startswith("/")
 
 class Source:
     """A .hbk folder: local path, optionally mirrored on-demand from an rclone remote."""
@@ -74,7 +70,7 @@ class Source:
         .hbk then. The source is read-only, so a restore must never write into or around the .hbk; a restore back into the
         original shares (dest = the NAS root) is fine as long as the backup does not live in one of the restored shares."""
         d = dest.strip().replace("\\", "/").rstrip("/")
-        remote = ":" in d and not d.startswith("/")
+        remote = is_remote_path(d)
         def join(base, share):
             share = share.strip("/")
             if remote:
@@ -103,7 +99,7 @@ class Source:
             return False
         try: dp = Path(os.path.expanduser(w)).resolve()
         except OSError: dp = Path(os.path.expanduser(w))
-        roots = self.read_roots() + [Path(r) for r in self.remotes if r.startswith("/")]     # a "remote" may be a plain folder
+        roots = self.read_roots() + [Path(r) for r in self.remotes if is_local_abs(r)]     # a "remote" may be a plain folder
         for root in roots:
             try: rr = root.resolve()
             except OSError: rr = root
