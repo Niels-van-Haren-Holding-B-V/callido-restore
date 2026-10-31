@@ -284,7 +284,9 @@ class CancelDuringParse(unittest.TestCase):
             with self.assertRaises(cpool.Cancelled):
                 cpool.parse_record_stream([str(p)], lambda off, ids: seen.append(off), cancelled=lambda: True)
             self.assertLess(len(seen), 12000)
-            cpool.parse_record_stream([str(p)], lambda off, ids: None, cancelled=lambda: False)     # not cancelled: completes
+            fr = []
+            cpool.parse_record_stream([str(p)], lambda off, ids: None, cancelled=lambda: False, progress=fr.append)   # completes
+            self.assertTrue(fr and fr == sorted(fr) and 0 < fr[0] and fr[-1] <= 1.0)           # progress rises through the parse
 
     def test_build_runs_stops_before_the_first_set(self):
         with tempfile.TemporaryDirectory() as td:

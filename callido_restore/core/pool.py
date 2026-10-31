@@ -120,14 +120,17 @@ class Cancelled(Exception):
     """Raised inside a long parse when the caller's ``cancelled()`` says stop (the Stop button of the pool job)."""
 
 
-def parse_record_stream(path_iter, on_record, cancelled=None):
+def parse_record_stream(path_iter, on_record, cancelled=None, progress=None):
     """Sequentially parse a set's slices (list of local paths in order); calls on_record(stream_off, ids).
-    ``cancelled``: optional callable checked every few thousand records; raises Cancelled when it returns true."""
+    ``cancelled``: optional callable checked every few thousand records; raises Cancelled when it returns true.
+    ``progress``: optional callable given the fraction of bytes parsed, every few thousand records."""
     data = b"".join(open(p, "rb").read() for p in path_iter)
     n = len(data); p = 64; seen = 0
     while p + 8 <= n:
         seen += 1
-        if cancelled is not None and seen % 5000 == 0 and cancelled(): raise Cancelled()
+        if seen % 5000 == 0:
+            if cancelled is not None and cancelled(): raise Cancelled()
+            if progress is not None: progress(p / n)
         magic, ln = struct.unpack_from(">II", data, p)
         if (magic >> 16) != 0xa93b:
             q = data.find(b"\xa9\x3b", p + 1)
@@ -223,10 +226,11 @@ def file_pool_chunks(path):
     return out
 
 # ----------------------------------------------------------------------------- offline analysis: record runs
-def build_runs(source, outdir, log=print, cancelled=None):
+def build_runs(source, outdir, log=print, cancelled=None, progress=None):
     """Parse all 4 record streams. Writes <outdir>/runs_set<s>.bin (rec_off,u64 g_start,u32 len triples) and
     blocks.json (block -> owning writer, by longest consecutive runs). ``cancelled()`` true (Stop) returns None before
-    the next set or mid-parse; the sets already written stay, the run is simply redone next time."""
+    the next set or mid-parse; the sets already written stay, the run is simply redone next time. ``progress(fraction)``
+    follows the four sets (a set's own parse fraction counts for a quarter)."""
     from array import array
     os.makedirs(outdir, exist_ok=True)
     owner_votes = collections.defaultdict(lambda: [0, 0, 0, 0])   # block -> votes per writer (sum of run lengths >= 2)
@@ -252,8 +256,9 @@ def build_runs(source, outdir, log=print, cancelled=None):
                     b0, b1 = ids[i] // BLOCK, ids[j - 1] // BLOCK
                     for b in range(b0, b1 + 1): owner_votes[b][w] += j - i
                 i = j
-        try: parse_record_stream(paths, on_record, cancelled)
+        try: parse_record_stream(paths, on_record, cancelled, (lambda f: progress((s - 1 + f) / 4)) if progress else None)
         except Cancelled: return None
+        if progress: progress(s / 4)
         with open(os.path.join(outdir, f"runs_set{s}.bin"), "wb") as f:
             f.write(struct.pack("<Q", len(g0))); rec_off.tofile(f); g0.tofile(f); ln.tofile(f)
         stats[s] = {"records": nrec, "refs": nrefs, "runs": len(g0)}
