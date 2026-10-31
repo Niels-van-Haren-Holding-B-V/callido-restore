@@ -136,25 +136,26 @@ def _terminate(pid, grace=2.0):
     return True
 
 def _ps():
-    """[(pid, ppid, command)] of every process (patched in tests); [] where ``ps`` is not available."""
+    """[(pid, ppid, executable)] of every process (patched in tests); [] where ``ps`` is not available. ``comm`` is the
+    executable path, not the command line: a process that merely names our rclone in an argument must not match."""
     if os.name == "nt": return []
-    try: r = subprocess.run(["ps", "-axo", "pid=,ppid=,command="], capture_output=True, text=True)
+    try: r = subprocess.run(["ps", "-axo", "pid=,ppid=,comm="], capture_output=True, text=True)
     except OSError: return []
     rows = []
     for line in r.stdout.splitlines():
-        parts = line.split(None, 2)
-        if len(parts) == 3 and parts[0].isdigit() and parts[1].isdigit(): rows.append((int(parts[0]), int(parts[1]), parts[2]))
+        parts = line.split(None, 2)                                 # the executable path may contain spaces (the app name does)
+        if len(parts) == 3 and parts[0].isdigit() and parts[1].isdigit(): rows.append((int(parts[0]), int(parts[1]), parts[2].strip()))
     return rows
 
 def kill_orphans():
-    """Stop rclone processes of this app that outlived it: the bundled rclone (``<app>.app/Contents/Frameworks/rclone``, any
-    install location) whose parent is gone (re-parented to pid 1). A crashed app leaves its daemon and the copy it was running
+    """Stop rclone processes of this app that outlived it: processes whose executable is the bundled rclone
+    (``<app>.app/Contents/Frameworks/rclone``, any install location) and whose parent is gone (re-parented to pid 1). A crashed app leaves its daemon and the copy it was running
     behind; they keep using the user's Google Drive quota, so the live app's downloads crawl. Processes with a living parent
     (another running copy of the app) and rclone binaries from elsewhere are never touched. Returns the number stopped."""
-    marker = f"{APP_NAME}.app/Contents/Frameworks/rclone"
+    marker = f"/{APP_NAME}.app/Contents/Frameworks/rclone"
     stopped = 0
-    for pid, ppid, cmd in _ps():
-        if ppid != 1 or pid == os.getpid() or marker not in cmd: continue
+    for pid, ppid, exe in _ps():
+        if ppid != 1 or pid == os.getpid() or not exe.endswith(marker): continue
         if _terminate(pid): stopped += 1
     return stopped
 

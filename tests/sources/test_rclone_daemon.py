@@ -109,11 +109,13 @@ class StaleDaemon(unittest.TestCase):
 
 class Orphans(unittest.TestCase):
     """rclone processes of a crashed app: the bundled binary with a dead parent is stopped, anything else is left alone."""
-    ROWS = [(500, 1, "/Volumes/Callido Restore/Callido Restore.app/Contents/Frameworks/rclone copyto gdrive:x/f /tmp/f.part"),
-            (501, 1, "/Volumes/Callido Restore/Callido Restore.app/Contents/Frameworks/rclone rcd --rc-addr 127.0.0.1:59619"),
-            (502, 300, "/Applications/Callido Restore.app/Contents/Frameworks/rclone rcd --rc-addr 127.0.0.1:61940"),   # another running app
-            (503, 1, "/opt/homebrew/bin/rclone copy a: b"),                                                                 # not ours
-            (504, 1, "/Applications/Other.app/Contents/Frameworks/rclone rcd")]
+    ROWS = [(500, 1, "/Volumes/Callido Restore/Callido Restore.app/Contents/Frameworks/rclone"),                  # the crashed app's copy
+            (501, 1, "/Volumes/Callido Restore/Callido Restore.app/Contents/Frameworks/rclone"),                  # and its daemon
+            (502, 300, "/Applications/Callido Restore.app/Contents/Frameworks/rclone"),                          # another running app (parent alive)
+            (503, 1, "/opt/homebrew/bin/rclone"),                                                                # not ours
+            (504, 1, "/Applications/Other.app/Contents/Frameworks/rclone"),
+            (505, 1, "/usr/bin/xattr"),                                                                          # a launchd job naming our rclone as an argument
+            (506, 1, "/Applications/Callido Restore.app/Contents/MacOS/Callido Restore")]                        # the app itself, not its rclone
     def test_only_bundled_rclone_with_dead_parent_is_stopped(self):
         with mock.patch.object(rc, "_ps", return_value=self.ROWS), mock.patch.object(rc, "_alive", return_value=False), \
              mock.patch.object(os, "kill") as kill:
@@ -121,9 +123,10 @@ class Orphans(unittest.TestCase):
         self.assertEqual(kill.call_args_list, [mock.call(500, 15), mock.call(501, 15)])
 
     def test_ps_rows_are_parsed(self):
-        out = subprocess.CompletedProcess([], 0, stdout="  500     1 /Applications/Callido Restore.app/Contents/Frameworks/rclone rcd --x\n  bad line\n", stderr="")
-        with mock.patch.object(subprocess, "run", return_value=out):
-            self.assertEqual(rc._ps(), [(500, 1, "/Applications/Callido Restore.app/Contents/Frameworks/rclone rcd --x")])
+        out = subprocess.CompletedProcess([], 0, stdout="  500     1 /Applications/Callido Restore.app/Contents/Frameworks/rclone\n  bad line\n", stderr="")
+        with mock.patch.object(subprocess, "run", return_value=out) as run:
+            self.assertEqual(rc._ps(), [(500, 1, "/Applications/Callido Restore.app/Contents/Frameworks/rclone")])
+        self.assertEqual(run.call_args[0][0], ["ps", "-axo", "pid=,ppid=,comm="])                                  # the executable, not the command line
 
 
 class DeadDaemon(unittest.TestCase):
