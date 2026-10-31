@@ -170,3 +170,58 @@ class RealDaemon(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CopyFile(unittest.TestCase):
+    """Downloads through the daemon: async copyfile, bytes/speed/retry note from core/stats, cancel, fallback."""
+    def test_async_copy_reports_progress_and_finishes(self):
+        d = tempfile.mkdtemp(); self.addCleanup(shutil.rmtree, d, True)
+        dst = os.path.join(d, "f.bin"); calls = []; polls = {"n": 0}
+        def fake_rc(m, timeout=None, **p):
+            calls.append(m)
+            if m == "operations/copyfile":
+                self.assertEqual((p["srcFs"], p["srcRemote"], p["dstFs"], p["dstRemote"]), ("gdrive:", "x/file", d, "f.bin"))
+                self.assertTrue(p["_async"]); return {"jobid": 7}
+            if m == "job/status":
+                polls["n"] += 1
+                if polls["n"] >= 3:
+                    open(dst, "wb").write(b"x" * 30); return {"finished": True, "success": True}
+                return {"finished": False}
+            if m == "core/stats": return {"bytes": 0, "speed": 1234.5, "transferring": [{"bytes": 10 * polls["n"]}], "lastError": "googleapi: Error 403: userRateLimitExceeded" if polls["n"] == 1 else ""}
+            if m == "core/stats-delete": return {}
+            raise AssertionError(m)
+        seen = []
+        with mock.patch.object(rc.DAEMON, "available", return_value=True), mock.patch.object(rc.DAEMON, "rc", side_effect=fake_rc):
+            rc.copyfile("gdrive:x/file", dst, progress=lambda b, s, n: seen.append((b, s, n)), poll=0)
+        self.assertEqual(seen[0], (10, 1234.5, "rate-limited, retrying")); self.assertEqual(seen[1][2], "")
+        self.assertEqual(seen[-1], (30, 0.0, "")); self.assertIn("core/stats-delete", calls)
+
+    def test_failed_job_raises(self):
+        def fake_rc(m, timeout=None, **p):
+            return {"jobid": 1} if m == "operations/copyfile" else {"finished": True, "success": False, "error": "directory not found"} if m == "job/status" else {}
+        with mock.patch.object(rc.DAEMON, "available", return_value=True), mock.patch.object(rc.DAEMON, "rc", side_effect=fake_rc):
+            with self.assertRaises(rc.RcloneError) as cm: rc.copyfile("nas:x/missing", "/tmp/never", poll=0)
+        self.assertIn("directory not found", str(cm.exception))
+
+    def test_cancel_stops_the_job(self):
+        calls = []
+        def fake_rc(m, timeout=None, **p):
+            calls.append(m); return {"jobid": 1} if m == "operations/copyfile" else {"finished": False} if m == "job/status" else {}
+        with mock.patch.object(rc.DAEMON, "available", return_value=True), mock.patch.object(rc.DAEMON, "rc", side_effect=fake_rc):
+            with self.assertRaises(rc.RcloneError) as cm: rc.copyfile("nas:x/f", "/tmp/never", cancelled=lambda: True, poll=0)
+        self.assertEqual(str(cm.exception), "cancelled"); self.assertIn("job/stop", calls)
+
+    def test_without_daemon_runs_copyto(self):
+        ok = subprocess.CompletedProcess([], 0, stdout="", stderr="")
+        with mock.patch.object(rc.DAEMON, "available", return_value=False), mock.patch.object(subprocess, "run", return_value=ok) as run:
+            rc.copyfile("nas:x/f", "/tmp/out")
+        self.assertEqual(run.call_args[0][0][1:4], ["copyto", "nas:x/f", "/tmp/out"])
+
+    @unittest.skipUnless(rc.RCLONE and shutil.which(rc.RCLONE), "needs an rclone binary")
+    def test_real_daemon_copies_a_local_file(self):
+        d = tempfile.mkdtemp(); self.addCleanup(shutil.rmtree, d, True)
+        src = os.path.join(d, "src", "a.bin"); os.makedirs(os.path.dirname(src)); open(src, "wb").write(b"z" * 100000)
+        self.assertTrue(rc.start(timeout=15)); self.addCleanup(rc.stop)
+        seen = []
+        rc.copyfile(src, os.path.join(d, "out", "a.bin"), progress=lambda b, s, n: seen.append(b), poll=0.05)
+        self.assertEqual(open(os.path.join(d, "out", "a.bin"), "rb").read(), b"z" * 100000); self.assertEqual(seen[-1], 100000)

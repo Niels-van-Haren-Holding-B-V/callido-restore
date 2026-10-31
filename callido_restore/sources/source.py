@@ -189,13 +189,15 @@ class Source:
             if r and (best is None or r[0] > best[2]): best = (n, e, r[0], r[1])
         return best
 
-    def ensure(self, rel, job=None):
+    def ensure(self, rel, job=None, progress=None, cancelled=None):
         """Return a readable path for rel.
 
         An existing file in the app cache or in a source folder is reused (so an
         earlier download into a mirror is not fetched again). A missing file is
         downloaded from the remote into the app cache only. Source folders are
-        not created, replaced, or deleted.
+        not created, replaced, or deleted. ``progress(bytes, speed, note)`` follows
+        the download (through the rclone daemon: live bytes, speed and a
+        'rate-limited, retrying' note); ``cancelled()`` true aborts it.
         """
         found = self.locate(rel)
         if found is not None:
@@ -208,15 +210,20 @@ class Source:
         for attempt in range(4):                       # outer retry: 4 rounds over all remotes, growing pauses
             for remote in self.remotes:
                 if job: job["message"] = f"fetching {rel} from {remote.split(':')[0]}" + (f" (retry {attempt})" if attempt else "")
-                # copyto reads the remote and writes the local temp file. Never the other way.
-                r = subprocess.run([RCLONE, "copyto", f"{remote}/{rel}", str(tmp), "--retries", "5", "--low-level-retries", "20",
-                                    "--retries-sleep", "5s", "--tpslimit", "8", "--drive-pacer-min-sleep", "100ms"], capture_output=True, text=True)
-                if r.returncode == 0 and tmp.is_file():
+                # the copy reads the remote and writes the local temp file. Never the other way.
+                try:
+                    rclone.copyfile(f"{remote}/{rel}", tmp, progress=progress, cancelled=cancelled)
+                    ok = tmp.is_file()
+                except rclone.RcloneError as e:
+                    ok = False; errs.append(f"{remote}: {str(e)[-160:]}")
+                    if str(e) == "cancelled":
+                        if tmp.exists(): tmp.unlink()
+                        raise RuntimeError(f"fetch of {rel} cancelled")
+                if ok:
                     tmp.rename(dest)
                     parent = str(Path(rel).parent).strip("/")
                     with self._lock: self._list.pop("" if parent == "." else parent, None)   # that listing is stale now (root key is "")
                     return dest
-                errs.append(f"{remote}: {r.stderr.strip()[-160:]}")
                 if tmp.exists(): tmp.unlink()
             time.sleep([3, 15, 60, 0][attempt])
         raise RuntimeError(f"fetch failed for {rel} after retries: {errs[-1] if errs else '?'}")

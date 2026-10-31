@@ -22,7 +22,7 @@ def _rec(idx, n, entries=None, tagged=True):
 
 class _Src:
     def __init__(self, local): self.local = Path(local)
-    def ensure(self, rel, job=None): return self.local / rel
+    def ensure(self, rel, job=None, progress=None, cancelled=None): return self.local / rel
 
 
 class NewRange(unittest.TestCase):
