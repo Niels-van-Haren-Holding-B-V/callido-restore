@@ -6,7 +6,8 @@ from pathlib import Path
 from urllib.parse import urlparse, parse_qs, unquote
 from callido_restore import paths
 from callido_restore.about import APP_NAME, TAGLINE, NOTICE, VERSION
-from callido_restore.paths import RCLONE, _bundled
+from callido_restore.oscompat import popen_kw
+from callido_restore.paths import RCLONE, _bundled, is_remote_path, ui_path
 from callido_restore.restore.backup import Backup
 from callido_restore.restore.destination import restore_target_error
 from callido_restore.restore.jobs import JOBS, start_job
@@ -40,6 +41,35 @@ def job_file(jid):
 
 BACKUPS = {}
 
+# The pool preparation is not optional (every restore needs the map), so it starts by itself: after the backup is opened and
+# after every share load, as soon as a raw snapshot is local, unless a map exists, a preparation runs, or the user paused it.
+AUTOPREPARE = os.environ.get("HBK_NO_AUTOPREPARE") != "1"
+POOL_LOCK = threading.Lock()                     # check-and-start of a preparation is atomic: open, share loads and Resume all race
+
+def pool_job(sid):
+    """The running preparation job of a source, or None."""
+    return next((j for j in JOBS.values() if j["state"] == "running" and j["label"] == "build pool map" and j.get("src") == sid), None)
+
+def start_pool_job(sid, b, max_bucket=None):
+    """The running preparation of the source, or a new one (lifting a pause). Never two for one source."""
+    with POOL_LOCK:
+        j = pool_job(sid)
+        if j: return j
+        b.set_pool_paused(False)
+        return start_job(lambda job: b.build_pool(job, max_bucket), "build pool map", src=sid)
+
+def maybe_autoprepare(sid):
+    """Start the preparation when it can run and has not finished; None when nothing was started (and why is not an error)."""
+    if not AUTOPREPARE or sid not in BACKUPS: return None
+    b = BACKUPS[sid]
+    try:                                                   # the slow checks (a share listing may go to the remote) run outside the lock
+        if pool_job(sid) or b.pool_paused() or b.pool_status().get("complete") or not b.raw_snapshots(): return None
+    except Exception: return None
+    with POOL_LOCK:                                        # the cheap checks again, atomically with the start
+        if pool_job(sid) or b.pool_paused(): return None
+        b.set_pool_paused(False)
+        return start_job(lambda job: b.build_pool(job, None), "build pool map", src=sid)
+
 def backup_for(sid, refresh=False, log=None):
     if sid not in SOURCES: raise KeyError(f"unknown source {sid}")
     if refresh: SOURCES[sid].forget_listings()                   # the ↻ button: read the backup's folders from the remote again
@@ -72,7 +102,7 @@ class H(BaseHTTPRequestHandler):
                 p = Path(os.path.expanduser(q.get("path") or "~"))
                 if not p.is_dir(): p = p.parent
                 items = sorted([e.name for e in p.iterdir() if e.is_dir() and not e.name.startswith(".")], key=str.lower)
-                return self._json({"path": str(p), "parent": str(p.parent), "dirs": items})
+                return self._json({"path": ui_path(p), "parent": ui_path(p.parent), "dirs": items})
             if u.path == "/api/dest/check":   # restore destination: is it inside the backup? does it exist? is it empty?
                 dest = (q.get("dest") or "").strip(); src = SOURCES.get(q.get("src") or "")     # no backup scan needed for this
                 shares = json.loads(q.get("shares") or "[]")                                    # selected shares: the restore writes dest/<share>/...
@@ -80,7 +110,7 @@ class H(BaseHTTPRequestHandler):
                 else: conflict = src.contains_dest(dest, shares) if src and dest else ""
                 out = {"dest": dest, "inside_source": bool(conflict), "conflict": conflict or None, "exists": False, "empty": None, "files": 0}
                 if not dest: return self._json(out | {"error": "no destination"})
-                if ":" in dest and not dest.startswith("/"):
+                if is_remote_path(dest):
                     try:
                         ents = rclone.ls(dest, max_depth=1, timeout=120); out["exists"] = True; out["files"] = len(ents); out["empty"] = not ents
                     except rclone.RcloneError as e:
@@ -117,7 +147,7 @@ class H(BaseHTTPRequestHandler):
                     pp = Path(os.path.expanduser(path or "~"))
                     try: dirs = sorted(e.name for e in pp.iterdir() if e.is_dir() and not e.name.startswith(".")); files = sorted(e.name for e in pp.iterdir() if e.is_file())[:50]
                     except OSError as e: return self._json({"error": str(e)})
-                    path = str(pp)
+                    path = ui_path(pp)
                 looks_hbk = "Config" in dirs and "Pool" in dirs
                 return self._json({"path": path, "dirs": dirs, "files": files[:50], "looks_like_hbk": looks_hbk, "hbk_dirs": [d for d in dirs if d.endswith(".hbk")]})
             if u.path == "/api/rclone/connect":  # secrets (password, client secret) go in a POST body, never in the query string
@@ -144,7 +174,8 @@ class H(BaseHTTPRequestHandler):
                     if sid not in SOURCES: return self._json({"error": f"unknown source {sid}"}, 404)
                     def run(job):
                         job["message"] = "Opening the backup…"
-                        backup_for(sid, refresh=refresh, log=lambda m: job.__setitem__("message", m)); return {"ok": True}
+                        backup_for(sid, refresh=refresh, log=lambda m: job.__setitem__("message", m))
+                        maybe_autoprepare(sid); return {"ok": True}
                     return self._json(start_job(run, "open backup"))
                 b = backup_for(q["src"], refresh=q.get("refresh") == "1"); return self._json(b.info)
             b = backup_for(q["src"])
@@ -159,6 +190,7 @@ class H(BaseHTTPRequestHandler):
                         job["message"] = f"{sh}: preparing"; job["progress"] = i / len(shares)
                         try: out.append({"share": sh, "ok": True, "path": b.build_index(sh, ver, job)})
                         except Exception as e: out.append({"share": sh, "ok": False, "error": str(e)})
+                    maybe_autoprepare(q["src"])                        # a raw snapshot is local now: the preparation can run
                     return out
                 return self._json(start_job(run, f"index v{ver} {share}"))
             if u.path == "/api/query": return self._json(b.query(q.get("share", "*"), int(q["ver"]), q))
@@ -166,10 +198,12 @@ class H(BaseHTTPRequestHandler):
             if u.path == "/api/histogram": return self._json(b.histogram(q.get("share", "*"), int(q["ver"]), q))
             if u.path == "/api/file": return self._json(b.file_detail(q["share"], int(q["ver"]), q["id"]))
             if u.path == "/api/diff": return self._json(b.diff(q["share"], int(q["a"]), int(q["b"])))
-            if u.path == "/api/pool": return self._json(b.pool_status())
-            if u.path == "/api/pool/build":
+            if u.path == "/api/pool/build":                       # an explicit start also lifts a pause
                 mb = int(q["max_bucket"]) if q.get("max_bucket") else None
-                return self._json(start_job(lambda job: b.build_pool(job, mb), "build pool map"))
+                return self._json(start_pool_job(q["src"], b, mb))
+            if u.path == "/api/pool":
+                st = b.pool_status(); j = pool_job(q["src"]); st["running"] = j["id"] if j else None
+                return self._json(st)
             if u.path == "/api/restore_count":
                 return self._json(b.restore_count(json.loads(q["items"]), q.get("skip_meta", "1") == "1"))
             if u.path == "/api/restore_plan":
@@ -200,6 +234,18 @@ class H(BaseHTTPRequestHandler):
         try:
             if u.path == "/api/sources":
                 s = add_source(body["name"], body["local"], body.get("remote"), body.get("extra")); return self._json(s.to_json())
+            if u.path in ("/api/pool/pause", "/api/pool/resume"):   # the user's pause survives share loads and restarts
+                sid = body.get("src")
+                if sid not in SOURCES: return self._json({"error": f"unknown source {sid}"}, 404)
+                b = backup_for(sid)
+                if u.path.endswith("pause"):
+                    b.set_pool_paused(True); j = pool_job(sid)
+                    if j: j["cancel"] = True
+                    return self._json({"paused": True, "cancelled": j["id"] if j else None})
+                b.set_pool_paused(False)
+                if b.pool_status().get("complete") and not pool_job(sid):   # nothing to resume: say so instead of a full rebuild
+                    st = b.pool_status(); st["running"] = None; return self._json(st)
+                return self._json(start_pool_job(sid, b))
             if u.path == "/api/rclone/connect":  # start an rclone config (opens the browser for Google); body carries the secrets
                 name = re.sub(r"[^A-Za-z0-9_-]", "", body.get("name") or "gdrive") or "gdrive"
                 kind = body.get("kind", "drive")
@@ -221,7 +267,7 @@ class H(BaseHTTPRequestHandler):
                     # the password is handed to rclone over stdin ("-"), so it never appears in a process list; the obscured
                     # form that lands in rclone.conf is the only thing passed as an argument
                     pw = (body.get("password") or "").replace("\n", "")
-                    obs = subprocess.run([RCLONE, "obscure", "-"], input=pw + "\n", capture_output=True, text=True).stdout.strip()
+                    obs = subprocess.run([RCLONE, "obscure", "-"], input=pw + "\n", capture_output=True, text=True, **popen_kw()).stdout.strip()
                     if not obs: return self._json({"error": "rclone could not prepare the password"}, 500)
                     args = [RCLONE, "config", "create", name, "smb", f"host={body.get('host', '')}", f"user={body.get('user', '')}", f"pass={obs}", "--obscure=false", "--non-interactive"]
                 def run(job):
@@ -244,7 +290,7 @@ class H(BaseHTTPRequestHandler):
                         except rclone.RcloneError as e: raise RuntimeError(str(e))
                     else:
                         job["message"] = "Connecting…"
-                        r = subprocess.run(args, capture_output=True, text=True, timeout=600)
+                        r = subprocess.run(args, capture_output=True, text=True, timeout=600, **popen_kw())
                         if r.returncode != 0: raise RuntimeError(r.stderr.strip()[-400:] or "rclone config failed")
                     rclone.forget(); rclone.fscache_clear()                     # new or changed connection: cached listings and backends are stale
                     job["message"] = "Listing your Drive…" if kind == "drive" else "Listing the shares…"     # the root listing can take a while

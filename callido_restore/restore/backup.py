@@ -11,7 +11,8 @@ from callido_restore.core.hbkmeta import ROOT_PARENT
 from callido_restore.core.hbkmeta import SCRIPT_EXT
 from callido_restore.core.hbkmeta import is_sqlite
 from callido_restore.core.hbkmeta import rev_of
-from callido_restore.paths import RCLONE
+from callido_restore.oscompat import popen_kw
+from callido_restore.paths import RCLONE, ui_path
 from callido_restore.restore.destination import file_target
 from callido_restore.restore.destination import list_destination
 from callido_restore.restore.destination import place_file
@@ -349,11 +350,39 @@ class Backup:
         st = self.pool.status(); st["lz4"] = True
         try: import lz4  # noqa
         except Exception: st["lz4"] = False
+        st["complete"] = self.pool_prepared()           # a run of this mapper version finished (partial maps are its honest result)
+        st["paused"] = self.pool_paused()
         return st
+    # --- preparation state the UI and the auto-start read (persisted next to the pool files): finished by which mapper version,
+    # paused by the user. A leftover map from a stopped run, a test run or an older mapper does not count as finished.
+    def _prepared_file(self): return self.src.index_dir / "pool" / "prepared.json"
+    def pool_prepared(self):
+        from callido_restore.pool import poolmap
+        try: return json.loads(self._prepared_file().read_text()).get("mapper") == poolmap.MAPPER_VERSION
+        except (OSError, ValueError): return False
+    def mark_prepared(self, mapped, total):
+        from callido_restore.pool import poolmap
+        p = self._prepared_file(); p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps({"mapper": poolmap.MAPPER_VERSION, "finished": time.time(), "mapped": mapped, "total": total}))
+    def _pause_file(self): return self.src.index_dir / "pool" / "paused"
+    def pool_paused(self): return self._pause_file().is_file()
+    def set_pool_paused(self, on):
+        p = self._pause_file()
+        if on: p.parent.mkdir(parents=True, exist_ok=True); p.write_text("paused by the user\n")
+        elif p.exists(): p.unlink()
+    def raw_snapshots(self):
+        """Local raw <ver>.db snapshot files (one per share whose file list was loaded): the record tags come from these."""
+        out = []
+        for sh in self.shares:
+            for n, e in self.src.listdir(f"Config/@Share/{sh}").items():
+                if e["local"] and re.match(r"^\d+\.db\.\d+$", n): out.append(str(self.src.ensure(f"Config/@Share/{sh}/{n}")))
+        return out
     def build_pool(self, job, max_bucket=None):
         from callido_restore.pool import poolmap, indexfetch
         from callido_restore.core import pool
         pool_dir = self.src.index_dir / "pool"; pool_dir.mkdir(parents=True, exist_ok=True)
+        try: self._prepared_file().unlink()                        # a run in progress is not a finished one
+        except OSError: pass
         log = lambda m: job.__setitem__("message", str(m))
         def stopped(stage):
             job["message"] = f"stopped during {stage} — run Build again to continue"
@@ -380,10 +409,7 @@ class Backup:
                             progress=lambda f: job.__setitem__("progress", 0.1 + 0.2 * f), report=report)   # this phase spans 10-30 % of the job
         if job.get("cancel"): return stopped("chunk-records")
         job["message"] = "collecting file sizes from loaded snapshots"; job["progress"] = 0.3
-        dbs = [(str(p), "index") for p in self.src.index_dir.glob("*__*.sqlite")]
-        for sh in self.shares:
-            for n, e in self.src.listdir(f"Config/@Share/{sh}").items():
-                if e["local"] and re.match(r"^\d+\.db\.\d+$", n): dbs.append((str(self.src.ensure(f"Config/@Share/{sh}/{n}")), "raw"))
+        dbs = [(str(p), "index") for p in self.src.index_dir.glob("*__*.sqlite")] + [(p, "raw") for p in self.raw_snapshots()]
         pool.build_recsizes(self.src, dbs, str(pool_dir), log, cancelled=lambda: bool(job.get("cancel")))
         if job.get("cancel"): return stopped("record-sizes")
         # The anchor-first mapper (T1) identifies records by the file tags of the raw snapshots: recmeta_set<s>.json.
@@ -419,6 +445,7 @@ class Backup:
         res, upto = poolmap.build_poolmap_detached(self.src, str(pool_dir), mlog, max_bucket=max_bucket, cancelled=lambda: bool(job.get("cancel")))
         self._pool = None
         if job.get("cancel"): return stopped("mapping")
+        if max_bucket is None: self.mark_prepared(len(res), self.pool_status().get("total_buckets", 0))   # finished: the auto-start leaves it alone (a max_bucket test run is not a finished preparation)
         return {"mapped": len(res), "upto": upto}
     def restore_plan(self, items, skip_meta=True):
         """items: [{share, ver, path, is_dir}] -> list of file rows (dicts) to restore."""
@@ -469,7 +496,7 @@ class Backup:
             m["files"] += len(mine); m["bytes"] += sum(f["size"] for f in mine)
             if mine and m["sample_from"] is None:
                 root, rel = file_target(mine[0], items, dest)
-                m["sample_from"] = f"{mine[0]['share']}/{mine[0]['path']}"; m["sample_to"] = f"{root}/{rel}" if root else rel
+                m["sample_from"] = f"{mine[0]['share']}/{mine[0]['path']}"; m["sample_to"] = (f"{root}/{rel}" if is_remote_path(root) else ui_path(f"{root}/{rel}")) if root else rel   # Windows: one separator
         return {"files": len(files), "bytes": sum(f["size"] for f in files), "mappings": out, "sample": [f"{f['share']}/{f['path']}" for f in files[:20]]}
     def restore(self, items, dest, job, skip_meta=True, start_at=0):
         """Restore the selected items. An item with its own 'dest' gets its contents there (H8: one target per folder);
@@ -590,7 +617,7 @@ class Backup:
                         out = os.path.join(stage[root], rel); os.makedirs(os.path.dirname(out), exist_ok=True)
                         pool.extract(f["off"], out, size=f["size"], mtime=f["mtime"], job=None, fh_cache=fh_cache)
                         # --ignore-existing: if the file appeared at the target since the listing, rclone leaves it alone
-                        r = subprocess.run([RCLONE, "moveto", out, f"{root}/{rel}", "--ignore-existing", "--retries", "5", "--low-level-retries", "20", "--retries-sleep", "5s"], capture_output=True, text=True)
+                        r = subprocess.run([RCLONE, "moveto", out, f"{root}/{rel}", "--ignore-existing", "--retries", "5", "--low-level-retries", "20", "--retries-sleep", "5s"], capture_output=True, text=True, **popen_kw())
                         if r.returncode != 0: raise RuntimeError("upload failed: " + r.stderr.strip()[-200:])
                         if os.path.exists(out):      # not moved: the target already had it
                             os.unlink(out); job["skipped"] += 1; job["done_files"] += 1; break

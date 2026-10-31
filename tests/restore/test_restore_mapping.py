@@ -253,7 +253,7 @@ class RestoreApiTests(_Fixture):
     def test_plan_mappings_preview(self):
         out = self.get("/api/restore_plan?src=t8&dest=&items=" + json.dumps(self.items).replace(" ", "%20").replace('"', "%22"))
         self.assertEqual(out["files"], 4)
-        self.assertEqual(out["mappings"][1]["sample_to"], os.path.join(self.dB, "docs", "z.txt"))
+        self.assertEqual(os.path.normpath(out["mappings"][1]["sample_to"]), os.path.join(self.dB, "docs", "z.txt"))   # a preview string; "/" inside on Windows
         self.assertEqual(out["mappings"][1]["sample_from"], "B/docs/z.txt")
         self.assertEqual((out["mappings"][0]["files"], out["mappings"][0]["dest"]), (2, self.dA))
 

@@ -47,8 +47,9 @@ class ContainsDestTests(SourceFixture):
     def test_local_written_roots(self):
         c = self.src.contains_dest
         parent = os.path.dirname(self.local)                                       # .../mirror, which holds backup_1.hbk
-        self.assertEqual(c(parent, ["backup_1.hbk"]), os.path.join(parent, "backup_1.hbk"))      # would write into the backup
-        self.assertEqual(c(os.path.dirname(parent), ["mirror"]), os.path.join(self.tmp.name, "mirror"))   # the backup lies inside the written root
+        n = os.path.normpath                                                        # Windows reports these with forward slashes
+        self.assertEqual(n(c(parent, ["backup_1.hbk"])), os.path.join(parent, "backup_1.hbk"))      # would write into the backup
+        self.assertEqual(n(c(os.path.dirname(parent), ["mirror"])), os.path.join(self.tmp.name, "mirror"))   # the backup lies inside the written root
         self.assertEqual(c(parent, ["homes", "Photos"]), "")                  # siblings of the backup are fine
         self.assertEqual(c(os.path.join(self.tmp.name, "restore"), ["homes"]), "")
 
@@ -197,7 +198,7 @@ class DestCheckApiTests(SourceFixture):
         check.assert_called_once_with("123-abc.apps.googleusercontent.com", "GOCSPX-x")                  # the pair is checked with Google before the browser opens
         self.assertIn('token={"access_token":"t"}', create); self.assertIn("--non-interactive", create)      # the token from the sign-in, no questions
         self.assertEqual(auth.call_args[0][:2], ("123-abc.apps.googleusercontent.com", "GOCSPX-x"))
-        self.assertTrue(str(auth.call_args[1]["template"]).endswith("static/oauth.html"))
+        self.assertTrue(Path(auth.call_args[1]["template"]).as_posix().endswith("static/oauth.html"))
         forget.assert_called_once(); clear.assert_called_once()
 
     def _connect(self, body, remotes, check=""):

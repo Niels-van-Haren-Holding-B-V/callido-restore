@@ -18,6 +18,7 @@ correct files are already readable. Nothing new is written under
 import re, stat, subprocess, threading, time
 from pathlib import Path
 
+from callido_restore.oscompat import popen_kw
 from callido_restore.sources import transfer
 
 _CHK = re.compile(r"chk#(\d+)/(\d+)")
@@ -197,7 +198,7 @@ def _progress(base, span, i, n, frac):
 
 def run_rclone(cmd, on_line, should_stop):
     """Run rclone, forwarding each stderr line to ``on_line``. Returns -1 if ``should_stop`` fires (process is terminated, files are not removed)."""
-    proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+    proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, **popen_kw())
     def reader():
         try:
             for line in proc.stderr:

@@ -2,6 +2,7 @@
 atomically, ``file_target``/``restore_roots`` map backup folders to destinations (H8), ``restore_target_error`` validates them."""
 import json, os, subprocess
 from pathlib import Path
+from callido_restore.oscompat import popen_kw
 from callido_restore.paths import RCLONE
 from callido_restore.sources import rclone
 from callido_restore.sources.source import is_remote_path
@@ -59,7 +60,7 @@ def restore_target_error(src, items, dest, create):
     for root in restore_roots(items, dest):
         if is_remote_path(root):
             if not create: continue                                   # listed (and refused on failure) when the restore starts
-            r = subprocess.run([RCLONE, "mkdir", root], capture_output=True, text=True)
+            r = subprocess.run([RCLONE, "mkdir", root], capture_output=True, text=True, **popen_kw())
             if r.returncode != 0: return f"cannot use remote destination {root}: {r.stderr.strip()[-200:]}"
         elif not os.path.isdir(root):
             if create and os.path.isdir(os.path.dirname(root)): os.makedirs(root, exist_ok=True)      # a new folder next to existing ones

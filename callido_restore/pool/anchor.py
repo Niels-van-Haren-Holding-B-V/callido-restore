@@ -15,6 +15,9 @@ WORKER_RSS_MB = int(os.environ.get("HBK_SCAN_WORKER_RSS_MB", "1024"))  # a worke
 PARENT_RSS_MB = int(os.environ.get("HBK_SCAN_RSS_MB", "6144"))         # the parent (holds `writers`) likewise
 
 def _rss_mb():
+    """Peak resident memory of this process in MB (the H9 guards compare it with the limits above)."""
+    from callido_restore import oscompat
+    if oscompat.WINDOWS: return oscompat.peak_rss_mb()        # no `resource` module on Windows: the peak working set
     import resource, sys
     r = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
     return r / (1 << 20) if sys.platform == "darwin" else r / 1024
@@ -81,7 +84,8 @@ def _run_worker(job, tmpdir, n, progress=None):
     jp = os.path.join(tmpdir, f"job{n}.pkl"); op = os.path.join(tmpdir, f"out{n}.pkl")
     with open(jp, "wb") as f: pickle.dump(job, f)
     argv, kw = _worker_command(jp, op)
-    p = subprocess.Popen(argv, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL, text=True, **kw)
+    from callido_restore.oscompat import popen_kw
+    p = subprocess.Popen(argv, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL, text=True, **kw, **popen_kw())
     tail = ""
     for line in p.stderr:
         line = line.rstrip("\n")
@@ -376,12 +380,13 @@ def resolve_and_place(writers, anchors, counts, log=print, max_bucket=None):
     log(f"phase2: {dict(report)}; owners {len(owner):,}/{len(buckets):,}")
     return owner, placements, report
 
-def export_map(writers, owner, placements, counts, outdir, mapped_upto, flags=None, report=None):
+def export_map(writers, owner, placements, counts, outdir, mapped_upto, flags=None, report=None, complete=False):
     """poolmap2.json for PoolReader: owners, entry counts, per-record placement segments and id ranges; ``guessed`` lists
     the records placed without a byte check (set -> [rec_off]) and ``aliased`` the copies restored from another record's
     entries (set -> [[rec_off, source set, source rec_off], ...], the source null for a copy of an untagged original);
-    ``stats`` is the placer's report."""
-    out = {"buckets": {str(b): w for b, w in owner.items()}, "counts": {str(b): counts[b] for b in owner}, "placements": {}, "ranges": {}, "mapped_upto": mapped_upto}
+    ``stats`` is the placer's report; ``map_complete`` says the placer ran over every bucket (the map is as good as the loaded
+    snapshots allow: the buckets without an owner hold files it could not locate, rerunning changes nothing)."""
+    out = {"buckets": {str(b): w for b, w in owner.items()}, "counts": {str(b): counts[b] for b in owner}, "placements": {}, "ranges": {}, "mapped_upto": mapped_upto, "map_complete": bool(complete)}
     flags = flags or {}
     out["guessed"] = {str(SET_OF_WRITER[w]): sorted(writers[w][ri].off for (ww, ri) in flags.get("guessed", ()) if ww == w) for w in range(4)}
     al = flags.get("aliased", {}); al = al if isinstance(al, dict) else {k: None for k in al}

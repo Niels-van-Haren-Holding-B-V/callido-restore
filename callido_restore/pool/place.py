@@ -401,7 +401,9 @@ def resolve_and_place_v3(writers, anchors, index, log=print, max_bucket=None):
     owner_out = {b: w for b, w in claimed.items() if isinstance(w, int)}
     R["owned"] = len(owner_out); R["records"] = sum(len(W[w]) for w in W); R["placed"] = sum(len(p) for p in placements.values())
     sz_all = sum(r.size for w in W for r in W[w] if r.size); sz_pl = sum(W[w][ri].size for w in W for ri in placements[w] if W[w][ri].size)
-    R["bytes-placed-pct"] = round(100 * sz_pl / sz_all, 1) if sz_all else 0
+    R["bytes-placed-pct"] = round(100 * sz_pl / sz_all, 1) if sz_all else 0          # a percentage 0-100 (the UI shows it as such)
+    R["sized"] = sum(1 for w in W for r in W[w] if r.size is not None)               # file records the loaded snapshots describe
+    R["placed-sized"] = sum(1 for w in W for ri in placements[w] if W[w][ri].size is not None)
     R["verified"] = sum(1 for w in W for ri in placements[w] if (w, ri) not in flags["guessed"] and (w, ri) not in flags["aliased"] and W[w][ri].size is not None)
     log(f"placer done: {R['placed']:,} of {R['records']:,} records placed ({R['bytes-placed-pct']} % of bytes, {R['verified']:,} verified by size), {R['owned']:,} of {len(buckets):,} buckets owned, {time.time() - t0:.0f}s")
     return owner_out, placements, R, flags

@@ -1,6 +1,7 @@
 """Build the bucket -> writer map for a Hyper Backup pool (see core/pool.py for the format notes)."""
 import os, json, struct, bisect, collections, subprocess, sys, threading, time
 from array import array
+from callido_restore import oscompat
 from callido_restore.core.pool import BLOCK, WRITER_OF_SET, SET_OF_WRITER, load_runs
 
 class WriterModel:
@@ -239,11 +240,19 @@ def build_poolmap(source, outdir, log=print, max_bucket=None):
 # The search is pure Python at 100 % CPU for minutes; inside the app process it holds the interpreter lock, so every API
 # request and the Stop button wait behind it. As a child process it costs the app nothing and Stop simply ends it.
 DETACHED = True
+MAPPER_VERSION = "anchor+place-v3"               # bump when the map's meaning changes: finished preparations of older versions are redone
 RUNNING = set()                                  # mapper children alive right now (Quit kills them with their workers)
 
 def _kill_group(p, grace=3.0):
-    """SIGTERM to the child's whole process group (the mapper and its scan workers), SIGKILL after ``grace`` seconds."""
+    """SIGTERM to the child's whole process group (the mapper and its scan workers), SIGKILL after ``grace`` seconds.
+    Windows has no process-group signals and the child has no console for a Ctrl-Break: taskkill /T ends the tree at once
+    (the mapper writes its outputs atomically, so a hard stop leaves nothing half-written)."""
     import signal
+    if oscompat.WINDOWS:
+        if not oscompat.kill_tree(p.pid): p.kill()
+        try: p.wait(grace)
+        except subprocess.TimeoutExpired: pass
+        return
     try: os.killpg(p.pid, signal.SIGTERM)
     except (ProcessLookupError, PermissionError, AttributeError): p.terminate()
     try: p.wait(grace)
@@ -272,7 +281,8 @@ def _ps_commands():
 
 def kill_orphan_helpers():
     """At app start: mapper children and scan workers of a crashed or killed app (the app binary with --mapper or
-    --scan-worker, parent gone) are ended, so they stop burning CPU. Returns the number ended."""
+    --scan-worker, parent gone) are ended, so they stop burning CPU. Returns the number ended.
+    Windows: a deliberate no-op for now (``_ps_commands`` returns []). Follow-up in docs/TASKS.md T14."""
     import signal
     from callido_restore.about import APP_NAME
     marker = f"{APP_NAME}.app/Contents/MacOS/{APP_NAME} --"
@@ -302,7 +312,7 @@ def build_poolmap_anchor(source, outdir, log=print, max_bucket=None):
     writers = poolmap2.build_writers(outdir, log)
     log("scanning the bucket indexes for tagged records…")
     anchors, counts = anchor.scan_anchors(source, outdir, listing, writers, log=log, max_bucket=max_bucket)
-    flags = None
+    flags = None; complete = False
     if os.environ.get("HBK_PLACER", "v3") == "v2":
         log("placing records: owners from anchors, copies by neighbours, gaps by chunk count…")
         owner, placements, report = anchor.resolve_and_place(writers, anchors, counts, log=log, max_bucket=max_bucket)
@@ -315,9 +325,12 @@ def build_poolmap_anchor(source, outdir, log=print, max_bucket=None):
         index = place.Index(counts, anchor.bucket_revs(listing), lambda b: str(source.ensure(f"Pool/0/{b // 2048}/{names[b][0]}")),
                             ubytes=anchor.load_bucket_totals(outdir), lru=1500)          # the scan just saved them
         owner, placements, report, flags = place.resolve_and_place_v3(writers, anchors, index, log=log, max_bucket=max_bucket)
+        complete = max_bucket is None            # a run limited to the first buckets is a test map, not a complete one
     buckets = sorted(b for b in counts if max_bucket is None or b <= max_bucket)
-    upto = len(buckets) if len(owner) >= len(buckets) else len(owner)        # partial when not every bucket got an owner
-    anchor.export_map(writers, owner, placements, counts, outdir, mapped_upto=upto, flags=flags, report=report)
+    # v3 ran over every bucket: the map is complete even when buckets stay without an owner (they hold files it could not
+    # locate; a rerun gives the same result, only more loaded snapshots add tags). v2: partial when not every bucket got an owner.
+    upto = len(buckets) if complete or len(owner) >= len(buckets) else len(owner)
+    anchor.export_map(writers, owner, placements, counts, outdir, mapped_upto=upto, flags=flags, report=report, complete=complete)
     log(f"mapped {len(owner)}/{len(buckets)} buckets (anchor-first); {dict(report)}")
     return dict(owner), upto
 
@@ -352,8 +365,8 @@ def build_poolmap_detached(source, outdir, log=print, max_bucket=None, cancelled
     child's last lines when it fails. ``DETACHED = False`` (tests) runs in-process instead."""
     if not DETACHED: return build_map(source, outdir, log, max_bucket)
     cmd, env = _mapper_command(source.id, outdir, max_bucket)
-    # Its own session: the child's scan workers are in the same process group, so Stop (or Quit) ends all of them at once.
-    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, text=True, env=env, start_new_session=True)
+    # Its own session (Windows: process group): the child's scan workers are in the same process group, so Stop (or Quit) ends all of them at once.
+    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, text=True, env=env, **oscompat.popen_kw(new_group=True))
     RUNNING.add(p)
     tail = collections.deque(maxlen=8)
     def reader():
