@@ -180,6 +180,16 @@ CIM `Win32_Process` with parent liveness instead of ppid 1). Code signing (Azure
 Acceptance: the MSI installs on Windows 10 and 11 without admin tricks, the app opens in its own window (WebView2), the full
 restore flow works with a local folder and a Drive source, uninstall leaves `~/.hbk-explorer` alone.
 
+## T15 — End-to-end tests on a synthetic backup (hbk-6)
+IN PROGRESS (hbk-6): `tests/e2e/`. `hbkgen.py` writes a synthetic .hbk with a real pool (buckets, indexes, virtual file index,
+chunk records, file pool, tags; four writers, id blocks of 2260, buckets in fill-completion order) plus a manifest with the
+expected bytes/mtimes of every file per run and the ground truth `truth.buckets` (bucket -> writer, revision).
+`test_e2e.py` (CI, ~3 s): open, file lists, the real mapper in-process, restore of every run, compared byte for byte; re-run
+skips everything. `test_app.py` (HBK_E2E=1): the real app process over HTTP (auto-prepare in the detached mapper, destination
+checks, count, restore with Pause/Resume, download). `ui_drive.py`: headless Chrome through the restore wizard (screenshots,
+console errors). Open: E5 (large files over many buckets, hbk-1), U1-U4 (UI wording/dead end, hbk-3); see
+docs/handovers/2026-10-31-1530-claude-hbk6.md.
+
 ## Do not
 * Do not change the on-disk layout of `~/.hbk-explorer/index/<src>/pool/*` without a migration; the full map build takes hours of downloads.
 * Do not commit anything from `~/.hbk-explorer` or user paths/remotes into the repo, and no real share/folder/host names (H18 rule in docs/HANDOVER.md).
