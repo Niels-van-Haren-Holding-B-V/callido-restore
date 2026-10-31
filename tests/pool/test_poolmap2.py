@@ -2,8 +2,8 @@
 import hashlib, json, os, struct, tempfile, unittest
 from pathlib import Path
 
-from callido_restore.pool import poolmap2 as hbk_poolmap2
-from callido_restore.core import pool as hbk_pool
+from callido_restore.pool import poolmap2
+from callido_restore.core import pool
 from callido_restore.pool.poolmap import new_range
 from callido_restore.core.pool import BLOCK
 
@@ -13,10 +13,10 @@ def _entry(ulen, seed):
 
 
 def _rec(idx, n, entries=None, tagged=True):
-    r = hbk_poolmap2.Rec(idx * 1000); r.n = n; r.head_new = n; r.idx = idx; r.ranges = [[idx * 100000, n]]
+    r = poolmap2.Rec(idx * 1000); r.n = n; r.head_new = n; r.idx = idx; r.ranges = [[idx * 100000, n]]
     if entries is not None:
         r.size = sum(e[2] for e in entries)
-        if tagged: r.tag = hashlib.md5(b"".join(e[3] for e in entries[:hbk_poolmap2.TAGK])).hexdigest(); r.tail = sum(e[2] for e in entries[:hbk_poolmap2.TAGK])
+        if tagged: r.tag = hashlib.md5(b"".join(e[3] for e in entries[:poolmap2.TAGK])).hexdigest(); r.tail = sum(e[2] for e in entries[:poolmap2.TAGK])
     return r
 
 
@@ -40,7 +40,7 @@ class Mapper(unittest.TestCase):
         self.ents = {5: self.a + self.b, 6: self.c}
         recs = [_rec(0, 2, self.a), _rec(1, 1, self.b, tagged=False), _rec(2, 2, self.c)]
         listing = [{"t": "index", "b": b, "rev": 2, "name": f"{b}.index.2", "size": 64 + 32 * len(e)} for b, e in self.ents.items()]
-        self.mp = hbk_poolmap2.Mapper2(_Src("/nonexistent"), "/nonexistent", listing, {0: recs, 1: [], 2: [], 3: []}, log=lambda *a: None)
+        self.mp = poolmap2.Mapper2(_Src("/nonexistent"), "/nonexistent", listing, {0: recs, 1: [], 2: [], 3: []}, log=lambda *a: None)
         self.mp.entries = lambda b: self.ents[b]
 
     def test_try_assign_identifies_by_tag_and_reports_guesses(self):
@@ -81,24 +81,24 @@ class ReaderMaps(unittest.TestCase):
     def tearDown(self): self.tmp.cleanup()
 
     def _reader(self):
-        return hbk_pool.PoolReader(_Src(self.pool), self.pool)
+        return pool.PoolReader(_Src(self.pool), self.pool)
 
     def test_v2_only(self):
-        hbk_pool.dump_json(os.path.join(self.pool, "poolmap2.json"), self.v2); r = self._reader()
+        pool.dump_json(os.path.join(self.pool, "poolmap2.json"), self.v2); r = self._reader()
         self.assertTrue(r.v2); self.assertFalse(r.v1)
         self.assertEqual(r.locate2(4, 100, [1000, 1001, 1002]), [(7, 0), (7, 1), (8, 0)])
         self.assertEqual(r.locate(1001), (7, 1)); self.assertEqual(r.guessed, {4: {100}})
         with self.assertRaises(KeyError): r.locate(5000)
 
     def test_partial_v2_falls_back_to_v1(self):
-        hbk_pool.dump_json(os.path.join(self.pool, "poolmap2.json"), self.v2); hbk_pool.dump_json(os.path.join(self.pool, "poolmap.json"), self.v1)
+        pool.dump_json(os.path.join(self.pool, "poolmap2.json"), self.v2); pool.dump_json(os.path.join(self.pool, "poolmap.json"), self.v1)
         r = self._reader(); self.assertTrue(r.v1 and r.v2)
         self.assertEqual(r.locate(1001), (7, 1))                 # served by v2
         self.assertEqual(r.locate(5000), (9, 5000 - 2 * BLOCK))  # not in v2, served by v1
         self.assertEqual(r.counts, {7: 2, 8: 5, 9: 1000})
 
     def test_dump_json_atomic(self):
-        p = os.path.join(self.pool, "x.json"); hbk_pool.dump_json(p, [1]); self.assertEqual(hbk_pool.load_json(p), [1]); self.assertEqual(os.listdir(self.pool), ["x.json"])
+        p = os.path.join(self.pool, "x.json"); pool.dump_json(p, [1]); self.assertEqual(pool.load_json(p), [1]); self.assertEqual(os.listdir(self.pool), ["x.json"])
 
 
 if __name__ == "__main__": unittest.main()

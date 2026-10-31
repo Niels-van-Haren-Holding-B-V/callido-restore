@@ -8,7 +8,10 @@ import subprocess, tempfile, time, unittest
 from pathlib import Path
 from unittest import mock
 
-import hbk_explorer
+from callido_restore import paths
+from callido_restore.restore.backup import Backup
+from callido_restore.restore.jobs import start_job
+from callido_restore.sources.source import Source
 from callido_restore.pool import indexfetch as F
 
 
@@ -361,16 +364,16 @@ class ListdirCacheTests(unittest.TestCase):
     databases it fetched (they were silently skipped when listdir only looked at the source folders)."""
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.old = hbk_explorer.INDEX_DIR; self.old_cache = hbk_explorer.CACHE_DIR
-        hbk_explorer.INDEX_DIR = Path(self.tmp.name) / "index"; hbk_explorer.CACHE_DIR = Path(self.tmp.name) / "cache"
+        self.old = paths.INDEX_DIR; self.old_cache = paths.CACHE_DIR
+        paths.INDEX_DIR = Path(self.tmp.name) / "index"; paths.CACHE_DIR = Path(self.tmp.name) / "cache"
         local = Path(self.tmp.name) / "src"; (local / "Config/@Share/s").mkdir(parents=True)
         (local / "Config/@Share/s/1.db.2").write_bytes(b"in-source")
-        self.src = hbk_explorer.Source("t4l", "t4l", str(local))
+        self.src = Source("t4l", "t4l", str(local))
         cached = self.src.cache_dir / "Config/@Share/s"; cached.mkdir(parents=True)
         (cached / "2.db.3").write_bytes(b"in-cache!")
         (cached / "1.db.2").write_bytes(b"cache-copy-wins")              # the app cache is checked first when both exist
     def tearDown(self):
-        hbk_explorer.INDEX_DIR = self.old; hbk_explorer.CACHE_DIR = self.old_cache; self.tmp.cleanup()
+        paths.INDEX_DIR = self.old; paths.CACHE_DIR = self.old_cache; self.tmp.cleanup()
     def test_ensure_refreshes_the_listing(self):
         """A download invalidates the cached listing of its directory, so the new file shows up as local."""
         self.src.remotes = ["fake:remote"]
@@ -378,7 +381,7 @@ class ListdirCacheTests(unittest.TestCase):
             if cmd[1] == "lsjson": return subprocess.CompletedProcess(cmd, 0, "[]", "")
             Path(cmd[3]).write_bytes(b"downloaded")                       # rclone copyto <remote/rel> <tmp>
             return subprocess.CompletedProcess(cmd, 0, "", "")
-        with mock.patch.object(hbk_explorer.subprocess, "run", side_effect=fake_run):
+        with mock.patch.object(subprocess, "run", side_effect=fake_run):
             self.assertNotIn("3.db.4", self.src.listdir("Config/@Share/s"))
             self.assertEqual(self.src.ensure("Config/@Share/s/3.db.4").read_bytes(), b"downloaded")
             self.assertTrue(self.src.listdir("Config/@Share/s")["3.db.4"]["local"])
@@ -402,21 +405,21 @@ class ListdirCacheTests(unittest.TestCase):
 class BuildPoolWiringTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.old = hbk_explorer.INDEX_DIR
-        self.old_cache = hbk_explorer.CACHE_DIR
-        hbk_explorer.INDEX_DIR = Path(self.tmp.name) / "index"
-        hbk_explorer.CACHE_DIR = Path(self.tmp.name) / "cache"
+        self.old = paths.INDEX_DIR
+        self.old_cache = paths.CACHE_DIR
+        paths.INDEX_DIR = Path(self.tmp.name) / "index"
+        paths.CACHE_DIR = Path(self.tmp.name) / "cache"
         local = Path(self.tmp.name) / "hbk"
         local.mkdir()
-        self.src = hbk_explorer.Source("t4", "t4", str(local))
-        self.backup = hbk_explorer.Backup(self.src)
+        self.src = Source("t4", "t4", str(local))
+        self.backup = Backup(self.src)
         pool = self.src.index_dir / "pool"
         pool.mkdir(parents=True)
         (pool / "listing.json").write_text("[]")
 
     def tearDown(self):
-        hbk_explorer.INDEX_DIR = self.old
-        hbk_explorer.CACHE_DIR = self.old_cache
+        paths.INDEX_DIR = self.old
+        paths.CACHE_DIR = self.old_cache
         self.tmp.cleanup()
 
     def test_stop_does_not_start_the_mapper(self):
@@ -427,8 +430,8 @@ class BuildPoolWiringTests(unittest.TestCase):
         def boom(*_a, **_k):
             mapped["yes"] = True
             raise AssertionError("mapper ran")
-        with mock.patch("hbk_pool.build_runs", lambda *_a, **_k: None), \
-             mock.patch("hbk_pool.build_recsizes", lambda *_a, **_k: None), \
+        with mock.patch("callido_restore.core.pool.build_runs", lambda *_a, **_k: None), \
+             mock.patch("callido_restore.core.pool.build_recsizes", lambda *_a, **_k: None), \
              mock.patch("callido_restore.pool.indexfetch.fetch_bucket_indexes", fetch), \
              mock.patch("callido_restore.pool.poolmap.build_poolmap", boom):
             job = {"cancel": False, "message": "", "progress": 0}
@@ -450,12 +453,12 @@ class BuildPoolWiringTests(unittest.TestCase):
         def run(cmd, on_line, should_stop):
             self.assertEqual(cmd[1], "copy")
             self.assertTrue(str(cmd[2]).startswith("remote:hbk/"))
-            self.assertTrue(hbk_explorer.Source.in_cache(self.src, cmd[3]) or str(cmd[3]).startswith(str(self.src.cache_dir)))
+            self.assertTrue(Source.in_cache(self.src, cmd[3]) or str(cmd[3]).startswith(str(self.src.cache_dir)))
             return 1
         def boom(*_a, **_k):
             raise AssertionError("mapper ran")
-        with mock.patch("hbk_pool.build_runs", lambda *_a, **_k: None), \
-             mock.patch("hbk_pool.build_recsizes", lambda *_a, **_k: None), \
+        with mock.patch("callido_restore.core.pool.build_runs", lambda *_a, **_k: None), \
+             mock.patch("callido_restore.core.pool.build_recsizes", lambda *_a, **_k: None), \
              mock.patch("callido_restore.pool.indexfetch.run_rclone", run), \
              mock.patch("callido_restore.pool.indexfetch.time.sleep", lambda *_a, **_k: None), \
              mock.patch("callido_restore.pool.poolmap.build_poolmap", boom):
@@ -483,7 +486,7 @@ class BuildPoolWiringTests(unittest.TestCase):
             dest.parent.mkdir(parents=True, exist_ok=True)
             dest.write_bytes(b"from-remote")
             return mock.Mock(returncode=0, stdout="", stderr="")
-        with mock.patch("hbk_explorer.subprocess.run", fake_run):
+        with mock.patch("subprocess.run", fake_run):
             fetched = self.src.ensure("Pool/0/0/9.index.1")
         self.assertEqual(fetched.read_bytes(), b"from-remote")
         self.assertTrue(self.src.in_cache(fetched))
@@ -495,8 +498,8 @@ class BuildPoolWiringTests(unittest.TestCase):
             return {"stopped": False, "failed": [3], "error": "bucket index fetch failed for Pool/0/3"}
         def boom(*_a, **_k):
             raise AssertionError("mapper ran")
-        with mock.patch("hbk_pool.build_runs", lambda *_a, **_k: None), \
-             mock.patch("hbk_pool.build_recsizes", lambda *_a, **_k: None), \
+        with mock.patch("callido_restore.core.pool.build_runs", lambda *_a, **_k: None), \
+             mock.patch("callido_restore.core.pool.build_recsizes", lambda *_a, **_k: None), \
              mock.patch("callido_restore.pool.indexfetch.fetch_bucket_indexes", fetch), \
              mock.patch("callido_restore.pool.poolmap.build_poolmap", boom):
             with self.assertRaises(RuntimeError) as cm:
@@ -507,7 +510,7 @@ class BuildPoolWiringTests(unittest.TestCase):
         def fn(job):
             job["progress"] = 0.42
             return {"stopped": True}
-        job = hbk_explorer.start_job(fn, "stop-test")
+        job = start_job(fn, "stop-test")
         for _ in range(100):
             if job["state"] != "running":
                 break

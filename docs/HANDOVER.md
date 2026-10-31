@@ -56,7 +56,7 @@ A NAS was hit by L0CK3D ransomware and has since been wiped and reinstalled. The
 
 ## In progress / to verify
 1. **Full pool map.** Needs every bucket index (tens of thousands of files, several GB). A background download into `<mirror>/backup_1.hbk/Pool/0/<d>/`
-   was at directory 10/18 at 21:15; a chained job then runs `hbk_poolmap.build_poolmap`. The mapper was fixed to prefer the writer
+   was at directory 10/18 at 21:15; a chained job then runs `pool.poolmap.build_poolmap`. The mapper was fixed to prefer the writer
    with an exact size match (`strong` candidates) — re-verify it completes without exhausting the backtrack budget. If it gets stuck,
    run `Mapper.run(verbose=True)` to see the first bucket with no candidate and inspect that writer's piece (see `docs/FORMAT.md`).
    The in-app "Build pool map" / "Continue pool map" button does the same (bulk index fetch + mapping). The fetch skips finished
@@ -79,8 +79,8 @@ A NAS was hit by L0CK3D ransomware and has since been wiped and reinstalled. The
 
 ## How to test quickly
 ```
-.venv/bin/python hbk_explorer.py --no-browser     # then open http://127.0.0.1:8765
+.venv/bin/python -m callido_restore --no-window   # then open http://127.0.0.1:8765
 curl 'localhost:8765/api/open?src=<id>' ; curl 'localhost:8765/api/pool?src=<id>'
 python -m unittest discover -s tests -t . -v      # parser + index-fetch tests (no real backup)
 ```
-Analysis scripts used during reverse engineering are not part of the repo; `hbk_poolmap.build_models` prints per-writer statistics.
+Analysis scripts used during reverse engineering are not part of the repo; `pool.poolmap.build_models` prints per-writer statistics.

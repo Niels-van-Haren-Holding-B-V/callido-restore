@@ -1,4 +1,4 @@
-"""Build the bucket -> writer map for a Hyper Backup pool (see hbk_pool.py for the format notes)."""
+"""Build the bucket -> writer map for a Hyper Backup pool (see core/pool.py for the format notes)."""
 import os, json, struct, bisect, collections, time
 from array import array
 from callido_restore.core.pool import BLOCK, WRITER_OF_SET, SET_OF_WRITER, load_runs

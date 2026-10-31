@@ -1,3 +1,5 @@
+from pathlib import Path
+import subprocess
 """H8: one destination per selected backup folder.
 
 Each basket item may carry its own ``dest``; its contents are written there directly (no version or source folder in
@@ -8,8 +10,11 @@ import json, os, shutil, tempfile, threading, time, unittest
 from http.server import ThreadingHTTPServer
 from urllib.request import Request, urlopen
 
-import hbk_explorer
-from hbk_explorer import file_target, restore_roots
+from callido_restore import paths
+from callido_restore.restore.backup import Backup
+from callido_restore.restore.destination import file_target, restore_roots
+from callido_restore.server.api import BACKUPS, H, job_file
+from callido_restore.sources.source import SOURCES, Source
 
 
 class FileTargetTests(unittest.TestCase):
@@ -53,7 +58,7 @@ class FakePool:
         os.utime(out, (mtime, mtime))
 
 
-class FakeBackup(hbk_explorer.Backup):
+class FakeBackup(Backup):
     pool = None                      # shadows the property; the real one needs a pool map
     def __init__(self, src, files):
         self.src = src; self.pool = FakePool(); self._files = files
@@ -88,15 +93,15 @@ FILES = [{"share": "A", "path": "x.txt", "size": 9, "mtime": 1700000000, "off": 
 class _Fixture(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(); t = self.tmp.name
-        self.saved = (hbk_explorer.INDEX_DIR, hbk_explorer.CACHE_DIR, hbk_explorer.JOBS_DIR)
-        hbk_explorer.INDEX_DIR = hbk_explorer.Path(t) / "index"; hbk_explorer.CACHE_DIR = hbk_explorer.Path(t) / "cache"; hbk_explorer.JOBS_DIR = hbk_explorer.Path(t) / "jobs"
-        self.src = hbk_explorer.Source("t8", "t8", os.path.join(t, "mirror", "backup_1.hbk"), ["nas:Backups/backup_1.hbk"])
+        self.saved = (paths.INDEX_DIR, paths.CACHE_DIR, paths.JOBS_DIR)
+        paths.INDEX_DIR = Path(t) / "index"; paths.CACHE_DIR = Path(t) / "cache"; paths.JOBS_DIR = Path(t) / "jobs"
+        self.src = Source("t8", "t8", os.path.join(t, "mirror", "backup_1.hbk"), ["nas:Backups/backup_1.hbk"])
         self.b = FakeBackup(self.src, FILES)
         self.dA = os.path.join(t, "ShareA"); self.dB = os.path.join(t, "Docs"); os.makedirs(self.dA); os.makedirs(self.dB)
         self.items = [{"share": "A", "ver": 1234, "path": "", "is_dir": 1, "dest": self.dA},
                       {"share": "B", "ver": 1234, "path": "docs", "is_dir": 1, "dest": self.dB}]
     def tearDown(self):
-        hbk_explorer.INDEX_DIR, hbk_explorer.CACHE_DIR, hbk_explorer.JOBS_DIR = self.saved; self.tmp.cleanup()
+        paths.INDEX_DIR, paths.CACHE_DIR, paths.JOBS_DIR = self.saved; self.tmp.cleanup()
     def job(self, label="restore"):
         return {"id": "ab" + label[:3].encode().hex(), "label": label, "started": time.time(), "state": "running"}   # hex, like uuid4().hex[:10]
 
@@ -124,7 +129,7 @@ class MappedRestoreTests(_Fixture):
         job = self.job(); job["cancel"] = True                                               # pause before the first file
         res = self.b.restore(self.items, "", job)
         self.assertTrue(res["paused"]); self.assertEqual(res["next_index"], 0)
-        saved = json.loads((hbk_explorer.JOBS_DIR / ("ab" + b"res".hex() + ".json")).read_text())
+        saved = json.loads((paths.JOBS_DIR / ("ab" + b"res".hex() + ".json")).read_text())
         self.assertEqual(saved["state"], "paused"); self.assertEqual([it["dest"] for it in saved["items"]], [self.dA, self.dB])
         self.assertEqual(saved["roots"], [self.dA, self.dB])
         # resume the way /api/restore/resume does: items (with their dest) and next_index from the job file
@@ -166,11 +171,11 @@ class RestoreCountTests(_Fixture):
 class RestoreApiTests(_Fixture):
     def setUp(self):
         super().setUp()
-        hbk_explorer.SOURCES["t8"] = self.src; hbk_explorer.BACKUPS["t8"] = self.b
-        self.srv = ThreadingHTTPServer(("127.0.0.1", 0), hbk_explorer.H)
+        SOURCES["t8"] = self.src; BACKUPS["t8"] = self.b
+        self.srv = ThreadingHTTPServer(("127.0.0.1", 0), H)
         threading.Thread(target=self.srv.serve_forever, daemon=True).start()
     def tearDown(self):
-        self.srv.shutdown(); self.srv.server_close(); hbk_explorer.SOURCES.pop("t8", None); hbk_explorer.BACKUPS.pop("t8", None); super().tearDown()
+        self.srv.shutdown(); self.srv.server_close(); SOURCES.pop("t8", None); BACKUPS.pop("t8", None); super().tearDown()
     def post(self, path, body):
         req = Request(f"http://127.0.0.1:{self.srv.server_address[1]}{path}", data=json.dumps(body).encode(), headers={"Content-Type": "application/json"})
         try:
@@ -207,7 +212,7 @@ class RestoreApiTests(_Fixture):
 
     def test_restore_plan_prefix_is_exact_and_case_sensitive(self):        # H17: LIKE matched Foto_2024 -> FotoX2024, Photos -> photos, 100% -> 100x
         files = [{"share": "A", "path": p, "size": 1, "mtime": 0, "off": -1} for p in ("Foto_2024/a.jpg", "FotoX2024/b.jpg", "Photos/c.jpg", "photos/d.jpg", "100%/e.txt", "100x/f.txt", "Photos.old/g.jpg")]
-        b = FakeBackup(self.src, files); plan = lambda folder: hbk_explorer.Backup.restore_plan(b, [{"share": "A", "ver": 1, "path": folder, "is_dir": 1}])
+        b = FakeBackup(self.src, files); plan = lambda folder: Backup.restore_plan(b, [{"share": "A", "ver": 1, "path": folder, "is_dir": 1}])
         self.assertEqual([f["path"] for f in plan("Foto_2024")], ["Foto_2024/a.jpg"])
         self.assertEqual([f["path"] for f in plan("Photos")], ["Photos/c.jpg"])
         self.assertEqual([f["path"] for f in plan("photos")], ["photos/d.jpg"])
@@ -217,7 +222,7 @@ class RestoreApiTests(_Fixture):
     def test_resume_keeps_the_job_file_when_a_root_is_missing_or_unsafe(self):
         job = self.job("keep"); job["cancel"] = True
         self.b.restore(self.items, "", job)                                    # pauses at once and writes the job file
-        jid = "ab" + b"kee".hex(); jf = hbk_explorer.JOBS_DIR / f"{jid}.json"; self.assertTrue(jf.is_file())
+        jid = "ab" + b"kee".hex(); jf = paths.JOBS_DIR / f"{jid}.json"; self.assertTrue(jf.is_file())
         shutil.rmtree(self.dB)                                                 # the share is "unmounted"
         code, out = self.post("/api/restore/resume", {"id": jid})
         self.assertEqual(code, 400); self.assertIn("not there any more", out["error"]); self.assertTrue(jf.is_file())
@@ -234,7 +239,7 @@ class RestoreApiTests(_Fixture):
         self.assertEqual(x["state"], "done", x)
 
     def test_resume_id_is_validated(self):                                  # H20: the id names a file under JOBS_DIR, never a path
-        outside = hbk_explorer.JOBS_DIR.parent / "outside.json"; hbk_explorer.JOBS_DIR.mkdir(parents=True, exist_ok=True); outside.write_text("{}")
+        outside = paths.JOBS_DIR.parent / "outside.json"; paths.JOBS_DIR.mkdir(parents=True, exist_ok=True); outside.write_text("{}")
         for bad in ("../outside", "../outside.json", "/etc/passwd", "a/b", "", "x" * 70, "JKEE1234"):
             code, out = self.post("/api/restore/resume", {"id": bad})
             self.assertEqual(code, 400, bad); self.assertEqual(out["error"], "not a job id")
@@ -243,7 +248,7 @@ class RestoreApiTests(_Fixture):
         code, out = self.post("/api/restore/resume", {"id": "0123456789"})
         self.assertEqual(code, 404); self.assertEqual(out["error"], "no such saved job")
         self.assertTrue(outside.is_file())
-        self.assertIsNone(hbk_explorer.job_file("../x")); self.assertEqual(hbk_explorer.job_file("deadbeef00").name, "deadbeef00.json")
+        self.assertIsNone(job_file("../x")); self.assertEqual(job_file("deadbeef00").name, "deadbeef00.json")
 
     def test_plan_mappings_preview(self):
         out = self.get("/api/restore_plan?src=t8&dest=&items=" + json.dumps(self.items).replace(" ", "%20").replace('"', "%22"))

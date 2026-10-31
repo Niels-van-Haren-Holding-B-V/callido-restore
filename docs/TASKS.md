@@ -54,7 +54,7 @@ until T1–T3 are done.
 Serves the goal: client-side-encrypted backups are the same restore, later, once the unencrypted path works for everyone.
 
 ## T6 — Quality
-**Parser tests done.** `tests/test_hbk_pool.py` builds synthetic fixtures for a 2-chunk file_pool object, a bucket index
+**Parser tests done.** `tests/core/test_pool.py` builds synthetic fixtures for a 2-chunk file_pool object, a bucket index
 (header + entries + crc32), LZ4 decode with the `PoolReader.read_chunk` md5 check, and the 56-byte virtual file entry
 (including a slice boundary). `tests/test_indexfetch.py` covers resume, stop, and "do not overwrite". CI is
 `.github/workflows/test.yml` (ubuntu-latest, `python -m unittest`, on push and pull_request). Assumptions where the format
@@ -91,7 +91,7 @@ is the owner's call once main is green.
 
 ## H18 — No personal data in the repo (owner, 2026-10-31 00:35; rule in docs/HANDOVER.md)
 DONE (hbk-2): #51 (docs, handovers, `tests/test_hbk_pool.py`, `scripts/check_private.sh`, CI job `private-check`); hbk-3 scrubbed
-the tests, `hbk_explorer.py` and `static/index.html` in #49/#52. Open for the owner: add the `PRIVATE_DENYLIST` repository secret
+the tests, `hbk_explorer.py` (now `callido_restore/`) and `static/index.html` in #49/#52. Open for the owner: add the `PRIVATE_DENYLIST` repository secret
 (one extended regex per line); until then CI runs only the built-in patterns. Run `scripts/check_private.sh` locally before pushing.
 
 ## H17 — Exact folder selection, safe resume (Reviewer, 2026-10-31 00:34)
@@ -109,18 +109,13 @@ subfolders keep their relative path (H13 rule); each item carries its `dest` (pe
 DONE (hbk-3): #52. Tree with checkboxes in step 2 (children on demand, indeterminate parents, inclusion-list basket), live
 "Selected: N files · size" via `/api/restore_count`.
 
-## H16 — Restructure into packages (owner, 2026-10-31 01:01; docs/handovers/2026-10-31-0101-nas-triage-H16-now.md) — TOP PRIORITY
-IN PROGRESS (hbk-2): step 1 DONE (#55): `callido_restore/core/pool.py` + `tests/core/`. Step 2 in review: `callido_restore/pool/`
-(`poolmap.py`, `poolmap2.py`, `anchor.py` with `python -m callido_restore.pool.anchor --worker`, `indexfetch.py`) + `tests/pool/`,
-root shims kept. Next, one PR each from fresh origin/main, pure moves, zero behaviour change, green on unit + both DMG builds: (3) `restore/` + `sources/` out of `hbk_explorer.py`; (4) `server/` +
-`app/` with the entry point, build_app.sh / PyInstaller, README; (5) remove the root shims. No other code PRs in the meantime.
-
-## H19 — Search prefix filter (Reviewer, 2026-10-31 00:59)
-DONE (hbk-3): #53. `Backup._where` selects a folder prefix with exact `substr`; test in `tests/test_query_where.py`.
-
-## H20 — Resume follow-ups (Reviewer, 2026-10-31 01:12)
-DONE (hbk-3): `/api/restore/resume` accepts only a job id (`^[0-9a-f-]{8,64}$`, `job_file()`), 404 for a missing job, one `dest`
-variable; TASKS.md H17/H19 marked done. Test: `test_resume_id_is_validated`.
+## H16 — Restructure into packages (owner, 2026-10-31 01:01; docs/handovers/2026-10-31-0101-nas-triage-H16-now.md)
+DONE (hbk-2): #55 (core), #57 (pool), and one PR for the rest (owner asked for it in one go): `callido_restore/` with `paths.py`,
+`about.py`, `core/` (`pool.py`, `hbkmeta.py`), `pool/`, `sources/source.py`, `restore/` (`destination.py`, `jobs.py`, `backup.py`),
+`server/api.py`, `app/main.py`; entry point `python -m callido_restore` (`callido_restore/__main__.py`, also the PyInstaller script);
+root shims and `hbk_explorer.py` removed; `tests/` mirrors the layers; `pyproject.toml` with the `callido-restore` script. Pure moves,
+no behaviour change. Follow-up candidates: split `Backup` (snapshot index/queries vs restore engine), an in-app anchor scan needs a
+`--worker` dispatch in the entry point.
 
 ## Do not
 * Do not change the on-disk layout of `~/.hbk-explorer/index/<src>/pool/*` without a migration; the full map build takes hours of downloads.
