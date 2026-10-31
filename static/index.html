@@ -244,8 +244,11 @@ async function loadSources(){const list=await api('/api/sources');const sel=$('#
   if(!list.length){$('#overview').innerHTML=emptyState('No backup added yet','Point the app at a Hyper Backup folder on Google Drive, on a NAS share or on a disk. Only the backup\'s small index files are read until you restore something.','<button class="primary" onclick="$(\'#addSrc\').click()">Add your backup</button>');renderFlow();return}
   const want=localStorage.getItem('src');sel.value=list.some(s=>s.id===want)?want:list[0].id;openSource();}
 $('#srcSel').onchange=openSource;$('#refreshSrc').onclick=()=>openSource(true);
-async function openSource(refresh){const id=$('#srcSel').value;if(!id)return;S.src=id;localStorage.setItem('src',id);$('#srcStatus').textContent='scanning…';$('#overview').innerHTML=emptyState('Reading the backup…','The backup\'s index files are being read. The first time this can take a minute or two.');$('#snap').style.display='none';S.ver=null;renderFlow();
-  try{S.info=await api('/api/open',{src:id,refresh:refresh===true?1:0});}catch(e){$('#overview').innerHTML=`<div class="alert">Could not open: ${esc(e.message)}</div>`;$('#srcStatus').textContent='';return}
+async function openSource(refresh){const id=$('#srcSel').value;if(!id)return;S.src=id;localStorage.setItem('src',id);$('#srcStatus').textContent='scanning…';$('#overview').innerHTML=emptyState('Reading the backup…','<span class="spin"></span> <span id="openMsg">Opening the backup…</span><br><span class="muted">The first time this lists the backup folder and reads its small index files; over Google Drive every step can take a few seconds.</span>');$('#snap').style.display='none';S.ver=null;renderFlow();
+  // The scan runs as a job: a long single request can get lost while the window is in the background (WebKit throttling),
+  // and the job message gives visible progress per step.
+  try{const j=await api('/api/open',{src:id,refresh:refresh===true?1:0,job:1});const job=await waitJob(j.id,m=>{const el=$('#openMsg');if(el)el.textContent=m});
+    if(job.state==='error')throw new Error(job.error);S.info=await api('/api/open',{src:id});}catch(e){$('#overview').innerHTML=`<div class="alert">Could not open: ${esc(e.message)}</div>`;$('#srcStatus').textContent='';return}
   $('#srcStatus').textContent='';renderOverview();renderVersions();renderFlow();
   if(S.info.readable&&S.info.versions.length){const last=S.info.versions[S.info.versions.length-1];selectVersion(last.id)}}
 function renderOverview(){const i=S.info,t=i.task||{},r=i.ransomware;let h='';
@@ -307,9 +310,10 @@ async function refreshShares(){const id=S.ver;S.snaps={};const infos=await Promi
   $$('#snapShares .chip').forEach(c=>c.onclick=()=>{const i=S.snaps[c.dataset.share];if(!i.indexed&&i.available&&!i.locked)runIndex(c.dataset.share)});
   const la=$('#loadAll');if(la)la.onclick=()=>runIndex('*');}
 async function runIndex(share){const j=await api('/api/index',{src:S.src,share,ver:S.ver});const el=$('#jobStatus');
-  const poll=async()=>{const job=await api('/api/job',{id:j.id});el.innerHTML=`<span class="prog" style="display:inline-block;vertical-align:middle"><i style="width:${Math.round(job.progress*100)}%"></i></span> ${esc(job.message||'')} <span class="muted">${etaText(job.id,job.progress||0)}</span>`;
-    if(job.state==='running')setTimeout(poll,700);else{el.textContent=job.state==='error'?'Error: '+job.error:'';const errs=(job.result||[]).filter(r=>!r.ok);if(errs.length)el.textContent=errs.map(e=>e.share+': '+e.error).join(' · ');
-      S.info=await api('/api/open',{src:S.src});renderVersions();await refreshShares();showTab(S.tab)}};poll();}
+  const show=job=>{el.innerHTML=`<span class="prog" style="display:inline-block;vertical-align:middle"><i style="width:${Math.round((job.progress||0)*100)}%"></i></span> ${esc(job.message||'')} <span class="muted">${etaText(job.id,job.progress||0)}</span>`};
+  const job=await waitJob(j.id,null,700,show);                     // survives errors and a throttled window, like the other waits
+  el.textContent=job.state==='error'?'Error: '+job.error:'';const errs=(job.result||[]).filter(r=>!r.ok);if(errs.length)el.textContent=errs.map(e=>e.share+': '+e.error).join(' · ');
+  S.info=await api('/api/open',{src:S.src});renderVersions();await refreshShares();showTab(S.tab)}
 $$('.tabs button').forEach(b=>b.onclick=()=>showTab(b.dataset.t));
 function showTab(t){S.tab=t;renderFlow();$$('.tabs button').forEach(b=>b.classList.toggle('on',b.dataset.t===t));$$('[id^=tab-]').forEach(d=>d.style.display=d.id==='tab-'+t?'':'none');
   ({changes:tabChanges,timeline:tabTimeline,browse:tabBrowse,search:tabSearch,compare:tabCompare,restore:tabRestore})[t]();}
@@ -535,8 +539,8 @@ async function tabRestore(){const el=$('#tab-restore');
 const sleepOrWake=ms=>new Promise(res=>{let t=null;const done=()=>{clearTimeout(t);document.removeEventListener('visibilitychange',done);window.removeEventListener('focus',done);res()};t=setTimeout(done,ms);document.addEventListener('visibilitychange',done);window.addEventListener('focus',done)});
 // Wait for a job to leave the running state. A failed poll (network hiccup, throttled view) is retried, never left hanging;
 // an unknown job id ends the wait with an error result.
-async function waitJob(id,onMsg,ms=1000){for(let miss=0;;){let x=null;try{x=await api('/api/job',{id});miss=0}catch(e){if(/no such job/i.test(e.message)||++miss>60)return{state:'error',error:e.message}}
-  if(x&&x.state!=='running')return x;if(x&&onMsg)onMsg(x.message||'');await sleepOrWake(ms)}}
+async function waitJob(id,onMsg,ms=1000,onJob){for(let miss=0;;){let x=null;try{x=await api('/api/job',{id});miss=0}catch(e){if(/no such job/i.test(e.message)||++miss>60)return{state:'error',error:e.message}}
+  if(x&&onJob)onJob(x);if(x&&x.state!=='running')return x;if(x&&onMsg)onMsg(x.message||'');await sleepOrWake(ms)}}
 function pollJob(id,el,done,rich,stopLabel){let stopping=false;const t=async()=>{let job;try{job=await api('/api/job',{id})}catch(e){if(/no such job/i.test(e.message)){el.innerHTML+=`<p style="color:var(--bad)">${esc(e.message)}</p>`;return}await sleepOrWake(2000);return t()}
   const stop=stopLabel&&job.state==='running'?`<button class="small" id="jobStop" ${stopping?'disabled':''}>${stopping?'Stopping…':stopLabel}</button>`:'';
   el.innerHTML=progressHtml(job,rich,stop);

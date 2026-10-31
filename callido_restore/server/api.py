@@ -34,9 +34,9 @@ def job_file(jid):
 
 BACKUPS = {}
 
-def backup_for(sid, refresh=False):
+def backup_for(sid, refresh=False, log=None):
     if sid not in SOURCES: raise KeyError(f"unknown source {sid}")
-    if refresh or sid not in BACKUPS: BACKUPS[sid] = Backup(SOURCES[sid])
+    if refresh or sid not in BACKUPS: BACKUPS[sid] = Backup(SOURCES[sid], log)
     return BACKUPS[sid]
 
 class H(BaseHTTPRequestHandler):
@@ -139,6 +139,13 @@ class H(BaseHTTPRequestHandler):
             if u.path == "/api/job":
                 j = JOBS.get(q.get("id")); return self._json(j or {"error": "no such job"})
             if u.path == "/api/open":
+                if q.get("job") == "1":          # the first open lists and fetches over rclone: run it as a job with step messages; the UI then GETs the info
+                    sid, refresh = q["src"], q.get("refresh") == "1"
+                    if sid not in SOURCES: return self._json({"error": f"unknown source {sid}"}, 404)
+                    def run(job):
+                        job["message"] = "Opening the backup…"
+                        backup_for(sid, refresh=refresh, log=lambda m: job.__setitem__("message", m)); return {"ok": True}
+                    return self._json(start_job(run, "open backup"))
                 b = backup_for(q["src"], refresh=q.get("refresh") == "1"); return self._json(b.info)
             b = backup_for(q["src"])
             if u.path == "/api/snapshot_info":
