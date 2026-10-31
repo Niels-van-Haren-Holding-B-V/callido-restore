@@ -118,7 +118,9 @@ label.f{display:grid;gap:4px;margin-bottom:10px;font-size:12.5px;color:var(--mut
 .empty{display:grid;justify-items:center;text-align:center;gap:10px;padding:34px 20px;color:var(--muted)}
 .empty b{color:var(--ink);font-size:15px;font-weight:600}.empty p{margin:0;max-width:460px}
 .empty img{width:72px;height:72px;border-radius:16px;box-shadow:var(--shadow)}
-details.adv{margin:8px 0 0}details.adv summary{cursor:pointer;color:var(--muted);font-size:12.5px;list-style:none;display:inline-flex;align-items:center;gap:4px;user-select:none}
+details.adv{margin:8px 0 0}
+#dlgSrc.keyOnly #ws1>p,#dlgSrc.keyOnly label:has(input[name=wsk]:not([value=existing])),#dlgSrc.keyOnly #wsDrive,#dlgSrc.keyOnly #wsSmb{display:none}   /* key-only mode: just the connection and its key */
+details.adv summary{cursor:pointer;color:var(--muted);font-size:12.5px;list-style:none;display:inline-flex;align-items:center;gap:4px;user-select:none}
 details.adv summary::-webkit-details-marker{display:none}details.adv summary::before{content:"▸";font-size:11px;transition:transform .15s;display:inline-block}details.adv[open] summary::before{transform:rotate(90deg)}
 details.adv>*:not(summary){margin-top:8px}
 /* restore wizard steps */
@@ -325,7 +327,7 @@ async function openSource(refresh){const id=$('#srcSel').value;if(!id)return;S.s
   // The scan runs as a job: a long single request can get lost while the window is in the background (WebKit throttling),
   // and the job message gives visible progress per step.
   try{const j=await api('/api/open',{src:id,refresh:refresh===true?1:0,job:1});const job=await waitJob(j.id,m=>{const el=$('#openMsg');if(el)el.textContent=m});
-    if(job.state==='error')throw new Error(job.error);S.info=await api('/api/open',{src:id});}catch(e){$('#overview').innerHTML=`<div class="alert">Could not open: ${esc(e.message)}</div>`;$('#srcStatus').textContent='';return}
+    if(job.state==='error')throw new Error(job.error);S.info=await api('/api/open',{src:id});try{S.types=(await api('/api/remotes')).types||{}}catch(e){S.types={}}}catch(e){$('#overview').innerHTML=`<div class="alert">Could not open: ${esc(e.message)}</div>`;$('#srcStatus').textContent='';return}
   $('#srcStatus').textContent='';renderOverview();renderVersions();renderFlow();
   if(S.info.readable&&S.info.versions.length){const last=S.info.versions[S.info.versions.length-1];selectVersion(last.id)}}
 function renderOverview(){const i=S.info,t=i.task||{},r=i.ransomware;let h='';
@@ -337,6 +339,7 @@ function renderOverview(){const i=S.info,t=i.task||{},r=i.ransomware;let h='';
   h+=`<h2>Backup of <b>${esc(t.host_name||'?')}</b> <span class="help">· task “${esc(t.name||'?')}”${t.enable_data_encrypt?' · <b style="color:var(--warn)">client-side encryption on (not supported yet)</b>':''}</span></h2>
   <div class="kpi"><div><b>${i.versions.length.toLocaleString()}</b><span>backup runs${first?` · ${dd(first.ts)} → ${dd(last.ts)}`:''}</span></div>${shares}
   <div><b>${i.layout.pool_present?'yes':'no'}</b><span>file data present</span></div></div>
+  ${driveRemote(i.source.remote)?`<p class="help" style="margin:8px 0 0">Downloads slow? <a href="#" class="keyLink" data-remote="${esc(driveRemote(i.source.remote))}">Give your Google Drive connection a key of your own</a> · free, about five minutes, makes the one-time preparation much faster.</p>`:''}
   <details class="adv"><summary>Details</summary><p class="help">Source: <code>${esc(i.source.remote||'local only')}</code> · cache: <code>${esc(i.source.local)}</code><br>Snapshots per share: ${i.shares.map(s=>`${esc(shareLabel(s.name))} ${s.snapshots.toLocaleString()}`).join(' · ')}<br>Backed-up folders: ${(t.backup_folders||[]).map(x=>`<code>${esc(x)}</code>`).join(' ')||'?'} · compression ${t.data_compress_type??'?'} · version rotation ${t.enable_version_rotation?'on':'off'}</p></details>`;
   $('#overview').innerHTML=h;}
 
@@ -557,7 +560,7 @@ async function tabRestore(){const el=$('#tab-restore');
      <p class="help" style="margin:0">Tick the shared folders or subfolders to restore (▸ opens a folder). Ticking a folder takes everything under it; untick a subfolder to leave it out. Folders and files can also be added from <b>Folders</b> or <b>Search</b> with the + buttons.</p>
      <div class="tree" id="rsTree"></div>
      <details class="adv"><summary>Advanced</summary><div class="row"><label><input type="checkbox" id="rsMeta" checked> skip Synology metadata (@eaDir thumbnails, @SynoResource, .DS_Store)</label><label><input type="checkbox" id="rsFiles" ${localStorage.getItem('rsFiles')==='1'?'checked':''}> show single files in the tree</label></div></details>`,S.basket.length>0)+
-  step(3,'Prepare the backup for reading (one time)',`<p class="help" style="margin:0">Before files can be read without Hyper Backup, the app has to learn where every piece of every file is stored. This is done once and takes a while (it downloads about 7 GB of small index files, no file data). You can stop at any time: what is already downloaded is kept, and running it again continues from there. Later restores reuse it.</p>
+  step(3,'Prepare the backup for reading (one time)',`<p class="help" style="margin:0">Before files can be read without Hyper Backup, the app has to learn where every piece of every file is stored. This is done once and takes a while (it downloads about 7 GB of small index files, no file data). You can stop at any time: what is already downloaded is kept, and running it again continues from there. Later restores reuse it.${driveRemote(S.info.source.remote)?` Slow over Google Drive? <a href="#" class="keyLink" data-remote="${esc(driveRemote(S.info.source.remote))}">Give the connection a key of your own</a>.`:''}</p>
      ${poolRun?`<div class="row" style="align-items:flex-start"><div id="poolJob" style="flex:1"></div><button class="small" id="poolBuild" disabled>Preparing…</button></div>`:
      `<div class="row"><div class="prog"><i style="width:${pct}%"></i></div><span>${total?(mapped?`${pct}% · ${mapped.toLocaleString()} of ${total.toLocaleString()} blocks`:`Folder listing saved · ${total.toLocaleString()} blocks · download not started`):`Not started · ${pool.index_bytes?human(pool.index_bytes)+' of':'a few GB of'} index files to download`}${pool.index_bytes?` · ${human(pool.index_bytes_local||0)} of ${human(pool.index_bytes)} downloaded`:(idxFiles?` · ${idxLocal.toLocaleString()} of ${idxFiles.toLocaleString()} index files on disk`:'')}</span><button class="small ${!mapOk&&firstOpen===3?'primary':''}" id="poolBuild">${mapOk?'Redo':idxLocal?'Continue':'Prepare now'}</button></div><div id="poolJob"></div>`}`,mapOk)+
   step(4,'Where should the files go?',`<p class="help" style="margin:0">Each shared folder you selected from is restored into a folder of your choice on the NAS, usually the shared folder with the same name. Selected subfolders keep their place under it (<code>Documents/Invoices/2025</code> → <code>&lt;target&gt;/Invoices/2025</code>), with no version or source folder in between. Nothing at a target is ever overwritten or deleted; files keep their original modification times.</p>
@@ -686,13 +689,28 @@ async function openDetail(share,ver,id){const d=await api('/api/file',{src:S.src
 
 // ---------- add source wizard
 const WS={step:1,remote:'',path:'',kind:'existing'};
-function wsShow(){$('#wzS').textContent=`step ${WS.step} of 3`;[1,2,3].forEach(i=>$('#ws'+i).style.display=WS.step===i?'':'none');$('#wsBack').style.display=WS.step>1?'':'none';$('#wsNext').textContent=WS.step===3?'Add backup':'Next'}
+function wsShow(){$('#wzS').textContent=WS.keyOnly?'add your own Google key':`step ${WS.step} of 3`;[1,2,3].forEach(i=>$('#ws'+i).style.display=WS.step===i?'':'none');$('#wsBack').style.display=WS.step>1?'':'none';$('#wsNext').textContent=WS.keyOnly?'Sign in again with this key':(WS.step===3?'Add backup':'Next')}
 // The "why a key of your own" text and the how-to live once (template #keyHelp) and are cloned into both places they appear.
 (()=>{const t=$('#keyHelp').content;$$('.keyWhy').forEach(e=>e.replaceWith(t.querySelector('p').cloneNode(true)));$$('.keyHowto').forEach(e=>e.replaceWith(t.querySelector('details').cloneNode(true)))})();
 // The key panel under "a connection I already set up" is only for Google Drive remotes: re-keying must never touch an SMB target.
 const keyPanel=()=>{const p=$('#wsKeyEx');const isDrive=(WS.types||{})[$('#wsRem').value]==='drive';p.style.display=isDrive?'':'none';if(!isDrive){$('#wsCidEx').value='';$('#wsCsecEx').value=''}};
 $('#wsRem').onchange=keyPanel;
-$('#addSrc').onclick=async()=>{WS.step=1;wsShow();$('#dlgSrc').showModal();try{const r=await api('/api/remotes');WS.types=r.types||{};$('#wsRem').innerHTML=r.remotes.map(x=>`<option>${esc(x)}</option>`).join('')||'<option value="">(none configured)</option>'}catch(e){WS.types={}}keyPanel()};
+// "gdrive:Backups/x.hbk" -> "gdrive:"; '' for a local path. driveRemote() also wants that connection to be Google Drive
+// (types from /api/remotes, fetched with the backup): the key links never show for a backup read over SMB.
+const remoteName=r=>{const m=/^([A-Za-z0-9_-]+):/.exec(r||'');return m?m[1]+':':''};
+const driveRemote=r=>{const n=remoteName(r);return n&&(S.types||{})[n]==='drive'?n:''};
+// Open the Add-backup dialog; with {remote, key:true} it starts on that existing connection with the Google-key panel unfolded
+// (the links "Give your Google Drive connection a key of your own" in the overview and in the restore steps).
+async function openAddBackup(opts={}){WS.step=1;WS.keyOnly=!!opts.key;$('#dlgSrc').classList.toggle('keyOnly',!!opts.key);wsShow();$('#dlgSrc').showModal();
+  $('#dlgSrc h3').firstChild.textContent=opts.key?'Your Google Drive connection ':'Add a backup ';
+  try{const r=await api('/api/remotes');WS.types=r.types||{};$('#wsRem').innerHTML=r.remotes.map(x=>`<option>${esc(x)}</option>`).join('')||'<option value="">(none configured)</option>'}catch(e){WS.types={}}
+  if(opts.remote){const ex=$('input[name=wsk][value=existing]');ex.checked=true;ex.dispatchEvent(new Event('change',{bubbles:true}));
+    if([...$('#wsRem').options].some(o=>o.value===opts.remote))$('#wsRem').value=opts.remote;}
+  keyPanel();
+  if(opts.key){if((WS.types||{})[$('#wsRem').value]==='drive'){$('#wsKeyEx').open=true;$('#wsKeyEx').scrollIntoView({block:'nearest'});$('#wsCidEx').focus()}
+    else toast(`${opts.remote||'This connection'} is not a Google Drive connection; a Google key only applies to Google Drive.`,{kind:'warn'})}}
+$('#addSrc').onclick=()=>openAddBackup();
+document.addEventListener('click',e=>{const a=e.target.closest('a.keyLink');if(a){e.preventDefault();openAddBackup({remote:a.dataset.remote,key:true})}});
 $$('input[name=wsk]').forEach(r=>r.onchange=()=>{WS.kind=r.value;$('#wsDrive').style.display=WS.kind==='drive'?'':'none';$('#wsSmb').style.display=WS.kind==='smb'?'':'none'});
 $('#nCancel').onclick=()=>{$('#wsNext').disabled=false;$('#dlgSrc').close()};$('#wsBack').onclick=()=>{$('#wsNext').disabled=false;WS.step--;wsShow()};
 const wsInto=d=>(WS.remote?(WS.path?WS.path.replace(/\/$/,'')+'/':''):(WS.path.replace(/\/$/,'')+'/'))+d;   // child folder d of the current path
@@ -712,6 +730,7 @@ $('#wsNext').onclick=async()=>{
     // An existing connection with a key typed under it is re-created under the same name with that key (a new Google sign-in).
     const rekey=k==='existing'&&(WS.types||{})[$('#wsRem').value]==='drive'&&$('#wsCidEx').value.trim();const drive=k==='drive'||!!rekey;
     if(k==='existing'&&!$('#wsRem').value){toast('Choose a connection first.',{kind:'warn'});return}
+    if(WS.keyOnly&&!rekey){toast('Enter the Google client id and the client secret first.',{kind:'warn'});$('#wsCidEx').focus();return}
     if(rekey&&!$('#wsCsecEx').value.trim()){toast('Enter the client secret that belongs to the client id.',{kind:'warn'});return}
     if(k==='existing'&&!rekey){WS.remote=$('#wsRem').value;WS.path=''}
     else if(k==='local'){WS.remote='';WS.path='~'}
@@ -724,7 +743,9 @@ $('#wsNext').onclick=async()=>{
       try{if(job.state==='error'){$('#wsConn').textContent='Failed: '+job.error;return}
         WS.remote=job.result.remote;WS.path='';const sel=$('#wsRem');if(![...sel.options].some(o=>o.value===WS.remote))sel.add(new Option(WS.remote,WS.remote));sel.value=WS.remote;   // the new connection is the selected one from now on
         $('#wsConn').textContent=(rekey?'Signed in again with your own key: ':'Connected: ')+WS.remote+' — now pick the backup folder on it.';if(rekey){$('#wsCidEx').value='';$('#wsCsecEx').value='';$('#wsKeyEx').open=false}}catch(e){$('#wsConn').textContent=e.message;$('#wsNext').disabled=false;return}
-      $('#wsNext').disabled=false}
+      $('#wsNext').disabled=false
+      // Opened only to add the key (the links on the main screen): done here, the backup itself is already set up.
+      if(rekey&&WS.keyOnly){$('#dlgSrc').close();toast(`Signed in again with your own key: ${WS.remote}. Downloads now run on your own Google quota.`,{kind:'ok'});return}}
     WS.step=2;wsShow();wsList();return}
   if(WS.step===2){if(WS.busy)return;$('#wsBusy').style.display='inline-flex';$('#wsBusyText').textContent='Checking the folder…';$('#wsNext').disabled=true;
     let r;try{r=await api('/api/rclone/ls',{remote:WS.remote,path:WS.path})}catch(e){r={error:e.message}}finally{$('#wsBusy').style.display='none';$('#wsNext').disabled=false}

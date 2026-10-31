@@ -6,4 +6,4 @@ TAGLINE = "Restore Synology Hyper Backup (.hbk) files"
 
 NOTICE = "Not affiliated with or endorsed by Synology. Hyper Backup is a trademark of Synology Inc."
 
-VERSION = "0.3.0"
+VERSION = "0.3.1"
