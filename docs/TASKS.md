@@ -29,6 +29,11 @@ fills gaps between consecutive anchors with the writer's untagged records by chu
 exports `poolmap2.json` (per-record placement segments + id ranges) that `PoolReader` already reads.
 Acceptance: `/api/pool` reports the map; a sample of files from every share restores byte-exact (tag/size verified). Do not run
 `build_poolmap` (v1); do not edit `callido_restore/pool/anchor.py` / `poolmap2.py` without coordinating with hbk-1.
+Wired into the app by hbk-2 on 2026-10-31 (0.3.4): `Backup.build_pool` runs `poolmap.build_map` in a child process
+(`build_poolmap_detached`, app entry `--mapper`), which is `build_poolmap_anchor` = `poolmap2.build_writers` → `anchor.scan_anchors`
+→ `anchor.resolve_and_place` → `anchor.export_map` (poolmap2.json); the v1 search only with `HBK_MAPPER=v1`. Until then the app
+still ran v1, which sat at bucket 3000/36132 for 15 minutes on the real backup. Open for hbk-1: a `--scan-worker` dispatch in the
+app entry so the frozen app can scan with more than one process (anchor.py falls back to one when frozen).
 
 ## T2 — End-to-end restore test to the NAS
 Wizard → version 1234 (the last clean run) → <a small folder> → target `<remote>:<restore-test-folder>`.

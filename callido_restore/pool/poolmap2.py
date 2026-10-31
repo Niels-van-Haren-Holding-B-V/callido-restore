@@ -180,7 +180,7 @@ class Mapper2:
         buckets = sorted(b for b in self.counts if max_bucket is None or b <= max_bucket)
         self.place = {w: {} for w in range(4)}; self.placelog = []; self.how = {w: {} for w in range(4)}
         state = {w: (0, (), None) for w in range(4)}; result = {}; snaps = {}
-        i = 0; t0 = time.time(); last_log = 0; repairs = 0; perturb = 0
+        i = 0; t0 = time.time(); last_log = 0; last_t = time.time(); repairs = 0; perturb = 0
         while i < len(buckets):
             b = buckets[i]; snaps[i] = (dict(state), len(self.placelog)); snaps.pop(i - window - 1, None)
             cands, reasons = self._cands(b, state)
@@ -200,7 +200,7 @@ class Mapper2:
                 self.log(f"  stuck at bucket {b} (index {i}): {reasons}"); return result, i
             w, ns, ev, pl = chosen
             self._apply(w, b, ns, pl, state, result); i += 1
-            if i - last_log >= 1000: last_log = i; self.log(f"  {i}/{len(buckets)} buckets, repairs={repairs}, perturbations={perturb}, {time.time()-t0:.0f}s, {dict(self.stats)}")
+            if i - last_log >= 1000 or time.time() - last_t >= 2: last_log = i; last_t = time.time(); self.log(f"  mapped {i}/{len(buckets)} buckets, repairs={repairs}, perturbations={perturb}, {time.time()-t0:.0f}s, {dict(self.stats)}")
         self.log(f"done: {len(result)} buckets, repairs={repairs}, perturbations accepted={perturb}")
         return result, i
     def probe(self, w, b, st):

@@ -1,5 +1,12 @@
 **Callido Restore** restores files from a Synology Hyper Backup (`.hbk`) without Hyper Backup or a working NAS. It reads the backup's own metadata, shows every backup run on a timeline, and restores the folders you pick to a NAS share or a local folder. Files already at the destination are never overwritten or deleted, and the backup source is only read.
 
+## What's new in 0.3.4
+
+- **The preparation now builds the anchor-first pool map** (the one the project's task list designates; the old sequential search it still ran sat at bucket 3000 of 36132 for a quarter of an hour on a real backup and could not be stopped). Progress shows the scan position.
+- **The pool map is computed in a separate process.** The app and its buttons stay responsive while the search runs at full CPU, and Stop ends it at once (it could not interrupt the computation before).
+- The pool-map phase reports its position every two seconds, also while it backtracks (it used to go silent for minutes between two reports a thousand buckets apart).
+- Once the preparation has every index file on disk and is computing the pool map, the bar says "5.7 GB downloaded" and the time left follows the mapping progress, instead of showing 0 B/s as if a download had stalled.
+
 ## What's new in 0.3.3
 
 - **Restores download 8 bucket files at a time instead of 4** (43 MB/s instead of 29 on a measured line), and the index-set slices of the preparation 8 instead of 4.

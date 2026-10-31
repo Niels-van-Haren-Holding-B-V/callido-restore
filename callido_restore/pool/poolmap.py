@@ -1,5 +1,5 @@
 """Build the bucket -> writer map for a Hyper Backup pool (see core/pool.py for the format notes)."""
-import os, json, struct, bisect, collections, time
+import os, json, struct, bisect, collections, subprocess, sys, threading, time
 from array import array
 from callido_restore.core.pool import BLOCK, WRITER_OF_SET, SET_OF_WRITER, load_runs
 
@@ -174,7 +174,7 @@ class Mapper:
         return last
     def _search(self, buckets, D, verbose, budget):
         state = {w: (0, 0, 0) for w in range(4)}; self.assigned = {w: [] for w in range(4)}; result = {}
-        stack = []; owners = []; i = 0; backtracks = 0; disc = 0; t0 = time.time(); last_log = 0
+        stack = []; owners = []; i = 0; backtracks = 0; disc = 0; t0 = time.time(); last_log = 0; last_t = time.time()
         while i < len(buckets):
             b = buckets[i]; cands = []; reasons = {}
             for w in range(4):
@@ -203,6 +203,8 @@ class Mapper:
                     for w in range(4): del self.assigned[w][saved_len[w]:]
                     for bb in buckets[bi:i]: result.pop(bb, None)
                     del owners[saved_own:]; i = bi; backtracks += 1
+                    # Backtracking can keep the search below the last logged index for minutes: report on time, not on count.
+                    if time.time() - last_t >= 2: last_t = time.time(); self.log(f"  D={D}: mapped {i}/{len(buckets)} buckets, backtracks={backtracks}, {time.time()-t0:.0f}s (searching)")
                     if alts and fdisc + 1 <= D:
                         w, ns = alts.pop(0); disc = fdisc + 1
                         if alts: stack.append((bi, alts, saved_state, saved_len, saved_own, fdisc))
@@ -215,7 +217,7 @@ class Mapper:
             w, ns = cands[0]; alts = cands[1:]
             if alts and disc < D: stack.append((i, alts, dict(state), {ww: len(self.assigned[ww]) for ww in range(4)}, len(owners), disc))
             self._apply(w, b, ns, state, result); owners.append(w); i += 1
-            if i - last_log >= 1000: last_log = i; self.log(f"  D={D}: mapped {i}/{len(buckets)} buckets, backtracks={backtracks}, {time.time()-t0:.0f}s")
+            if i - last_log >= 1000 or time.time() - last_t >= 2: last_log = i; last_t = time.time(); self.log(f"  D={D}: mapped {i}/{len(buckets)} buckets, backtracks={backtracks}, {time.time()-t0:.0f}s")
         return result, i, True
     def _apply(self, w, b, ns, state, result):
         s0 = self.models[w].stored_start[state[w][0]] + state[w][1] if state[w][0] < len(self.models[w].length) else self.models[w].total
@@ -231,3 +233,83 @@ def build_poolmap(source, outdir, log=print, max_bucket=None):
            "counts": {b: mp.counts[b] for b in result}, "buckets": {b: list(v) for b, v in result.items()}, "mapped_upto": upto}
     json.dump(out, open(os.path.join(outdir, "poolmap.json"), "w"))
     return result, upto
+
+
+# ----------------------------------------------------------------------------- the mapper as a child process
+# The search is pure Python at 100 % CPU for minutes; inside the app process it holds the interpreter lock, so every API
+# request and the Stop button wait behind it. As a child process it costs the app nothing and Stop simply ends it.
+DETACHED = True
+
+def _mapper_command(source_id, outdir, max_bucket):
+    """The child's command line: the frozen app binary with --mapper, or `python -m callido_restore --mapper` from a checkout."""
+    args = ["--mapper", source_id, str(outdir), "-" if max_bucket is None else str(max_bucket)]
+    if getattr(sys, "frozen", False): return [sys.executable] + args, None
+    root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    env = dict(os.environ, PYTHONPATH=root + os.pathsep + os.environ.get("PYTHONPATH", ""))
+    return [sys.executable, "-m", "callido_restore"] + args, env
+
+def build_poolmap_anchor(source, outdir, log=print, max_bucket=None):
+    """The anchor-first map (T1, pool/anchor.py): tagged records located in the bucket indexes, owners and placements derived
+    from them, exported as poolmap2.json which PoolReader prefers. Returns ({bucket: owner}, mapped_upto)."""
+    from callido_restore.pool import anchor, poolmap2
+    from callido_restore.core.pool import load_json
+    listing = load_json(os.path.join(outdir, "listing.json"))
+    writers = poolmap2.build_writers(outdir, log)
+    anchors, counts = anchor.scan_anchors(source, outdir, listing, writers, log=log, max_bucket=max_bucket)
+    owner, placements, report = anchor.resolve_and_place(writers, anchors, counts, log=log, max_bucket=max_bucket)
+    buckets = sorted(b for b in counts if max_bucket is None or b <= max_bucket)
+    upto = len(buckets) if len(owner) >= len(buckets) else len(owner)        # partial when not every bucket got an owner
+    anchor.export_map(writers, owner, placements, counts, outdir, mapped_upto=upto)
+    log(f"mapped {len(owner)}/{len(buckets)} buckets (anchor-first); {dict(report)}")
+    return dict(owner), upto
+
+def build_map(source, outdir, log=print, max_bucket=None):
+    """The app's mapper: anchor-first (TASKS.md T1: the sequential search below is obsolete), the v1 search only on request
+    (HBK_MAPPER=v1) for comparisons."""
+    if os.environ.get("HBK_MAPPER", "anchor") == "v1": return build_poolmap(source, outdir, log, max_bucket)
+    return build_poolmap_anchor(source, outdir, log, max_bucket)
+
+def read_map(outdir):
+    """({bucket: ...}, mapped_upto) of the map a mapper left in outdir: poolmap2.json (anchor-first) first, else poolmap.json."""
+    for name in ("poolmap2.json", "poolmap.json"):
+        p = os.path.join(outdir, name)
+        if os.path.isfile(p):
+            out = json.load(open(p))
+            return {int(b): (tuple(v) if isinstance(v, list) else v) for b, v in out["buckets"].items()}, out.get("mapped_upto", 0)
+    raise RuntimeError("the mapper left no map file")
+
+def mapper_main(argv):
+    """Child entry: build the pool map of one source, every log line to stdout (the parent turns them into progress)."""
+    from callido_restore.sources.source import load_sources, SOURCES
+    load_sources()
+    sid, outdir, mb = argv[0], argv[1], argv[2]
+    src = SOURCES.get(sid)
+    if src is None: raise SystemExit(f"mapper: unknown source {sid}")
+    build_map(src, outdir, log=lambda m: print(m, flush=True), max_bucket=None if mb == "-" else int(mb))
+    return 0
+
+def build_poolmap_detached(source, outdir, log=print, max_bucket=None, cancelled=None):
+    """``build_poolmap`` in a child process. Returns what ``build_poolmap`` returns (read back from poolmap.json), or
+    ({}, 0) when ``cancelled()`` turned true (the child is terminated, nothing is left running). Raises RuntimeError with the
+    child's last lines when it fails. ``DETACHED = False`` (tests) runs in-process instead."""
+    if not DETACHED: return build_map(source, outdir, log, max_bucket)
+    cmd, env = _mapper_command(source.id, outdir, max_bucket)
+    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, text=True, env=env)
+    tail = collections.deque(maxlen=8)
+    def reader():
+        for line in p.stdout:
+            line = line.rstrip("\n"); tail.append(line)
+            try: log(line)
+            except Exception: pass
+    t = threading.Thread(target=reader, daemon=True, name="mapper-log"); t.start()
+    while p.poll() is None:
+        if cancelled is not None and cancelled():
+            p.terminate()
+            try: p.wait(5)
+            except subprocess.TimeoutExpired: p.kill()
+            t.join(2); return {}, 0
+        time.sleep(0.3)
+    t.join(5)
+    if p.returncode != 0:
+        raise RuntimeError("mapper failed: " + (" | ".join(l for l in tail if l.strip())[-400:] or f"exit {p.returncode}"))
+    return read_map(outdir)
