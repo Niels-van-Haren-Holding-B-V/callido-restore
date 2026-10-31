@@ -27,7 +27,7 @@ def build_tag_index(writers):
     for w, recs in writers.items():
         for r in recs:
             if r.tag and r.n > 0:
-                K = min(r.n + len(r.dedup), TAGK)
+                K = min(r.n + r.nd, TAGK)
                 if r.head_new < K: continue            # leading chunks include dedup refs: tag would match elsewhere
                 idx.setdefault((K, r.tail), {}).setdefault(r.tag, []).append((w, r.idx)); ntag += 1
     return idx, ntag

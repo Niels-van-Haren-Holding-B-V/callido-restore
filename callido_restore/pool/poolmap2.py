@@ -13,8 +13,18 @@ LOOK = 96            # how many upcoming records (stream order) are considered a
 TAGK = 9
 
 class Rec:
-    __slots__ = ("off", "ranges", "n", "dedup", "size", "tag", "tail", "idx", "head_new")
-    def __init__(self, off): self.off = off; self.ranges = []; self.n = 0; self.dedup = []; self.size = None; self.tag = None; self.tail = None; self.idx = -1; self.head_new = 0
+    """One record of a writer's stream. ``ranges``: [start, len] runs of the ids it stores; ``dedup``: [start, len] runs of the ids
+    it references from earlier records (``nd`` ids in all; kept as runs, a flat id list was ~1.9 GB for the real backup, H9)."""
+    __slots__ = ("off", "ranges", "n", "dedup", "nd", "size", "tag", "tail", "idx", "head_new")
+    def __init__(self, off): self.off = off; self.ranges = []; self.n = 0; self.dedup = []; self.nd = 0; self.size = None; self.tag = None; self.tail = None; self.idx = -1; self.head_new = 0
+    def add_dedup(self, a, b):
+        """Ids a..b-1 are dedup references of this record; merges with the previous run when contiguous."""
+        if b <= a: return
+        if self.dedup and self.dedup[-1][0] + self.dedup[-1][1] == a: self.dedup[-1][1] += b - a
+        else: self.dedup.append([a, b - a])
+        self.nd += b - a
+    def dedup_ids(self):
+        for a, L in self.dedup: yield from range(a, a + L)
 
 def build_writers(outdir, log=print):
     """Per writer: records in stream order with new-id ranges, dedup ids, size, tag."""
@@ -41,19 +51,19 @@ def build_writers(outdir, log=print):
             for k in range(i, j):
                 g = g0[k]; L = ln[k]; nr = new_range(g, L, frontier)
                 if nr and owner.get(nr[0] // BLOCK) == w:
-                    ns, ne = nr; r.dedup.extend(range(g, ns))
+                    ns, ne = nr; r.add_dedup(g, ns)
                     if head_open and ns == g: r.head_new += ne - ns
                     else: head_open = False
                     while ns < ne:
                         blk = ns // BLOCK; seg_end = min(ne, (blk + 1) * BLOCK)
-                        if owner.get(blk) != w: r.dedup.extend(range(ns, seg_end))
+                        if owner.get(blk) != w: r.add_dedup(ns, seg_end)
                         else:
                             if r.ranges and r.ranges[-1][0] + r.ranges[-1][1] == ns: r.ranges[-1][1] += seg_end - ns
                             else: r.ranges.append([ns, seg_end - ns])
                             r.n += seg_end - ns
                         ns = seg_end
                     frontier = ne - 1
-                else: r.dedup.extend(range(g, g + L)); head_open = False
+                else: r.add_dedup(g, g + L); head_open = False
             m = mt.get(r.off)
             if m: r.size = m[0]; r.tag = m[1]; r.tail = m[2]
             r.idx = len(recs); recs.append(r); i = j
@@ -142,7 +152,7 @@ class Mapper2:
             if consumed == r.n:
                 if r.size is not None:
                     extra = 0; ok = True
-                    for g in r.dedup:
+                    for g in r.dedup_ids():
                         ul = self.ulen_of_id(g)
                         if ul is None:
                             ok = False; break
