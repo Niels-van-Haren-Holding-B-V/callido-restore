@@ -1,5 +1,13 @@
 **Callido Restore** restores files from a Synology Hyper Backup (`.hbk`) without Hyper Backup or a working NAS. It reads the backup's own metadata, shows every backup run on a timeline, and restores the folders you pick to a NAS share or a local folder. Files already at the destination are never overwritten or deleted, and the backup source is only read.
 
+## What's new in 0.2.2
+
+Progress you can see, from the first-run feedback:
+
+- Restore step 3 ("Prepare the backup for reading") shows one progress bar while the preparation runs: the phase, the percentage, how much is downloaded ("1.2 of 6.9 GB"), the download speed, the time left and a Stop button. "Prepare now" reads "Preparing…" and is disabled until the job is done, failed or stopped.
+- Buttons that start a job (Start restore, Continue a saved restore, Load all shares) are disabled while such a job is already running and come back when it ends, also after a failure.
+- "Count files and size" explains that counting needs no preparation; only the restore itself does.
+
 ## What's new in 0.2.1
 
 Two fixes on top of 0.2.0, found in the first hours of use:
