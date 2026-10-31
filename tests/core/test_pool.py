@@ -268,6 +268,7 @@ class PoolStatusTests(unittest.TestCase):
         self.assertEqual(st["index_files"], 3)
         self.assertEqual(st["indexes_local"], 1)
         self.assertEqual(st["total_buckets"], 3)
+        self.assertEqual((st["index_bytes"], st["index_bytes_local"]), (30, 10))   # all index files / the one present at its size
         self.assertFalse(st["map"])
 
 
