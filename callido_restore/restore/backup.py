@@ -349,7 +349,23 @@ class Backup:
         st = self.pool.status(); st["lz4"] = True
         try: import lz4  # noqa
         except Exception: st["lz4"] = False
+        st["complete"] = bool(st.get("map"))             # a map exists: the preparation ran to its end (partial maps included)
+        st["paused"] = self.pool_paused()
         return st
+    # --- preparation state the UI and the auto-start read: paused by the user (persisted next to the pool files)
+    def _pause_file(self): return self.src.index_dir / "pool" / "paused"
+    def pool_paused(self): return self._pause_file().is_file()
+    def set_pool_paused(self, on):
+        p = self._pause_file()
+        if on: p.parent.mkdir(parents=True, exist_ok=True); p.write_text("paused by the user\n")
+        elif p.exists(): p.unlink()
+    def raw_snapshots(self):
+        """Local raw <ver>.db snapshot files (one per share whose file list was loaded): the record tags come from these."""
+        out = []
+        for sh in self.shares:
+            for n, e in self.src.listdir(f"Config/@Share/{sh}").items():
+                if e["local"] and re.match(r"^\d+\.db\.\d+$", n): out.append(str(self.src.ensure(f"Config/@Share/{sh}/{n}")))
+        return out
     def build_pool(self, job, max_bucket=None):
         from callido_restore.pool import poolmap, indexfetch
         from callido_restore.core import pool
@@ -380,10 +396,7 @@ class Backup:
                             progress=lambda f: job.__setitem__("progress", 0.1 + 0.2 * f), report=report)   # this phase spans 10-30 % of the job
         if job.get("cancel"): return stopped("chunk-records")
         job["message"] = "collecting file sizes from loaded snapshots"; job["progress"] = 0.3
-        dbs = [(str(p), "index") for p in self.src.index_dir.glob("*__*.sqlite")]
-        for sh in self.shares:
-            for n, e in self.src.listdir(f"Config/@Share/{sh}").items():
-                if e["local"] and re.match(r"^\d+\.db\.\d+$", n): dbs.append((str(self.src.ensure(f"Config/@Share/{sh}/{n}")), "raw"))
+        dbs = [(str(p), "index") for p in self.src.index_dir.glob("*__*.sqlite")] + [(p, "raw") for p in self.raw_snapshots()]
         pool.build_recsizes(self.src, dbs, str(pool_dir), log, cancelled=lambda: bool(job.get("cancel")))
         if job.get("cancel"): return stopped("record-sizes")
         # The anchor-first mapper (T1) identifies records by the file tags of the raw snapshots: recmeta_set<s>.json.
