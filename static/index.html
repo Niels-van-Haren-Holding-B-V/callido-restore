@@ -272,7 +272,7 @@ const REASONS={'placed without a size check':'Its location in the backup couldn�
   'reads chunks from a record that is placed without a size check':'Part of it comes from data whose location couldn’t be confirmed','located through the v1 map':'Found with the older, less precise map',
   'the pool map gives no status':'The map has no check result for it','reads a chunk that no record stores':'Part of it is missing from the backup’s map'};
 // Restore errors come from the pool reader; the user gets plain words (the original text stays in the tooltip).
-function plainError(err){const s=String(err||'');const cov=PREP.pool&&PREP.pool.bytes_pct!=null?` (the preparation covers ${Math.round(PREP.pool.bytes_pct)} % of the data)`:'';
+function plainError(err){const s=String(err||'');const cov=PREP.pool&&!PREP.pool.chunk_index&&PREP.pool.bytes_pct!=null?` (the preparation covers ${Math.round(PREP.pool.bytes_pct)} % of the data)`:'';
   if(/not placed yet|map covers up to bucket|not in the pool map|KeyError|no record stores|unplaced/i.test(s))return `This file’s data could not be located in the backup${cov}.`;
   if(/upload failed/i.test(s))return 'Copying the file to the target failed: '+s.replace(/^upload failed:\s*/i,'');
   if(/No space left/i.test(s))return 'The target disk is full.';
@@ -565,10 +565,11 @@ async function prepState(){let pool={},jobs=[];try{pool=await api('/api/pool',{s
   const pools=jobs.filter(j=>j.label.startsWith('build pool map'));
   const job=(pool.running?pools.find(j=>j.id===pool.running):null)||(pools.some(j=>j.src!=null)?pools.find(j=>j.src===S.src):(pool.running!==undefined?null:pools[0]))||null;
   const total=pool.total_buckets||0,mapped=pool.mapped_buckets||0;
-  const complete=pool.complete!=null?!!pool.complete:!!(total&&mapped>=total);
+  const exact=!!pool.chunk_index;   // the backup's own chunk table locates every file: nothing to wait for
+  const complete=exact||(pool.complete!=null?!!pool.complete:!!(total&&mapped>=total));
   const running=pool.running||(job&&job.id)||null;
   const paused=pool.paused!=null?!!pool.paused:localStorage.getItem('prepPaused:'+S.src)==='1';
-  return {pool,job,running,complete,paused,total,mapped}}
+  return {pool,job,running,complete,paused,total,mapped,exact}}
 async function prepPause(id){id=id||PREP.jobId;try{await post('/api/pool/pause',{src:S.src})}catch(e){try{localStorage.setItem('prepPaused:'+S.src,'1');if(id)await api('/api/job/cancel',{id})}catch(e2){}}}
 async function prepRunAgain(){try{await api('/api/pool/build',{src:S.src})}catch(e){toastError(e)}if(S.tab==='restore')tabRestore()}
 async function prepResume(){try{await post('/api/pool/resume',{src:S.src})}catch(e){try{localStorage.removeItem('prepPaused:'+S.src);await api('/api/pool/build',{src:S.src})}catch(e2){toastError(e2)}}}
@@ -578,13 +579,13 @@ function coverageText(pool){if(!pool)return '';const parts=[];                  
   if(pool.bytes_pct!=null)parts.push(`${Math.round(pool.bytes_pct)} % of the data can be restored`);if(pool.records_placed!=null&&pool.records_total)parts.push(`${pool.records_placed.toLocaleString()} of ${pool.records_total.toLocaleString()} files located`);
   return parts.join(' · ')}
 // Step 4 shows the preparation as one labelled line (the header pill's content), never as the restore's bar.
-function prepLineText(j){const pct=Math.round((j.progress||0)*100);
-  return `Preparing the backup · ${j.message?j.message+' · ':''}${pct} %${PREP.eta?' · '+PREP.eta:''}`}
-function prepLineRender(st){const el=$('#prepLineText');if(!el||!st||!st.running)return;el.textContent=prepLineText(st.job||{})}
-function prepPillRender(st){const pill=$('#prepPill');if(!pill)return;if(!st||st.error||st.complete||(!st.running&&!st.paused)){pill.style.display='none';return}
+function prepLineText(j,exact){const pct=Math.round((j.progress||0)*100);
+  return `${exact?'Working in the background (a restore can start now)':'Preparing the backup'} · ${j.message?j.message+' · ':''}${pct} %${PREP.eta?' · '+PREP.eta:''}`}
+function prepLineRender(st){const el=$('#prepLineText');if(!el||!st||!st.running)return;el.textContent=prepLineText(st.job||{},st.exact)}
+function prepPillRender(st){const pill=$('#prepPill');if(!pill)return;if(!st||st.error||(st.complete&&!(st.exact&&st.running))||(!st.running&&!st.paused)){pill.style.display='none';return}
   pill.style.display='inline-flex';$('#prepSpin').style.display=st.running?'':'none';const b=$('#prepBtn');
   if(st.running){const j=st.job||{};const dl=j.total_bytes&&(j.done_bytes||0)<j.total_bytes;const bytes=dl?` · ${human(j.done_bytes||0)} of ${human(j.total_bytes)}${j.state==='running'?' · '+speedText(j.id):''}`:'';
-    $('#prepText').textContent=`Preparing the backup · ${j.message||'starting…'}${bytes}`;b.textContent='Pause';b.onclick=async()=>{b.disabled=true;b.textContent='Pausing…';await prepPause()}}
+    $('#prepText').textContent=`${st.exact?'Background work · restores can start now':'Preparing the backup'} · ${j.message||'starting…'}${bytes}`;b.textContent='Pause';b.onclick=async()=>{b.disabled=true;b.textContent='Pausing…';await prepPause()}}
   else{$('#prepText').textContent='Preparation paused · the restore waits for it';$('#prepPill').title='Resume continues the download where it stopped; the map itself is computed again.';b.textContent='Resume';b.disabled=false;b.onclick=async()=>{b.disabled=true;b.textContent='Resuming…';await prepResume()}}}
 // A restore queued with "Start when the backup is prepared" starts here, from the preparation watcher, whatever tab is open;
 // the Restore tab picks the running restore up with its own bar when it is (re-)rendered.
@@ -671,8 +672,9 @@ async function tabRestore(){const el=$('#tab-restore');
   step(4,'Check and start',`<div class="row"><button class="small" id="rsPlan">Count files and size</button><button class="${goOk&&!queued?'primary':''}" id="rsGo" ${goOk?'':'disabled'} title="${!mapOk&&goOk&&!queued?'The restore starts by itself as soon as the backup is prepared.':''}">${restoreRun?'Restoring…':loading.length?'Loading the file lists…':notLoaded.length?'Load the file lists first':queued?'Queued · cancel':mapOk?'Start restore':'Start when the backup is prepared'}</button><span class="help">counting needs no preparation, only the restore does · nothing at the target is ever overwritten or deleted: files already there are skipped, so an interrupted restore can simply be started again</span></div>
      ${notLoaded.length?`<p class="help" style="margin:4px 0;color:var(--warn)">The file list${notLoaded.length>1?'s':''} of ${notLoaded.map(esc).join(', ')} for this run ${notLoaded.length>1?'are':'is'} not loaded yet, so the restore cannot be planned. ${loading.length===notLoaded.length?'<span class="spin"></span> Loading…':`<button class="small primary" id="rsLoadLists">Load ${notLoaded.length>1?'them':'it'} now</button>`}</p>`:''}
      ${queued&&!mapOk?(prep.paused&&!poolRun?`<p class="help" style="margin:4px 0;color:var(--warn)"><b>Queued, but the preparation is paused:</b> nothing happens until you resume it. <button class="small primary" id="rsQueueResume">Resume the preparation</button></p>`:`<p class="help" style="margin:4px 0"><b>Queued:</b> the restore starts by itself when the backup is prepared. Keep the app open.</p>`):''}
-     ${poolRun?`<div class="row" id="prepLine" style="margin:4px 0"><span class="spin"></span><span id="prepLineText">${esc(prepLineText(prep.job||{}))}</span><button class="small" id="prepLinePause">Pause</button></div>`:''}
-     ${mapOk&&!poolRun?`<div class="row" style="margin:4px 0"><span class="help">✓ The backup is prepared${coverageText(pool)?' · '+coverageText(pool):''}</span><button class="small ghost" id="prepAgain" title="The downloaded index files are kept; the map is computed again, which takes a while.">Run the preparation again</button></div>
+     ${poolRun?`<div class="row" id="prepLine" style="margin:4px 0"><span class="spin"></span><span id="prepLineText">${esc(prepLineText(prep.job||{},prep.exact))}</span><button class="small" id="prepLinePause">Pause</button></div>`:''}
+     ${prep.exact&&!poolRun?`<p class="help" style="margin:4px 0">✓ Ready to restore: this backup records where every piece of every file is stored, so no preparation is needed. A file whose data is missing from the backup itself is reported as an error.</p>`:''}
+     ${mapOk&&!prep.exact&&!poolRun?`<div class="row" style="margin:4px 0"><span class="help">✓ The backup is prepared${coverageText(pool)?' · '+coverageText(pool):''}</span><button class="small ghost" id="prepAgain" title="The downloaded index files are kept; the map is computed again, which takes a while.">Run the preparation again</button></div>
      <p class="help" style="margin:0 0 4px">Files the map could not locate are reported as errors when restored. Loading the file lists of more shares or runs (step 1) gives the map more to work with; the preparation then runs again by itself.</p>`:''}
      ${mapOk?'':`<div id="prepBox" style="margin:6px 0"><p class="help" style="margin:0 0 4px">Before it can restore, the app learns where every piece of every file is stored: it downloads the backup's index files (a few GB, no file data) and builds a map. This starts by itself${poolRun?'':prep.paused?' once you resume it':(idxLocal||total)?'':' as soon as a share\'s file list is loaded for this run (step 1)'}, continues after a pause or a restart (the downloaded index files are kept; the map itself is computed again), and is kept for later restores.${keyLine(S.info.source.remote,true)?` ${keyLine(S.info.source.remote,true)}`:''}</p>
        ${poolRun?'':
