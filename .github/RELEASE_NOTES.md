@@ -1,5 +1,12 @@
 **Callido Restore** restores files from a Synology Hyper Backup (`.hbk`) without Hyper Backup or a working NAS. It reads the backup's own metadata, shows every backup run on a timeline, and restores the folders you pick to a NAS share or a local folder. Files already at the destination are never overwritten or deleted, and the backup source is only read.
 
+## What's new in 0.4.2
+
+- **Every file can be restored, with nothing to prepare.** The backup keeps its own table of where every piece of every file is stored (`Pool/chunk_index`). The app now reads that table directly, so each file is found exactly and the long "Preparing the backup" step is gone: load a share's file list, pick what you want, and start the restore right away (#152, #154, #156, #157). Every piece is still checked against its checksum while it is read, and a file whose data is missing from the backup itself is reported as an error.
+- A copy of a file that the backup stored only once is restored from the stored data (#156).
+- For a backup without that table the earlier map is still used, and it now places more files: large files that were written alongside others, newer versions of changed files, and leftovers of deleted files are handled (#150, #151).
+- The app keeps the parts of the table it has read in its cache folder for later restores (up to 6.8 GB for a 1.5 TB backup); the user guide explains what the cache holds (#157).
+
 ## What's new in 0.4.1
 
 - **Connecting a NAS over SMB tells you what is happening and what went wrong.** While it connects you see "Saving the connection to nas… 3 s" and "Listing the shares on nas… 12 s"; when it works, "Connected to nas: · 3 shares: …" stays on screen. A NAS that does not answer fails within about 20 seconds instead of minutes, with a plain reason: the name is not found (use the IP address), SMB is off in DSM, the user or password is wrong, there is no network route, or the address is not on your local network ("Did you mean 192.168.…?" for a mistyped address) (#138, #139, #141, #143).
