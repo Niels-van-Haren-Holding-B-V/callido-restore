@@ -48,7 +48,8 @@ def _scan_entries(b, ents, keys, hits):
     return checks
 
 def _worker_main(argv):
-    """Child entry (`python -m callido_restore.pool.anchor --worker <job.pkl> <out.pkl>`): job = (root, names, keys, buckets). A plain
+    """Child entry (`python -m callido_restore.pool.anchor --worker <job.pkl> <out.pkl>`): job = (root, names, keys, buckets); names[b] is
+    the full path of bucket b's index when root is "" (the scan resolves them through the source), else a name under root/Pool/0/<d>/. A plain
     subprocess, not multiprocessing: a spawned Pool worker re-runs the caller's main module, which re-loaded the whole
     `writers` table (GBs) in every worker last time."""
     import pickle
@@ -56,7 +57,7 @@ def _worker_main(argv):
     import sys
     hits = {}; checks = 0; since = 0
     for b in bl:
-        checks += _scan_entries(b, bucket_index_entries(os.path.join(root, f"Pool/0/{b // 2048}/{names[b]}")), keys, hits)
+        checks += _scan_entries(b, bucket_index_entries(names[b] if not root else os.path.join(root, f"Pool/0/{b // 2048}/{names[b]}")), keys, hits)
         if _rss_mb() > WORKER_RSS_MB: raise MemoryError(f"scan worker RSS {_rss_mb():.0f} MB > {WORKER_RSS_MB} MB at bucket {b}")
         since += 1
         if since >= 50: print(f"progress {since}", file=sys.stderr, flush=True); since = 0      # the parent sums these into "scanned i/N"
@@ -131,9 +132,10 @@ def scan_anchors(source, outdir, listing, writers, log=print, max_bucket=None, w
     idx, ntag = build_tag_index(writers)
     keys = {k: set(tm) for k, tm in idx.items()}
     names1, counts, buckets = _bucket_names(listing, max_bucket)
-    root = str(source.local)
-    for b in buckets:
-        if not os.path.isfile(os.path.join(root, f"Pool/0/{b // 2048}/{names1[b]}")): source.ensure(f"Pool/0/{b // 2048}/{names1[b]}")
+    # Where each bucket index really is: the app cache or a read-only root (source.local may not even exist for a backup
+    # read over a remote); ensure() returns that path, downloading only what is missing.
+    root = ""
+    names1 = {b: str(source.ensure(f"Pool/0/{b // 2048}/{names1[b]}")) for b in buckets}
     workers = max(1, min(workers or MAX_WORKERS, MAX_WORKERS, os.cpu_count() or 1))     # frozen too: the app binary is the worker
     log(f"anchor scan (x{workers}): {ntag:,} tagged records, {sum(len(v) for v in idx.values()):,} tags, {len(idx):,} keys, {len(buckets):,} buckets, rss {_rss_mb():.0f} MB")
     t0 = time.time(); hits = {}; checks = 0
@@ -142,7 +144,7 @@ def scan_anchors(source, outdir, listing, writers, log=print, max_bucket=None, w
     last_t = time.time()
     if workers == 1:
         for n_done, b in enumerate(buckets):
-            checks += _scan_entries(b, bucket_index_entries(os.path.join(root, f"Pool/0/{b // 2048}/{names1[b]}")), keys, hits)
+            checks += _scan_entries(b, bucket_index_entries(names1[b]), keys, hits)
             if (n_done + 1) % 500 == 0 or time.time() - last_t >= 2: last_t = time.time(); log(f"  scanned {n_done + 1}/{len(buckets)} buckets, tags hit={len(hits):,}, md5 checks={checks:,}, {time.time() - t0:.0f}s")
             if _rss_mb() > PARENT_RSS_MB: raise MemoryError(f"anchor scan RSS {_rss_mb():.0f} MB > {PARENT_RSS_MB} MB; aborted")
     else:

@@ -395,6 +395,14 @@ class Backup:
         if fetch.get("failed") or fetch.get("error") or fetch.get("mismatch_count"):
             raise RuntimeError(fetch.get("error") or "bucket index files are missing or the wrong size; mapping was not started")
         if job.get("cancel"): return stopped("before-mapping")
+        # The anchor-first mapper needs every record's tag (md5 of its first chunks) from the raw snapshot databases:
+        # recmeta_set<s>.json, built once. Only raw <ver>.db snapshots carry tags; the app downloads one per share loaded.
+        if not all((pool_dir / f"recmeta_set{k}.json").is_file() for k in (1, 2, 3, 4)):
+            raw = [p for p, kind in dbs if kind == "raw"]
+            if not raw: raise RuntimeError("no snapshot database is on this Mac yet: load the file list of at least one share for the chosen run (the chips above the tabs), then run the preparation again")
+            job["message"] = f"collecting record tags from {len(raw)} snapshot database(s)"; job["progress"] = 0.69
+            pool.build_recmeta(self.src, raw, str(pool_dir), log)
+        if job.get("cancel"): return stopped("record-meta")
         job["message"] = "mapping buckets to writers"; job["progress"] = 0.7
         def mlog(m):
             job["message"] = str(m)

@@ -423,6 +423,28 @@ class BuildPoolWiringTests(unittest.TestCase):
         paths.CACHE_DIR = self.old_cache
         self.tmp.cleanup()
 
+    def test_record_meta_is_built_for_the_anchor_mapper(self):
+        """recmeta_set<s>.json (record tags) is built from the raw snapshot databases before the mapper runs; without any raw
+        snapshot on this Mac the preparation says what to load first."""
+        self.src.remotes = ["remote:hbk"]
+        calls = {}
+        def recmeta(src, raw, outdir, log): calls["raw"] = list(raw)
+        fetch_ok = lambda *_a, **_k: {"stopped": False, "directories": 1, "directories_complete": 1, "failed": [], "mismatch_count": 0}
+        with mock.patch("callido_restore.core.pool.build_runs", lambda *_a, **_k: None), \
+             mock.patch("callido_restore.core.pool.build_recsizes", lambda *_a, **_k: None), \
+             mock.patch("callido_restore.core.pool.build_recmeta", recmeta), \
+             mock.patch("callido_restore.pool.indexfetch.fetch_bucket_indexes", fetch_ok), \
+             mock.patch("callido_restore.pool.poolmap.build_poolmap_detached", return_value=({1: 0}, 1)):
+            job = {"cancel": False, "message": "", "progress": 0}
+            with self.assertRaises(RuntimeError) as cm: self.backup.build_pool(job)          # no raw snapshot db anywhere
+            self.assertIn("load the file list", str(cm.exception))
+            share = self.src.cache_dir / "Config" / "@Share" / "Documents"; share.mkdir(parents=True)
+            (share / "1234.db.5").write_bytes(b"x")
+            self.backup.shares = ["Documents"]
+            self.src._list.clear()
+            result = self.backup.build_pool(job)
+        self.assertEqual(result, {"mapped": 1, "upto": 1}); self.assertTrue(calls["raw"][0].endswith("1234.db.5"))
+
     def test_stop_does_not_start_the_mapper(self):
         self.src.remotes = ["remote:hbk"]
         mapped = {}
