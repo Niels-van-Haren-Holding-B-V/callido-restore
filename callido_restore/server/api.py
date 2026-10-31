@@ -6,7 +6,8 @@ from pathlib import Path
 from urllib.parse import urlparse, parse_qs, unquote
 from callido_restore import paths
 from callido_restore.about import APP_NAME, TAGLINE, NOTICE, VERSION
-from callido_restore.paths import RCLONE, _bundled
+from callido_restore.oscompat import popen_kw
+from callido_restore.paths import RCLONE, _bundled, is_remote_path, ui_path
 from callido_restore.restore.backup import Backup
 from callido_restore.restore.destination import restore_target_error
 from callido_restore.restore.jobs import JOBS, start_job
@@ -101,7 +102,7 @@ class H(BaseHTTPRequestHandler):
                 p = Path(os.path.expanduser(q.get("path") or "~"))
                 if not p.is_dir(): p = p.parent
                 items = sorted([e.name for e in p.iterdir() if e.is_dir() and not e.name.startswith(".")], key=str.lower)
-                return self._json({"path": str(p), "parent": str(p.parent), "dirs": items})
+                return self._json({"path": ui_path(p), "parent": ui_path(p.parent), "dirs": items})
             if u.path == "/api/dest/check":   # restore destination: is it inside the backup? does it exist? is it empty?
                 dest = (q.get("dest") or "").strip(); src = SOURCES.get(q.get("src") or "")     # no backup scan needed for this
                 shares = json.loads(q.get("shares") or "[]")                                    # selected shares: the restore writes dest/<share>/...
@@ -109,7 +110,7 @@ class H(BaseHTTPRequestHandler):
                 else: conflict = src.contains_dest(dest, shares) if src and dest else ""
                 out = {"dest": dest, "inside_source": bool(conflict), "conflict": conflict or None, "exists": False, "empty": None, "files": 0}
                 if not dest: return self._json(out | {"error": "no destination"})
-                if ":" in dest and not dest.startswith("/"):
+                if is_remote_path(dest):
                     try:
                         ents = rclone.ls(dest, max_depth=1, timeout=120); out["exists"] = True; out["files"] = len(ents); out["empty"] = not ents
                     except rclone.RcloneError as e:
@@ -146,7 +147,7 @@ class H(BaseHTTPRequestHandler):
                     pp = Path(os.path.expanduser(path or "~"))
                     try: dirs = sorted(e.name for e in pp.iterdir() if e.is_dir() and not e.name.startswith(".")); files = sorted(e.name for e in pp.iterdir() if e.is_file())[:50]
                     except OSError as e: return self._json({"error": str(e)})
-                    path = str(pp)
+                    path = ui_path(pp)
                 looks_hbk = "Config" in dirs and "Pool" in dirs
                 return self._json({"path": path, "dirs": dirs, "files": files[:50], "looks_like_hbk": looks_hbk, "hbk_dirs": [d for d in dirs if d.endswith(".hbk")]})
             if u.path == "/api/rclone/connect":  # secrets (password, client secret) go in a POST body, never in the query string
@@ -266,7 +267,7 @@ class H(BaseHTTPRequestHandler):
                     # the password is handed to rclone over stdin ("-"), so it never appears in a process list; the obscured
                     # form that lands in rclone.conf is the only thing passed as an argument
                     pw = (body.get("password") or "").replace("\n", "")
-                    obs = subprocess.run([RCLONE, "obscure", "-"], input=pw + "\n", capture_output=True, text=True).stdout.strip()
+                    obs = subprocess.run([RCLONE, "obscure", "-"], input=pw + "\n", capture_output=True, text=True, **popen_kw()).stdout.strip()
                     if not obs: return self._json({"error": "rclone could not prepare the password"}, 500)
                     args = [RCLONE, "config", "create", name, "smb", f"host={body.get('host', '')}", f"user={body.get('user', '')}", f"pass={obs}", "--obscure=false", "--non-interactive"]
                 def run(job):
@@ -289,7 +290,7 @@ class H(BaseHTTPRequestHandler):
                         except rclone.RcloneError as e: raise RuntimeError(str(e))
                     else:
                         job["message"] = "Connecting…"
-                        r = subprocess.run(args, capture_output=True, text=True, timeout=600)
+                        r = subprocess.run(args, capture_output=True, text=True, timeout=600, **popen_kw())
                         if r.returncode != 0: raise RuntimeError(r.stderr.strip()[-400:] or "rclone config failed")
                     rclone.forget(); rclone.fscache_clear()                     # new or changed connection: cached listings and backends are stale
                     job["message"] = "Listing your Drive…" if kind == "drive" else "Listing the shares…"     # the root listing can take a while

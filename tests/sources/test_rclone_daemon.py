@@ -129,6 +129,7 @@ class Orphans(unittest.TestCase):
             self.assertEqual(rc.kill_orphans(), 2)
         self.assertEqual(kill.call_args_list, [mock.call(500, 15), mock.call(501, 15)])
 
+    @unittest.skipIf(os.name == "nt", "no ps on Windows: _ps() returns [] there by design")
     def test_ps_rows_are_parsed(self):
         out = subprocess.CompletedProcess([], 0, stdout="  500     1 /Applications/Callido Restore.app/Contents/Frameworks/rclone\n  bad line\n", stderr="")
         with mock.patch.object(subprocess, "run", return_value=out) as run:

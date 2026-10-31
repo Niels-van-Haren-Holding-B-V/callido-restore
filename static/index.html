@@ -198,7 +198,7 @@ footer.madeBy img{width:18px;height:18px;border-radius:5px;vertical-align:middle
           <li><i>APIs &amp; Services → OAuth consent screen</i>: user type <i>External</i>, app name “Callido Restore”, your e-mail as support and developer contact. Under <i>Test users</i> add your own Google account (the app stays in testing mode, that is fine for one user).</li>
           <li><i>APIs &amp; Services → Credentials → Create credentials → OAuth client ID</i>, application type <i>Desktop app</i>.</li>
           <li>Copy the <b>Client ID</b> (ends in <code>.apps.googleusercontent.com</code>) and the <b>Client secret</b> into the fields here.</li></ol>
-          <p class="help">The key only identifies this app towards Google; it gives nobody access to your Drive. It is stored in rclone's configuration on this Mac together with the sign-in token.</p></details></template>
+          <p class="help">The key only identifies this app towards Google; it gives nobody access to your Drive. It is stored in rclone's configuration on this computer together with the sign-in token.</p></details></template>
 <dialog id="dlgSrc" style="min-width:640px">
   <h3>Add a backup <span id="wzS" class="help">step 1 of 3</span></h3>
   <div id="ws1">
@@ -222,7 +222,7 @@ footer.madeBy img{width:18px;height:18px;border-radius:5px;vertical-align:middle
         <details class="adv"><summary>Advanced</summary><label class="f">connection name <input id="wsDName" value="gdrive"></label></details></div>
       <label><input type="radio" name="wsk" value="smb"> a NAS share over SMB — connect now</label>
       <div id="wsSmb" style="display:none;margin-left:22px"><label class="f">connection name <input id="wsSName" value="nas"></label><label class="f">host (IP or name) <input id="wsHost"></label><label class="f">user <input id="wsUser"></label><label class="f">password <input id="wsPass" type="password"></label></div>
-      <label><input type="radio" name="wsk" value="local"> a folder on this Mac / a mounted disk</label>
+      <label><input type="radio" name="wsk" value="local"> a folder on this computer / a mounted disk</label>
     </div>
     <div id="wsConn" class="status" style="margin-top:6px"></div>
   </div>
@@ -234,12 +234,13 @@ footer.madeBy img{width:18px;height:18px;border-radius:5px;vertical-align:middle
   </div>
   <div id="ws3" style="display:none">
     <label class="f">Name for this backup <input id="nName"></label>
-    <details class="adv"><summary>Advanced</summary><label class="f">Local cache folder on this Mac (metadata and temporarily fetched bucket data land here) <input id="nLocal"></label></details>
+    <details class="adv"><summary>Advanced</summary><label class="f">Local cache folder on this computer (metadata and temporarily fetched bucket data land here) <input id="nLocal"></label></details>
     <p class="help" id="wsSummary"></p>
   </div>
   <div class="row" style="justify-content:flex-end;margin-top:10px"><span id="wsBusy" class="muted" style="display:none;align-items:center;gap:8px"><span class="spin"></span><span id="wsBusyText">Signing in…</span></span><button id="nCancel" class="ghost">Cancel</button><button id="wsBack" style="display:none">Back</button><button id="wsNext" class="primary">Next</button></div>
 </dialog>
 <script>
+const LOCAL_EG=/^Win/.test(navigator.platform)?'Z:':'/Volumes';   // example local path in placeholders: a mapped drive on Windows
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 const S={src:null,info:null,ver:null,snaps:{},tab:'changes',range:365,basket:JSON.parse(localStorage.getItem('basket')||'[]')};
 // Every request goes through track(): an in-flight counter shows the header activity pill once a request runs longer than
@@ -616,7 +617,7 @@ async function tabRestore(){const el=$('#tab-restore');
      <details class="adv"><summary>Advanced</summary><div class="row"><label><input type="checkbox" id="rsMeta" checked> skip Synology metadata (@eaDir thumbnails, @SynoResource, .DS_Store)</label><label><input type="checkbox" id="rsFiles" ${localStorage.getItem('rsFiles')==='1'?'checked':''}> show single files in the tree</label></div></details>`,S.basket.length>0)+
   step(3,'Where should the files go?',`<p class="help" style="margin:0">Each shared folder you selected from is restored into a folder of your choice on the NAS, usually the shared folder with the same name. Selected subfolders keep their place under it (<code>Documents/Invoices/2025</code> → <code>&lt;target&gt;/Invoices/2025</code>), with no version or source folder in between. Nothing at a target is ever overwritten or deleted; files keep their original modification times.</p>
      <div class="row" style="margin:6px 0"><label>NAS connection <select id="wzRem"></select></label><span class="help" id="wzRemHelp"></span></div>
-     <table id="wzMap" style="margin:0 0 6px"><thead><tr><th>Folder from backup</th><th>Restore to</th><th></th></tr></thead><tbody>${shareRows().map((b,i)=>`<tr><td class="mono">${esc(b.share)}<div class="muted" style="font-size:11.5px">${b.paths.map(p=>p?esc(p):'(whole share)').join(' · ')}</div></td><td><span class="mapRemote"><select class="mapShare" data-i="${i}"><option value="">(loading…)</option></select> / <input class="mapSub" data-i="${i}" placeholder="(share root)" style="width:200px"></span><span class="mapLocal" style="display:none"><input class="mapPath" data-i="${i}" placeholder="/Volumes/share/folder" style="width:380px"></span><div class="mono muted mapTo" data-i="${i}"></div></td><td class="status mapStat" data-i="${i}"></td></tr>`).join('')||'<tr><td colspan="3" class="muted">Select folders in step 2 first.</td></tr>'}</tbody></table>
+     <table id="wzMap" style="margin:0 0 6px"><thead><tr><th>Folder from backup</th><th>Restore to</th><th></th></tr></thead><tbody>${shareRows().map((b,i)=>`<tr><td class="mono">${esc(b.share)}<div class="muted" style="font-size:11.5px">${b.paths.map(p=>p?esc(p):'(whole share)').join(' · ')}</div></td><td><span class="mapRemote"><select class="mapShare" data-i="${i}"><option value="">(loading…)</option></select> / <input class="mapSub" data-i="${i}" placeholder="(share root)" style="width:200px"></span><span class="mapLocal" style="display:none"><input class="mapPath" data-i="${i}" placeholder="${LOCAL_EG}/share/folder" style="width:380px"></span><div class="mono muted mapTo" data-i="${i}"></div></td><td class="status mapStat" data-i="${i}"></td></tr>`).join('')||'<tr><td colspan="3" class="muted">Select folders in step 2 first.</td></tr>'}</tbody></table>
      <div class="row" style="margin:6px 0"><button class="small" id="wzCheck">Check targets and preview</button><span id="wzCheckOut" class="status"></span></div>
      <details class="adv" id="wzPrep"><summary>No NAS connection yet? Prepare the NAS and connect</summary>
        <ol class="help" style="margin:6px 0 8px 18px;padding:0">
@@ -629,8 +630,8 @@ async function tabRestore(){const el=$('#tab-restore');
        <div id="wdConn" class="status"></div>
        <p class="help" style="margin:4px 0 0">The app never deletes anything on the NAS. It creates the target folder and writes the restored files; a target inside the backup itself is refused.</p>
      </details>
-     <details class="adv"><summary>Advanced: everything under one folder</summary><div class="row"><label><input type="checkbox" id="wzOne"> put all selected folders under one folder, as <code>&lt;folder&gt;/&lt;share&gt;/&lt;path&gt;</code></label><input id="wzOnePath" placeholder="nas:Restore/restore-${S.ver} or /Volumes/Restore/restore-${S.ver}" style="width:380px"></div></details>
-     <details class="adv"><summary>How the data flows</summary><p class="help">Google Drive → this Mac (decompress and verify) → NAS. The Drive download speed is the limit; data blocks are fetched 4 in parallel ahead of the writer and deleted from the Mac after use (cache ≤ 20 GB).</p></details>`,false)+
+     <details class="adv"><summary>Advanced: everything under one folder</summary><div class="row"><label><input type="checkbox" id="wzOne"> put all selected folders under one folder, as <code>&lt;folder&gt;/&lt;share&gt;/&lt;path&gt;</code></label><input id="wzOnePath" placeholder="nas:Restore/restore-${S.ver} or ${LOCAL_EG}/Restore/restore-${S.ver}" style="width:380px"></div></details>
+     <details class="adv"><summary>How the data flows</summary><p class="help">Google Drive → this computer (decompress and verify) → NAS. The Drive download speed is the limit; data blocks are fetched 4 in parallel ahead of the writer and deleted from the Mac after use (cache ≤ 20 GB).</p></details>`,false)+
   step(4,'Check and start',`<div class="row"><button class="small" id="rsPlan">Count files and size</button><button class="${S.basket.length&&mapOk&&!restoreRun?'primary':''}" id="rsGo" ${S.basket.length&&mapOk&&!restoreRun?'':'disabled'}>${restoreRun?'Restoring…':mapOk?'Start restore':poolRun?'Waiting for the preparation…':prep.paused?'Preparation paused':'Waiting for the preparation'}</button><span class="help">counting needs no preparation, only the restore does · nothing at the target is ever overwritten or deleted: files already there are skipped, so an interrupted restore can simply be started again</span></div>
      ${mapOk&&!poolRun?`<div class="row" style="margin:4px 0"><div class="prog"><i style="width:100%"></i></div><span class="help">Prepared${coverageText(pool)?' · '+coverageText(pool):''}</span><button class="small ghost" id="prepAgain" title="The downloaded index files are kept; the map is computed again, which takes a while.">Run the preparation again</button></div>
      <p class="help" style="margin:0 0 4px">Files the map could not locate are reported as errors when restored. Loading the file lists of more shares or runs (step 1) gives the map more to work with; the preparation then runs again by itself.</p>`:''}

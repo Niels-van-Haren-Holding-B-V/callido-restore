@@ -4,7 +4,7 @@ rclone ``--stats`` samples follow fs/accounting/stats.go String() (one-line
 form ``size / size, pct, speed, ETA`` with optional ``xfr#`` / ``chk#``, and
 the multi-line Checks / Transferred lines). pct is ``-`` when the total is 0.
 """
-import subprocess, tempfile, time, unittest
+import os, subprocess, tempfile, time, unittest
 from pathlib import Path
 from unittest import mock
 
@@ -66,7 +66,7 @@ class CommandTests(unittest.TestCase):
         self.assertNotIn("--delete", cmd)
         self.assertTrue(any(a.startswith("--delete") for a in cmd) is False)
         self.assertEqual(cmd[2], "remote:hbk/Pool/0/3")
-        self.assertEqual(cmd[3], "/tmp/pool/0/3")
+        self.assertEqual(cmd[3], os.path.normpath("/tmp/pool/0/3"))
 
 
 def _listing(*rows):
@@ -378,7 +378,7 @@ class ListdirCacheTests(unittest.TestCase):
     def test_ensure_refreshes_the_listing(self):
         """A download invalidates the cached listing of its directory, so the new file shows up as local."""
         self.src.remotes = ["fake:remote"]
-        def fake_run(cmd, capture_output=True, text=True):               # never the real rclone
+        def fake_run(cmd, capture_output=True, text=True, **_k):               # never the real rclone
             if cmd[1] == "lsjson": return subprocess.CompletedProcess(cmd, 0, "[]", "")
             Path(cmd[3]).write_bytes(b"downloaded")                       # rclone copyto <remote/rel> <tmp>
             return subprocess.CompletedProcess(cmd, 0, "", "")
