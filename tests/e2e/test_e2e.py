@@ -92,5 +92,31 @@ class CrossBucketTags(unittest.TestCase):
             shutil.rmtree(work, ignore_errors=True)
 
 
+
+class Rotation(unittest.TestCase):
+    """Version rotation (hbk-1's mechanism, 2026-10-31): a rotated-away run, its unneeded buckets purged, the freed bucket ids
+    reused by one writer while the others get fresh ones (same revision), so (revision, id) is not fill order for those."""
+    def run_flow(self, **kw):
+        work = tempfile.mkdtemp(prefix="hbk-e2e-rot-")
+        try: return flow.run_inprocess(work, scale=1, bucket_kb=256, rotate=True, **kw)
+        finally: shutil.rmtree(work, ignore_errors=True)
+
+    def check(self, rep):
+        self.assertTrue(rep["manifest"]["truth"]["reused"], "the scenario must reuse bucket ids")
+        for ver, r in rep["restores"].items():
+            self.assertEqual(r["wrong_bytes"], [], ver); self.assertEqual(r["missing"], [], f"v{ver}: " + flow.summary(rep))
+
+    def test_reused_bucket_ids_restore_every_run(self):
+        self.check(self.run_flow(rotate_copy=False))
+
+    @unittest.expectedFailure
+    def test_copy_of_a_rotated_original_keeps_its_neighbours(self):
+        """hbk-6 finding E6: run 102 copies a file that only a rotated-away run had. Its tag matches the original's entries in an
+        older bucket (rev 100), so it is anchored behind in time; the record before it on the same writer (IMG_4107.jpg,
+        spilling 19 -> 29 in run 101) then has its next anchor earlier than itself, gets spill-no-solution and is lost from
+        every run. The copy itself restores."""
+        self.check(self.run_flow(rotate_copy=True))
+
+
 if __name__ == "__main__":
     unittest.main()
