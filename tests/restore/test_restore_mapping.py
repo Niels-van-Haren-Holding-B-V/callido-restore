@@ -121,7 +121,7 @@ class MappedRestoreTests(_Fixture):
     def test_existing_file_is_skipped_per_root(self):
         os.makedirs(os.path.join(self.dB, "docs", "deeper")); open(os.path.join(self.dB, "docs", "deeper", "w.txt"), "w").write("mine")
         res = self.b.restore(self.items, "", self.job())
-        self.assertEqual((res["restored"], res["skipped"]), (4, 1))                      # "restored" counts handled files, skipped included
+        self.assertEqual((res["restored"], res["skipped"]), (3, 1))                      # restored = written files; skipped ones are not restored
         self.assertEqual(len(self.b.pool.extracted), 3)
         self.assertEqual(open(os.path.join(self.dB, "docs", "deeper", "w.txt")).read(), "mine")
 
@@ -166,6 +166,32 @@ class RestoreCountTests(_Fixture):
         b = FakeBackup(self.src, files); sel = [{"share": "A", "ver": 1234, "path": "", "is_dir": 1}]
         self.assertEqual(b.restore_count(sel, skip_meta=True), {"files": 2, "bytes": 18})
         self.assertEqual(b.restore_count(sel, skip_meta=False), {"files": 6, "bytes": 38})
+
+
+class ResumeCountsTests(_Fixture):
+    """E3 (hbk-6): a resumed restore keeps the counts and the errors from before the pause; E2: a re-run counts nothing as restored."""
+    def test_rerun_counts_nothing_as_restored(self):
+        self.b.restore(self.items, "", self.job("one"))
+        res = FakeBackup(self.src, FILES).restore(self.items, "", self.job("two"))
+        self.assertEqual((res["restored"], res["skipped"], res["errors"]), (0, 4, 0))
+
+    def test_resume_keeps_counts_and_errors(self):
+        job = self.job("pau")
+        class Pool(FakePool):
+            def extract(self2, off, out, **kw):
+                if out.endswith("y.txt"): raise KeyError("chunk not in the pool map")      # one failed file before the pause
+                super().extract(off, out, **kw)
+                if out.endswith("z.txt"): job["cancel"] = True                              # pause after the third file
+        self.b.pool = Pool()
+        res = self.b.restore(self.items, "", job)
+        self.assertTrue(res["paused"]); self.assertEqual((res["restored"], res["errors"]), (2, 1))
+        saved = json.loads((paths.JOBS_DIR / f"{job['id']}.json").read_text())
+        self.assertEqual((saved["done_files"], len(saved["errors"]), saved["next_index"]), (2, 1, 3))   # two written, one failed, paused before the fourth
+        # resume the way /api/restore/resume does: seed the counts from the file, start at next_index
+        job2 = self.job("res"); job2.update({k: saved[k] for k in ("done_files", "skipped", "errors", "verified", "identical_copy", "unverified")})
+        res2 = FakeBackup(self.src, FILES).restore(saved["items"], saved["dest"], job2, start_at=saved["next_index"])
+        self.assertEqual((res2["restored"], res2["skipped"], res2["errors"]), (3, 0, 1))
+        self.assertEqual([e["path"] for e in job2["errors"]], ["A/sub/y.txt"])
 
 
 class RestoreApiTests(_Fixture):
