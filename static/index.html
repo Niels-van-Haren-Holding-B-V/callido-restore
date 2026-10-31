@@ -330,7 +330,6 @@ const sinceText=s=>{const d=Math.max(0,Math.round(Date.now()/1000-(s||Date.now()
 const STALE={};function staleInfo(job){if(job.state!=='running')return null;const key=`${job.progress||0}|${job.done_bytes||0}`;const now=Date.now();const s=STALE[job.id]||(STALE[job.id]={key,t:now});
   if(s.key!==key){s.key=key;s.t=now;return null}return now-s.t>=3000?Math.round((now-s.t)/1000):null}
 function progressHtml(job,rich,extra){const pct=Math.round((job.progress||0)*100);const running=job.state==='running';
-  if(job.label&&String(job.label).startsWith('build pool map'))job={...job,message:plainPhase(job.message)};
   // Once every byte is on disk the job is computing (the pool map): no speed slot, and the time left follows the progress, not the bytes.
   const dlDone=!!job.total_bytes&&(job.done_bytes||0)>=job.total_bytes;
   const eta=running?etaText(job.id,job.progress||0,dlDone?undefined:job.done_bytes,dlDone?undefined:job.total_bytes):'';const stale=staleInfo(job);
@@ -577,19 +576,10 @@ async function prepResume(){try{await post('/api/pool/resume',{src:S.src})}catch
 function coverageText(pool){if(!pool)return '';const parts=[];                     // bytes_pct is a percentage, 0-100 (agreed with hbk-1)
   if(pool.bytes_pct!=null)parts.push(`${Math.round(pool.bytes_pct)} % of the data can be restored`);if(pool.records_placed!=null&&pool.records_total)parts.push(`${pool.records_placed.toLocaleString()} of ${pool.records_total.toLocaleString()} files located`);
   return parts.join(' · ')}
-// The mapper's progress messages are log lines ("scanned 54/54 buckets, tags hit=17", a stats dict); the user gets the phase.
-function plainPhase(msg){const s=String(msg||'');let m;
-  if((m=/^scanned (\d+)\/(\d+) buckets/.exec(s)))return `reading the index (${(+m[1]).toLocaleString()} of ${(+m[2]).toLocaleString()})`;
-  if(/^mapped \d+\/\d+ buckets|^placing|^placer/i.test(s))return 'building the map';
-  if(/^parsing chunk records/i.test(s))return 'reading the file records';
-  if(/^listing pool directories/i.test(s))return 'listing the backup folders';
-  if(/^downloading index set (\d+)\/(\d+)/.exec(s))return s.replace(/^downloading index set (\d+)\/(\d+).*$/,'downloading index files (set $1 of $2)');
-  if(/[{}]|tags hit|anchor|phantom/i.test(s))return 'building the map';
-  return s}
 function prepPillRender(st){const pill=$('#prepPill');if(!pill)return;if(!st||st.error||st.complete||(!st.running&&!st.paused)){pill.style.display='none';return}
   pill.style.display='inline-flex';$('#prepSpin').style.display=st.running?'':'none';const b=$('#prepBtn');
   if(st.running){const j=st.job||{};const dl=j.total_bytes&&(j.done_bytes||0)<j.total_bytes;const bytes=dl?` · ${human(j.done_bytes||0)} of ${human(j.total_bytes)}${j.state==='running'?' · '+speedText(j.id):''}`:'';
-    $('#prepText').textContent=`Preparing the backup · ${plainPhase(j.message)||'starting…'}${bytes}`;b.textContent='Pause';b.onclick=async()=>{b.disabled=true;b.textContent='Pausing…';await prepPause()}}
+    $('#prepText').textContent=`Preparing the backup · ${j.message||'starting…'}${bytes}`;b.textContent='Pause';b.onclick=async()=>{b.disabled=true;b.textContent='Pausing…';await prepPause()}}
   else{$('#prepText').textContent='Preparation paused · the restore waits for it';$('#prepPill').title='Resume continues the download where it stopped; the map itself is computed again.';b.textContent='Resume';b.disabled=false;b.onclick=async()=>{b.disabled=true;b.textContent='Resuming…';await prepResume()}}}
 async function prepWatch(){if(PREP.src===S.src&&PREP.timer)return;PREP.src=S.src;if(PREP.timer){clearTimeout(PREP.timer);PREP.timer=null}
   const tick=async()=>{if(PREP.src!==S.src)return;const st=await prepState();PREP.pool=st.pool||PREP.pool;const was=PREP.jobId;PREP.jobId=st.running||null;if(st.job){etaText(st.job.id,st.job.progress||0,st.job.done_bytes,st.job.total_bytes)}prepPillRender(st);
