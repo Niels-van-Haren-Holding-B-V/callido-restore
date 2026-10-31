@@ -120,14 +120,16 @@ A bugfix release from the first real test run of the app.
 
 ## Download
 
-| Mac | File |
+| Computer | File |
 | --- | --- |
-| Apple silicon (M1 and later) | `CallidoRestore-arm64.dmg` |
-| Intel | `CallidoRestore-amd64.dmg` |
+| Mac with Apple silicon (M1 and later) | `CallidoRestore-arm64.dmg` |
+| Mac with Intel | `CallidoRestore-amd64.dmg` |
+| Windows 10 (21H2 and later) or 11, x64; Arm64 Windows runs it through emulation | `CallidoRestore-x64.msi` |
 
-`SHA256SUMS` lists the checksum of both images; `shasum -a 256 -c SHA256SUMS` in the download folder verifies them.
+`SHA256SUMS` lists the checksums of the two Mac images (`shasum -a 256 -c SHA256SUMS` in the download folder verifies them);
+`CallidoRestore-x64.msi.sha256` that of the Windows installer (`Get-FileHash CallidoRestore-x64.msi` in PowerShell shows it).
 
-## Install and first start
+## Install and first start on a Mac
 
 1. Open the `.dmg` and drag **Callido Restore** to Applications.
 2. Open the app once. The app is not notarized, so macOS blocks this first start.
@@ -136,9 +138,16 @@ A bugfix release from the first real test run of the app.
 
 Only the first start needs this. Settings, caches and `app.log` live in `~/.hbk-explorer/`. rclone is bundled; its licence and the other third-party notices are inside the app under `Contents/Resources/Licenses/` and on the disk image.
 
+## Install and first start on Windows
+
+1. Run `CallidoRestore-x64.msi`. The installer is not signed yet, so Windows SmartScreen shows "Windows protected your PC": click **More info**, then **Run anyway**.
+2. Follow the installer; it installs into `C:\Program Files\Callido\Callido Restore`, adds a Start-menu and a desktop shortcut, and can open the app on its last page.
+
+Installing a newer version replaces the old one; uninstalling (Settings → Apps) never touches your settings, caches and `app.log` in `%USERPROFILE%\.hbk-explorer`. rclone is bundled.
+
 ## Known limitations
 
-* Not signed with a Developer ID and not notarized, hence the steps above.
+* Not signed: on a Mac not notarized with a Developer ID, on Windows no code-signing certificate; hence the first-start steps above.
 * Google Drive is the first supported source (also any rclone remote, an SMB share or a local folder). Use your own Google OAuth client id and secret in the Drive step; rclone's shared client id is being retired.
 * Backup tasks with client-side encryption are not supported yet.
 * A full pool map is built once per backup before the first restore; it downloads a few hundred KB per bucket index.
