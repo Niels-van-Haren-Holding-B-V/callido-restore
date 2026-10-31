@@ -129,6 +129,29 @@ class Placer(unittest.TestCase):
         self.assertEqual(pl[0][0], [(0, 1, 2), (2, 0, 2), (4, 0, 2), (6, 0, 1)]); self.assertEqual((owner[2], owner[4]), (0, 0))
         pool.tmp.cleanup()
 
+    def test_gap_with_leftover_chunks_slides_records_to_their_bytes(self):
+        # A (1 chunk), then two leftover entries of a deleted file (77, 88), then U (2 chunks, 30+40), then B anchored. The count
+        # between A and B is 4 for 2 needed: U is placed where its own bytes match, the only such start.
+        pool = Pool({0: (2, [10, 77, 88, 30, 40, 50])})
+        A = _rec(0, 100, 1, size=10, tag="a"); U = _rec(1, 101, 2, size=70); B = _rec(2, 103, 1, size=50, tag="b")
+        owner, pl, R, flags = self.run_placer(pool, {0: [A, U, B], 1: [], 2: [], 3: []}, {(0, 0): [(0, 0, 1)], (0, 2): [(0, 5, 1)]})
+        self.assertEqual(pl[0][1], [(0, 3, 2)]); self.assertEqual(R["gap-slid"], 1)
+        U.size = 71                                                                        # no start matches: nothing placed
+        owner, pl, R, flags = self.run_placer(pool, {0: [A, U, B], 1: [], 2: [], 3: []}, {(0, 0): [(0, 0, 1)], (0, 2): [(0, 5, 1)]})
+        self.assertNotIn(1, pl[0])
+        pool.tmp.cleanup()
+
+    def test_record_without_own_chunks_is_placed_when_its_references_add_up(self):
+        # V stores nothing new: both its chunks are A's (ids 100, 101). Placed (empty segments) when A is placed and the bytes match.
+        pool = Pool({0: (2, [10, 20, 30])})
+        A = _rec(0, 100, 2, size=30, tag="a"); B = _rec(1, 102, 1, size=30, tag="b")
+        V = _rec(2, 900, 0, size=30, dedup=[(100, 102)]); V.ranges = []
+        owner, pl, R, flags = self.run_placer(pool, {0: [A, B, V], 1: [], 2: [], 3: []}, {(0, 0): [(0, 0, 2)], (0, 1): [(0, 2, 1)]})
+        self.assertEqual(pl[0][2], []); self.assertEqual(R["placed-all-shared"], 1)
+        V.size = 31; owner, pl, R, flags = self.run_placer(pool, {0: [A, B, V], 1: [], 2: [], 3: []}, {(0, 0): [(0, 0, 2)], (0, 1): [(0, 2, 1)]})
+        self.assertNotIn(2, pl[0]); self.assertEqual(R["all-shared-unresolved"], 1)
+        pool.tmp.cleanup()
+
     def test_gap_records_between_anchors_are_laid_out_and_verified(self):
         # bucket 0: A (1 chunk) then an untagged record U (2 chunks) then a record H whose head is a dedup reference to A's chunk
         # (so it has a tag but was never scanned), then B anchored; sizes: U unknown (guessed), H = own 70 + referenced 10

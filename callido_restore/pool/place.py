@@ -405,6 +405,34 @@ def resolve_and_place_v3(writers, anchors, index, log=print, max_bucket=None):
     for (t, e), w, ri in order: place_anchored(w, ri, torder[t], e)
     # ---- D. gaps: records between two placed anchored records of a writer (untagged, tagged with dedup heads, or
     # anchored ones that could not spill) laid out along the writer's buckets when the entries match; verified by bytes.
+    def slide(w, between, seq, sp, b0, e0, bB, eB, avail, need):
+        """Lay out the records between two placed anchors when the writer's buckets there hold `avail - need` leftover entries
+        too: in stream order, each record takes the start in its window [lower bound, avail - what the later records need] where
+        the ulen sum of its entries equals its own bytes; it is placed only when that start is unique. Returns records placed."""
+        path = []; cur, ce = b0, e0
+        while len(path) < avail:
+            room = (eB if cur == bB else counts[cur]); p = index.prefix(cur)
+            for e in range(ce, room): path.append((cur, e, p[e + 1] - p[e]))
+            if cur == bB: break
+            nxt = sp[cur] + 1
+            if nxt >= len(seq): break
+            cur = seq[nxt]; ce = 0
+        if len(path) != avail: return 0
+        cum = [0]
+        for _, _, u in path: cum.append(cum[-1] + u)
+        lo = 0; left = need; n_ok = 0
+        for x in between:
+            n = phys[w][x]; left -= n; ob = own_bytes(w, x)
+            hi = avail - left - n                                           # the latest start that leaves room for the rest
+            if ob is None: lo += n; continue
+            starts = [s0 for s0 in range(lo, hi + 1) if cum[s0 + n] - cum[s0] == ob]
+            if len(starts) != 1: lo = (starts[0] if starts else lo) + n; continue
+            s0 = starts[0]; sg = []
+            for b, e, _ in path[s0:s0 + n]:
+                if sg and sg[-1][0] == b and sg[-1][1] + sg[-1][2] == e: sg[-1] = (b, sg[-1][1], sg[-1][2] + 1)
+                else: sg.append((b, e, 1))
+            placements[w][x] = sg; n_ok += 1; lo = s0 + n
+        return n_ok
     def gap_pass():
         placed_n = 0
         seqs = {w: [b for b in torder if claimed.get(b) == w] for w in W}; spos = {w: {b: i for i, b in enumerate(seqs[w])} for w in W}
@@ -420,7 +448,13 @@ def resolve_and_place_v3(writers, anchors, index, log=print, max_bucket=None):
                 avail = (eB - (e0 + n0)) if i0 == i1 else (counts[b0] - (e0 + n0)) + sum(counts[seqs[w][k]] for k in range(i0 + 1, i1)) + eB
                 need = sum(phys[w][x] for x in between)
                 if avail != need:
-                    if avail > need: R["gap-count-mismatch"] += 1; continue
+                    if avail > need:
+                        # leftover chunks of deleted files sit between records (buckets are never rewritten): slide each record
+                        # to the position where its own bytes match exactly, the only one in its window
+                        n_ok = slide(w, between, seqs[w], spos[w], b0, e0 + n0, bB, eB, avail, need)
+                        placed_n += n_ok; R["gap-slid"] += n_ok
+                        if not n_ok: R["gap-count-mismatch"] += 1
+                        continue
                     obs = [own_bytes(w, x) for x in between]; known = not any(o is None for o in obs)
                     have_b = (index.prefix(b0)[counts[b0]] - index.prefix(b0)[e0 + n0]) + sum(index.total(seqs[w][k]) for k in range(i0 + 1, i1)) + index.prefix(bB)[eB] if i0 != i1 else index.prefix(bB)[eB] - index.prefix(b0)[e0 + n0]
                     win = window(b0, bB); nb = (sum(obs) - have_b) if known else None
@@ -494,6 +528,14 @@ def resolve_and_place_v3(writers, anchors, index, log=print, max_bucket=None):
             placements[w][ri] = [(ok[0][0], ok[0][1], n)]; R["placed-multi-by-size"] += 1
             if n > 9 and len(ok) > 1: flags["guessed"].add((w, ri))
         else: R["multi-unplaced"] += 1
+    # ---- G0. records without chunks of their own (a later version whose every chunk is shared with earlier ones): nothing to
+    # place; the reader takes each chunk from the record that stores it. Counted as placed (an empty segment list) when every
+    # referenced chunk is placed and their bytes add up to the file size exactly.
+    for w in W:
+        for r in W[w]:
+            if r.n or r.idx in placements[w] or r.size is None or not r.dedup: continue
+            if own_bytes(w, r.idx) == 0: placements[w][r.idx] = []; R["placed-all-shared"] += 1
+            else: R["all-shared-unresolved"] += 1
     # ---- G. copies alias their stored record
     for (w, ri), (w2, ri2) in alias.items():
         if ri2 in placements[w2] and W[w][ri].size == W[w2][ri2].size: placements[w][ri] = placements[w2][ri2]; flags["aliased"][(w, ri)] = (w2, ri2); R["aliased"] += 1
