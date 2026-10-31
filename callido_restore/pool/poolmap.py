@@ -239,6 +239,7 @@ def build_poolmap(source, outdir, log=print, max_bucket=None):
 # The search is pure Python at 100 % CPU for minutes; inside the app process it holds the interpreter lock, so every API
 # request and the Stop button wait behind it. As a child process it costs the app nothing and Stop simply ends it.
 DETACHED = True
+MAPPER_VERSION = "anchor+place-v3"               # bump when the map's meaning changes: finished preparations of older versions are redone
 RUNNING = set()                                  # mapper children alive right now (Quit kills them with their workers)
 
 def _kill_group(p, grace=3.0):

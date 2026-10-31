@@ -4,9 +4,11 @@ import threading, time, traceback, uuid
 
 JOBS = {}
 
-def start_job(fn, label):
+def start_job(fn, label, **extra):
+    """``extra`` keys (e.g. the source id of a pool job) are on the job before it is registered, so a concurrent lookup never
+    sees a job without them."""
     jid = uuid.uuid4().hex[:10]
-    job = {"id": jid, "label": label, "state": "running", "progress": 0.0, "message": "starting", "result": None, "error": None, "started": time.time()}
+    job = {"id": jid, "label": label, "state": "running", "progress": 0.0, "message": "starting", "result": None, "error": None, "started": time.time(), **extra}
     JOBS[jid] = job
     def run():
         try:
