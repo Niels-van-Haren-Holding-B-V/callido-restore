@@ -226,11 +226,12 @@ def file_pool_chunks(path):
     return out
 
 # ----------------------------------------------------------------------------- offline analysis: record runs
-def build_runs(source, outdir, log=print, cancelled=None, progress=None):
+def build_runs(source, outdir, log=print, cancelled=None, progress=None, report=None):
     """Parse all 4 record streams. Writes <outdir>/runs_set<s>.bin (rec_off,u64 g_start,u32 len triples) and
     blocks.json (block -> owning writer, by longest consecutive runs). ``cancelled()`` true (Stop) returns None before
     the next set or mid-parse; the sets already written stay, the run is simply redone next time. ``progress(fraction)``
-    follows the four sets (a set's own parse fraction counts for a quarter)."""
+    follows the four sets (a set's own parse fraction counts for a quarter). ``report(message, done_bytes, total_bytes)``
+    is called while a set's slices are fetched, so the UI can show bytes and speed for that download."""
     from array import array
     os.makedirs(outdir, exist_ok=True)
     owner_votes = collections.defaultdict(lambda: [0, 0, 0, 0])   # block -> votes per writer (sum of run lengths >= 2)
@@ -240,9 +241,16 @@ def build_runs(source, outdir, log=print, cancelled=None, progress=None):
         w = WRITER_OF_SET[s]
         st = SlicedStream(source, f"Config/file_chunk{s}.index")
         names = st.names(); paths = []
+        sizes = {n: (e.get("size") or 0) for n, e in source.listdir(st.reldir).items()} if report else {}
+        total = sum(sizes.get(names[k], 0) for k in names); done = 0
+        if report: report(f"downloading index set {s}/4 · 0 of {total / 1048576:,.0f} MB", 0, total)
         for k in sorted(names):                                  # each slice may be a download: Stop between them
             if cancelled is not None and cancelled(): return None
             paths.append(st.slice_path(k))
+            if report:
+                done += sizes.get(names[k], 0)
+                report(f"downloading index set {s}/4 · {done / 1048576:,.0f} of {total / 1048576:,.0f} MB", done, total)
+        if report: report(f"parsing index set {s}/4", done, total)
         rec_off = array("q"); g0 = array("q"); ln = array("l"); nrec = 0; nrefs = 0
         def on_record(off, ids):
             nonlocal nrec, nrefs

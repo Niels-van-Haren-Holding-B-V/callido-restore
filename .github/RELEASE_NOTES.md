@@ -5,7 +5,8 @@
 - Stop takes effect within a second during every phase of the preparation, including the chunk-record parsing and the index-set downloads; what was already parsed is simply redone next time.
 - The preparation's progress bar moves during the chunk-record parsing (per set and by bytes parsed) instead of sitting at 10 %.
 - Running two copies of the app, or a development server next to it, no longer stops the other one's internal rclone helper.
-- A progress bar whose value has not moved for a few seconds shows a shimmer and the time since the last change, so a slow phase still reads as working.
+- A progress bar whose value has not moved for a few seconds shows a shimmer and "still working · last update N s ago", so a slow phase still reads as working.
+- Every job bar with a known size shows bytes, speed and time left, the restore included; the preparation reports the download of each index set ("downloading index set 2/4 · 123 of 560 MB").
 
 ## What's new in 0.2.3
 

@@ -22,6 +22,7 @@ silent (asserted against the current code):
   (documented constant 0x64) is not checked.
 """
 import hashlib, struct, tempfile, unittest, zlib
+from unittest import mock
 from pathlib import Path
 
 from callido_restore.core import pool as cpool
@@ -287,6 +288,18 @@ class CancelDuringParse(unittest.TestCase):
             fr = []
             cpool.parse_record_stream([str(p)], lambda off, ids: None, cancelled=lambda: False, progress=fr.append)   # completes
             self.assertTrue(fr and fr == sorted(fr) and 0 < fr[0] and fr[-1] <= 1.0)           # progress rises through the parse
+
+    def test_build_runs_reports_slice_download_bytes(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td) / "hbk"
+            for s in (1, 2, 3, 4):
+                d = root / "Config" / f"file_chunk{s}.index"; d.mkdir(parents=True)
+                (d / "0.idx.1").write_bytes(b"\0" * 100); (d / "1.idx.1").write_bytes(b"\0" * 50)
+            reports = []
+            cpool.build_runs(_LocalSource(root), str(Path(td) / "pool"), log=lambda *a: None, report=lambda m, d, t: reports.append((m, d, t)))
+            per_set = [r for r in reports if r[0].startswith("downloading index set 1/4")]
+            self.assertEqual([(d, t) for _, d, t in per_set], [(0, 150), (100, 150), (150, 150)])
+            self.assertIn("parsing index set 1/4", [r[0] for r in reports])
 
     def test_build_runs_stops_before_the_first_set(self):
         with tempfile.TemporaryDirectory() as td:
