@@ -125,14 +125,6 @@ def start_in_background():
     threading.Thread(target=DAEMON.start, daemon=True, name="rclone-rcd").start()
 
 
-def split_path(path):
-    """'gdrive:Synology/x' -> ('gdrive:', 'Synology/x'); a local path -> (path, '')."""
-    if ":" in path and not path.startswith("/"):
-        name, _, rest = path.partition(":")
-        return name + ":", rest
-    return path, ""
-
-
 def _run(args, timeout=None, **kw):
     if timeout is not None: kw["timeout"] = timeout
     r = subprocess.run([RCLONE, *args], capture_output=True, text=True, **kw)
@@ -147,9 +139,10 @@ def ls(path, dirs_only=False, files_only=False, recurse=False, max_depth=None, n
         key = ("ls", path, dirs_only, files_only, recurse, max_depth, no_modtime)
         return _cached(key, lambda: ls(path, dirs_only, files_only, recurse, max_depth, no_modtime, timeout))
     if DAEMON.running:
-        fs, remote = split_path(path)
+        # The listed folder itself is the "fs" and remote is "", so every Path comes back relative to that folder exactly like
+        # ``rclone lsjson <path>`` (with fs="nas:" remote="x" rclone would return "x/..." and list_destination's skip check would miss).
         opt = {"noMimeType": True, "dirsOnly": bool(dirs_only), "filesOnly": bool(files_only), "recurse": bool(recurse), "noModTime": bool(no_modtime)}
-        params = {"fs": fs, "remote": remote, "opt": opt}
+        params = {"fs": path, "remote": "", "opt": opt}
         if max_depth is not None: params["_config"] = {"MaxDepth": int(max_depth)}
         return DAEMON.rc("operations/list", timeout=timeout, **params).get("list") or []
     args = ["lsjson", "--no-mimetype"]
@@ -166,8 +159,12 @@ def remotes(cache=False):
     if cache: return _cached(("remotes",), lambda: remotes())
     if DAEMON.running:
         names = DAEMON.rc("config/listremotes").get("remotes") or []
-        dump = DAEMON.rc("config/dump")
-        return [(n + ":", (dump.get(n) or {}).get("type", "")) for n in names]
+        out = []
+        for n in names:                                   # config/get per remote: only its type, not the whole config with tokens
+            try: typ = (DAEMON.rc("config/get", name=n) or {}).get("type", "")
+            except RcloneError: typ = ""
+            out.append((n + ":", typ))
+        return out
     out = _run(["listremotes", "--long"])
     res = []
     for line in out.splitlines():                         # "name: type"
