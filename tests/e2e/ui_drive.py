@@ -72,7 +72,11 @@ def main():
             # whole Documents share into the basket, target = a new folder
             # step 2 as a user does it: tick the three shares in the tree (one at a time: each tick re-renders the tab)
             for sh in ("Documents", "Photos", "homes"):
-                b.js(f"(()=>{{const c=document.querySelector('#rsTree .tc[data-share=\"{sh}\"][data-path=\"\"]');if(c&&!c.checked){{c.checked=true;c.dispatchEvent(new Event('change'))}}}})()"); time.sleep(1.2)
+                notes.append(f"tree row before ticking {sh}: " + b.js(f"(()=>{{const c=document.querySelector('#rsTree .tc[data-share=\"{sh}\"][data-path=\"\"]');return c?c.parentElement.innerText.replace(/\\n/g,' '):'(no checkbox)'}})()"))
+                b.js(f"(()=>{{const c=document.querySelector('#rsTree .tc[data-share=\"{sh}\"][data-path=\"\"]');if(c&&!c.checked){{c.checked=true;c.dispatchEvent(new Event('change'))}}}})()")
+                t0 = time.time()                               # a person waits until the share shows as loaded and its target row is there
+                while time.time() - t0 < 30 and not b.js(f"!!(S.snaps&&S.snaps['{sh}']&&S.snaps['{sh}'].indexed) && [...document.querySelectorAll('#wzMap td.mono')].some(t=>t.textContent.startsWith('{sh}'))"): time.sleep(0.3)
+                notes.append(f"  {sh}: loaded and its row shown after {time.time() - t0:.1f}s")
             time.sleep(1); notes.append("selection summary: " + b.text("#rsSelSum"))
             dest = work / "restore-ui"; dest.mkdir()           # the "mounted share": its subfolders are new
             # step 3: one target per shared folder (the rows' path fields), each a new folder
@@ -81,7 +85,13 @@ def main():
                          i.dispatchEvent(new Event('input',{{bubbles:true}}));i.dispatchEvent(new Event('change',{{bubbles:true}}))}});return ins.length}})()""")
             notes.append(f"target rows filled: {ok}"); time.sleep(1.5); shot(b, "target-set")
             notes.append("check/start area: " + b.text("#tab-restore")[-900:].replace("\n", " | "))
-            go = b.js("(()=>{const g=document.querySelector('#rsGo');return g?{disabled:g.disabled,text:g.textContent}:null})()"); notes.append(f"start button: {go}")
+            gostate = "(()=>{const g=document.querySelector('#rsGo');return g?{disabled:g.disabled,text:g.textContent}:null})()"
+            go = b.js(gostate); notes.append(f"start button: {go}")
+            if go and go["disabled"]:                          # selected shares still unloaded: the one-click loader (#123)
+                hit = b.js("(()=>{const x=[...document.querySelectorAll('#tab-restore button')].find(x=>/Load (it|them) now/.test(x.textContent));if(x){x.click();return x.textContent}return null})()")
+                notes.append(f"one-click loader: {hit}"); t0 = time.time()
+                while go and go["disabled"] and time.time() - t0 < 60: time.sleep(0.5); go = b.js(gostate)
+                notes.append(f"start button after the loader ({time.time() - t0:.0f}s): {go}")
             if go and not go["disabled"]:
                 b.js("document.querySelector('#rsGo').click()"); t0 = time.time(); time.sleep(1.5)
                 notes.append("toasts after Start: " + b.text("#toasts").replace("\n", " | "))
