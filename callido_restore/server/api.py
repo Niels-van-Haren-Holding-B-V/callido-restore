@@ -128,7 +128,7 @@ class H(BaseHTTPRequestHandler):
                     try: d = json.loads(jf.read_text())
                     except Exception: continue
                     if d["id"] in JOBS and JOBS[d["id"]]["state"] == "running": d["state"] = "running"
-                    out.append({k: d.get(k) for k in ("id", "label", "state", "dest", "roots", "items", "next_index", "total_files", "done_files", "skipped", "total_bytes", "done_bytes", "started", "updated", "src")} | {"errors": len(d.get("errors") or [])})
+                    out.append({k: d.get(k) for k in ("id", "label", "state", "dest", "roots", "items", "next_index", "total_files", "done_files", "skipped", "total_bytes", "done_bytes", "started", "updated", "src", "verified", "identical_copy")} | {"errors": len(d.get("errors") or []), "unverified": len(d.get("unverified") or [])})
                 return self._json(out[:20])
             if u.path == "/api/job/cancel":
                 j = JOBS.get(q.get("id"))
