@@ -53,10 +53,14 @@ def _worker_main(argv):
     `writers` table (GBs) in every worker last time."""
     import pickle
     with open(argv[0], "rb") as f: root, names, keys, bl = pickle.load(f)
-    hits = {}; checks = 0
+    import sys
+    hits = {}; checks = 0; since = 0
     for b in bl:
         checks += _scan_entries(b, bucket_index_entries(os.path.join(root, f"Pool/0/{b // 2048}/{names[b]}")), keys, hits)
         if _rss_mb() > WORKER_RSS_MB: raise MemoryError(f"scan worker RSS {_rss_mb():.0f} MB > {WORKER_RSS_MB} MB at bucket {b}")
+        since += 1
+        if since >= 50: print(f"progress {since}", file=sys.stderr, flush=True); since = 0      # the parent sums these into "scanned i/N"
+    if since: print(f"progress {since}", file=sys.stderr, flush=True)
     with open(argv[1], "wb") as f: pickle.dump((hits, checks), f)
 
 def _worker_command(jp, op):
@@ -68,13 +72,23 @@ def _worker_command(jp, op):
     env = dict(os.environ, PYTHONPATH=root + os.pathsep + os.environ.get("PYTHONPATH", ""))
     return [sys.executable, "-m", "callido_restore.pool.anchor", "--worker", jp, op], {"env": env}
 
-def _run_worker(job, tmpdir, n):
-    import pickle, subprocess, sys
+def _run_worker(job, tmpdir, n, progress=None):
+    """Run one scan worker; ``progress(k)`` is called for every "progress k" line it prints (buckets scanned since the last one)."""
+    import pickle, subprocess
     jp = os.path.join(tmpdir, f"job{n}.pkl"); op = os.path.join(tmpdir, f"out{n}.pkl")
     with open(jp, "wb") as f: pickle.dump(job, f)
     argv, kw = _worker_command(jp, op)
-    p = subprocess.run(argv, capture_output=True, text=True, **kw)
-    if p.returncode: raise MemoryError(f"scan worker {n} failed: {p.stderr.strip().splitlines()[-1] if p.stderr.strip() else p.returncode}")
+    p = subprocess.Popen(argv, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL, text=True, **kw)
+    tail = ""
+    for line in p.stderr:
+        line = line.rstrip("\n")
+        if line.startswith("progress "):
+            if progress:
+                try: progress(int(line.split()[1]))
+                except (ValueError, IndexError): pass
+        elif line.strip(): tail = line
+    p.wait()
+    if p.returncode: raise MemoryError(f"scan worker {n} failed: {tail or p.returncode}")
     with open(op, "rb") as f: return pickle.load(f)
 
 def _bucket_names(listing, max_bucket):
@@ -134,8 +148,15 @@ def scan_anchors(source, outdir, listing, writers, log=print, max_bucket=None, w
     else:
         import concurrent.futures, tempfile
         chunks = [c for c in (buckets[i::workers * 4] for i in range(workers * 4)) if c]      # interleaved so progress is even
+        import threading
+        done_n = [0]; lock = threading.Lock(); last = [time.time()]
+        def progress(k):                               # from the worker reader threads: one "scanned i/N" line every 2 s
+            with lock:
+                done_n[0] += k
+                if time.time() - last[0] >= 2 or done_n[0] >= len(buckets):
+                    last[0] = time.time(); log(f"  scanned {done_n[0]}/{len(buckets)} buckets, tags hit={len(hits):,}, {time.time() - t0:.0f}s")
         with tempfile.TemporaryDirectory(prefix="hbk-scan-") as td, concurrent.futures.ThreadPoolExecutor(workers) as ex:
-            futs = [ex.submit(_run_worker, (root, names1, keys, c), td, n) for n, c in enumerate(chunks)]
+            futs = [ex.submit(_run_worker, (root, names1, keys, c), td, n, progress) for n, c in enumerate(chunks)]
             try:
                 for done, fu in enumerate(concurrent.futures.as_completed(futs), 1):
                     part, c = fu.result(); merge(part); checks += c

@@ -25,6 +25,10 @@ def _exit_app(code=0):
     """Stop the whole app: rclone children first (an `rclone lsjson` used to survive Quit), then the process. Restore jobs are
     persisted and can be resumed; the desktop window (if any) closes with the process."""
     rclone.stop()
+    try:
+        from callido_restore.pool import poolmap
+        poolmap.kill_running()                                     # the pool mapper and its scan workers, as a group
+    except Exception: pass
     if os.name != "nt": subprocess.run(["pkill", "-P", str(os.getpid())], capture_output=True)
     os._exit(code)
 

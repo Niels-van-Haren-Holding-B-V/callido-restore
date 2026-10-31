@@ -60,7 +60,9 @@ class Scan(unittest.TestCase):
 
     def test_parallel_capped(self):
         self.assertLessEqual(anchor.MAX_WORKERS, 4)
-        self._check(*anchor.scan_anchors(self.src, self.out, self.listing, self.writers, log=lambda *a: None, workers=64))
+        lines = []
+        self._check(*anchor.scan_anchors(self.src, self.out, self.listing, self.writers, log=lines.append, workers=64))
+        self.assertTrue(any("scanned " in l and "/" in l for l in lines), lines)          # the workers' progress reaches the log
 
     def test_resolve_uses_neighbours(self):
         anchors, counts = anchor.scan_anchors(self.src, self.out, self.listing, self.writers, log=lambda *a: None, workers=1)

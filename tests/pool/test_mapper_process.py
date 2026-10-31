@@ -108,3 +108,26 @@ class ScanWorkers(unittest.TestCase):
         from callido_restore.pool import anchor
         src = inspect.getsource(anchor.scan_anchors)
         self.assertNotIn('1 if getattr(sys, "frozen"', src); self.assertIn("MAX_WORKERS", src)
+
+
+class StopKillsTheGroup(unittest.TestCase):
+    def test_child_runs_in_its_own_session_and_cancel_kills_the_group(self):
+        seen = {}
+        real_popen = poolmap.subprocess.Popen
+        def popen(cmd, **kw):
+            seen.update(kw); return real_popen(cmd, **kw)
+        t0 = time.time()
+        with mock.patch.object(poolmap, "_mapper_command", lambda sid, outdir, mb: ([sys.executable, "-c", SLOW], None)), \
+             mock.patch.object(poolmap.subprocess, "Popen", popen), mock.patch.object(poolmap.os, "killpg", wraps=poolmap.os.killpg) as killpg:
+            res = poolmap.build_poolmap_detached(Src(), tempfile.mkdtemp(), log=lambda m: None, cancelled=lambda: time.time() - t0 > 0.5)
+        self.assertEqual(res, ({}, 0)); self.assertTrue(seen.get("start_new_session")); killpg.assert_called(); self.assertEqual(poolmap.RUNNING, set())
+
+    def test_orphan_helpers_of_a_dead_app_are_ended(self):
+        from callido_restore.about import APP_NAME
+        exe = f"/Applications/{APP_NAME}.app/Contents/MacOS/{APP_NAME}"
+        rows = [(500, 1, f"{exe} --scan-worker /t/job0.pkl /t/out0.pkl"), (501, 1, f"{exe} --mapper demo /t/pool -"),
+                (502, 300, f"{exe} --scan-worker /t/job1.pkl /t/out1.pkl"),        # parent alive: a running app's worker
+                (503, 1, exe), (504, 1, "/usr/bin/python3 --mapper x")]           # the app itself; not our binary
+        with mock.patch.object(poolmap, "_ps_commands", return_value=rows), mock.patch.object(poolmap.os, "kill") as kill:
+            self.assertEqual(poolmap.kill_orphan_helpers(), 2)
+        self.assertEqual(sorted(c[0][0] for c in kill.call_args_list), [500, 501])

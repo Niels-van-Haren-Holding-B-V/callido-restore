@@ -239,6 +239,50 @@ def build_poolmap(source, outdir, log=print, max_bucket=None):
 # The search is pure Python at 100 % CPU for minutes; inside the app process it holds the interpreter lock, so every API
 # request and the Stop button wait behind it. As a child process it costs the app nothing and Stop simply ends it.
 DETACHED = True
+RUNNING = set()                                  # mapper children alive right now (Quit kills them with their workers)
+
+def _kill_group(p, grace=3.0):
+    """SIGTERM to the child's whole process group (the mapper and its scan workers), SIGKILL after ``grace`` seconds."""
+    import signal
+    try: os.killpg(p.pid, signal.SIGTERM)
+    except (ProcessLookupError, PermissionError, AttributeError): p.terminate()
+    try: p.wait(grace)
+    except subprocess.TimeoutExpired:
+        try: os.killpg(p.pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError, AttributeError): p.kill()
+        try: p.wait(3)
+        except subprocess.TimeoutExpired: pass
+
+def kill_running():
+    """End every mapper child of this app (Quit): their process groups, workers included."""
+    for p in list(RUNNING):
+        if p.poll() is None: _kill_group(p)
+        RUNNING.discard(p)
+
+def _ps_commands():
+    """[(pid, ppid, command line)] (patched in tests); [] where ps is not available."""
+    if os.name == "nt": return []
+    try: r = subprocess.run(["ps", "-axo", "pid=,ppid=,command="], capture_output=True, text=True)
+    except OSError: return []
+    rows = []
+    for line in r.stdout.splitlines():
+        parts = line.split(None, 2)
+        if len(parts) == 3 and parts[0].isdigit() and parts[1].isdigit(): rows.append((int(parts[0]), int(parts[1]), parts[2]))
+    return rows
+
+def kill_orphan_helpers():
+    """At app start: mapper children and scan workers of a crashed or killed app (the app binary with --mapper or
+    --scan-worker, parent gone) are ended, so they stop burning CPU. Returns the number ended."""
+    import signal
+    from callido_restore.about import APP_NAME
+    marker = f"{APP_NAME}.app/Contents/MacOS/{APP_NAME} --"
+    n = 0
+    for pid, ppid, cmd in _ps_commands():
+        if ppid != 1 or pid == os.getpid(): continue
+        if marker not in cmd or not any(f" --{k} " in cmd + " " for k in ("mapper", "scan-worker")): continue
+        try: os.kill(pid, signal.SIGTERM); n += 1
+        except OSError: continue
+    return n
 
 def _mapper_command(source_id, outdir, max_bucket):
     """The child's command line: the frozen app binary with --mapper, or `python -m callido_restore --mapper` from a checkout."""
@@ -254,8 +298,11 @@ def build_poolmap_anchor(source, outdir, log=print, max_bucket=None):
     from callido_restore.pool import anchor, poolmap2
     from callido_restore.core.pool import load_json
     listing = load_json(os.path.join(outdir, "listing.json"))
+    log("loading the record tables of the 4 writers (a few GB, one to two minutes)…")
     writers = poolmap2.build_writers(outdir, log)
+    log("scanning the bucket indexes for tagged records…")
     anchors, counts = anchor.scan_anchors(source, outdir, listing, writers, log=log, max_bucket=max_bucket)
+    log("placing records: owners from anchors, copies by neighbours, gaps by chunk count…")
     owner, placements, report = anchor.resolve_and_place(writers, anchors, counts, log=log, max_bucket=max_bucket)
     buckets = sorted(b for b in counts if max_bucket is None or b <= max_bucket)
     upto = len(buckets) if len(owner) >= len(buckets) else len(owner)        # partial when not every bucket got an owner
@@ -294,7 +341,9 @@ def build_poolmap_detached(source, outdir, log=print, max_bucket=None, cancelled
     child's last lines when it fails. ``DETACHED = False`` (tests) runs in-process instead."""
     if not DETACHED: return build_map(source, outdir, log, max_bucket)
     cmd, env = _mapper_command(source.id, outdir, max_bucket)
-    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, text=True, env=env)
+    # Its own session: the child's scan workers are in the same process group, so Stop (or Quit) ends all of them at once.
+    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, text=True, env=env, start_new_session=True)
+    RUNNING.add(p)
     tail = collections.deque(maxlen=8)
     def reader():
         for line in p.stdout:
@@ -302,13 +351,13 @@ def build_poolmap_detached(source, outdir, log=print, max_bucket=None, cancelled
             try: log(line)
             except Exception: pass
     t = threading.Thread(target=reader, daemon=True, name="mapper-log"); t.start()
-    while p.poll() is None:
-        if cancelled is not None and cancelled():
-            p.terminate()
-            try: p.wait(5)
-            except subprocess.TimeoutExpired: p.kill()
-            t.join(2); return {}, 0
-        time.sleep(0.3)
+    try:
+        while p.poll() is None:
+            if cancelled is not None and cancelled():
+                _kill_group(p); t.join(2); return {}, 0
+            time.sleep(0.3)
+    finally:
+        RUNNING.discard(p)
     t.join(5)
     if p.returncode != 0:
         raise RuntimeError("mapper failed: " + (" | ".join(l for l in tail if l.strip())[-400:] or f"exit {p.returncode}"))
