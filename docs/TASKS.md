@@ -117,6 +117,13 @@ root shims and `hbk_explorer.py` removed; `tests/` mirrors the layers; `pyprojec
 no behaviour change. Follow-up candidates: split `Backup` (snapshot index/queries vs restore engine), an in-app anchor scan needs a
 `--worker` dispatch in the entry point.
 
+## H21 — Persistent rclone daemon (hbk-2, 2026-10-31 01:50)
+DONE (hbk-2): the app starts one `rclone rcd` on a random 127.0.0.1 port with random credentials (`callido_restore/sources/rclone.py`)
+and sends listings through its RC API (`ls`, `remotes`, `version`): 0.3 s instead of 1.3-5 s per Google Drive listing. Subprocess
+fallback when the daemon is not running (tests, failed start). 30 s listing cache for UI renders (`cache=True`, `forget()` after a new
+connection). Copies, config changes and the index fetch still run as separate rclone processes; moving them to the daemon
+(`operations/copyfile` with `_async` + `job/status` for progress) is the next step.
+
 ## Do not
 * Do not change the on-disk layout of `~/.hbk-explorer/index/<src>/pool/*` without a migration; the full map build takes hours of downloads.
 * Do not commit anything from `~/.hbk-explorer` or user paths/remotes into the repo, and no real share/folder/host names (H18 rule in docs/HANDOVER.md).

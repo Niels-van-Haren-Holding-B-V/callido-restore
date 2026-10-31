@@ -10,6 +10,7 @@ from callido_restore.paths import RCLONE, _bundled
 from callido_restore.restore.backup import Backup
 from callido_restore.restore.destination import restore_target_error
 from callido_restore.restore.jobs import JOBS, start_job
+from callido_restore.sources import rclone
 from callido_restore.sources.source import SOURCES, add_source, save_sources
 
 def jdump(o): return json.dumps(o, ensure_ascii=False).encode("utf-8")
@@ -23,6 +24,7 @@ def human(n):
 def _exit_app(code=0):
     """Stop the whole app: rclone children first (an `rclone lsjson` used to survive Quit), then the process. Restore jobs are
     persisted and can be resumed; the desktop window (if any) closes with the process."""
+    rclone.stop()
     if os.name != "nt": subprocess.run(["pkill", "-P", str(os.getpid())], capture_output=True)
     os._exit(code)
 
@@ -56,11 +58,8 @@ class H(BaseHTTPRequestHandler):
             if u.path == "/api/sources":
                 return self._json([s.to_json() for s in SOURCES.values()])
             if u.path == "/api/about":
-                try:
-                    r = subprocess.run([RCLONE, "version"], capture_output=True, text=True)
-                    line = (r.stdout.splitlines() or ["not found"])[0] if r.returncode == 0 else "rclone not found"
-                except OSError:
-                    line = "rclone not found"
+                try: line = rclone.version() or "rclone not found"
+                except (rclone.RcloneError, OSError): line = "rclone not found"
                 return self._json({"name": APP_NAME, "tagline": TAGLINE, "notice": NOTICE, "version": VERSION, "rclone": line, "rclone_path": RCLONE, "config": str(paths.CONF_DIR)})
             if u.path == "/api/quit":
                 threading.Timer(0.3, _exit_app).start(); return self._json({"ok": True})
@@ -77,11 +76,10 @@ class H(BaseHTTPRequestHandler):
                 out = {"dest": dest, "inside_source": bool(conflict), "conflict": conflict or None, "exists": False, "empty": None, "files": 0}
                 if not dest: return self._json(out | {"error": "no destination"})
                 if ":" in dest and not dest.startswith("/"):
-                    r = subprocess.run([RCLONE, "lsjson", "--no-mimetype", "--max-depth", "1", dest], capture_output=True, text=True, timeout=120)
-                    if r.returncode == 0:
-                        ents = json.loads(r.stdout or "[]"); out["exists"] = True; out["files"] = len(ents); out["empty"] = not ents
-                    else:
-                        err = r.stderr.strip()[-200:]
+                    try:
+                        ents = rclone.ls(dest, max_depth=1, timeout=120); out["exists"] = True; out["files"] = len(ents); out["empty"] = not ents
+                    except rclone.RcloneError as e:
+                        err = str(e)[-200:]
                         if "directory not found" in err: out["exists"] = False      # rclone's wording for a missing folder; "remote not found" etc. are errors
                         else: out["error"] = err
                 else:
@@ -94,24 +92,19 @@ class H(BaseHTTPRequestHandler):
                     elif not pp.parent.is_dir(): out["error"] = f"the folder above it does not exist: {pp.parent} (is the share mounted?)"
                 return self._json(out)
             if u.path == "/api/remotes":
-                r = subprocess.run([RCLONE, "listremotes", "--long"], capture_output=True, text=True)      # "name: type" per line
-                rems, types = [], {}
-                for ln in r.stdout.splitlines():
-                    name, _, typ = ln.partition(":")
-                    if name.strip(): rems.append(name.strip() + ":"); types[name.strip() + ":"] = typ.strip()
-                out = {"remotes": rems, "types": types, "dirs": []}
+                try: pairs = rclone.remotes(cache=True)
+                except rclone.RcloneError: pairs = []
+                out = {"remotes": [n for n, _ in pairs], "types": dict(pairs), "dirs": []}
                 if q.get("remote"):
-                    r2 = subprocess.run([RCLONE, "lsjson", "--no-mimetype", "--dirs-only", q["remote"] + (q.get("path") or "")], capture_output=True, text=True)
-                    if r2.returncode == 0: out["dirs"] = [e["Name"] for e in json.loads(r2.stdout or "[]")]
-                    else: out["error"] = r2.stderr.strip()[-200:]
+                    try: out["dirs"] = [e["Name"] for e in rclone.ls(q["remote"] + (q.get("path") or ""), dirs_only=True, cache=True)]
+                    except rclone.RcloneError as e: out["error"] = str(e)[-200:]
                 return self._json(out)
             if u.path == "/api/rclone/ls":      # browse a remote (or local path when remote == "")
                 rem, path = q.get("remote", ""), q.get("path", "")
                 if rem:
-                    # one rclone call per click (a Drive listing takes about a second); folders and files are split on IsDir here
-                    r = subprocess.run([RCLONE, "lsjson", "--no-mimetype", "--max-depth", "1", rem + path], capture_output=True, text=True)
-                    if r.returncode != 0: return self._json({"error": r.stderr.strip()[-300:]})
-                    ents = json.loads(r.stdout or "[]")
+                    # one listing per click through the shared rclone (daemon when it runs, 30 s cache for repeats); split on IsDir here
+                    try: ents = rclone.ls(rem + path, max_depth=1, cache=True)
+                    except rclone.RcloneError as e: return self._json({"error": str(e)[-300:]})
                     dirs = sorted(e["Name"] for e in ents if e.get("IsDir")); files = sorted(e["Name"] for e in ents if not e.get("IsDir"))
                 else:
                     pp = Path(os.path.expanduser(path or "~"))
@@ -219,10 +212,10 @@ class H(BaseHTTPRequestHandler):
                                       if kind == "drive" else "Connecting…")
                     r = subprocess.run(args, capture_output=True, text=True, timeout=600)
                     if r.returncode != 0: raise RuntimeError(r.stderr.strip()[-400:] or "rclone config failed")
+                    rclone.forget()                                             # a new connection: cached listings are stale
                     job["message"] = "Listing your Drive…" if kind == "drive" else "Listing the shares…"     # the root listing can take a while
-                    t = subprocess.run([RCLONE, "lsjson", "--no-mimetype", "--dirs-only", f"{name}:"], capture_output=True, text=True, timeout=60)
-                    if t.returncode != 0: raise RuntimeError("remote created but listing failed: " + t.stderr.strip()[-300:])
-                    shares = [e["Name"] for e in json.loads(t.stdout or "[]")]
+                    try: shares = [e["Name"] for e in rclone.ls(f"{name}:", dirs_only=True, timeout=60)]
+                    except rclone.RcloneError as e: raise RuntimeError("remote created but listing failed: " + str(e)[-300:])
                     return {"remote": name + ":", "shares": shares}
                 return self._json(start_job(run, f"connect {kind}"))
 
