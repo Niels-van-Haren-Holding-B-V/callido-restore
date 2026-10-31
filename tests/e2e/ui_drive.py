@@ -86,12 +86,13 @@ def queue_flow(b, base, work, m, notes, shot):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--chrome", required=True); ap.add_argument("--out", required=True)
+    ap.add_argument("--chunk-index", action="store_true", help="the backup carries its own chunk table (Pool/chunk_index)")
     ap.add_argument("--queue", action="store_true", help="#140: queue a restore while the preparation is paused, cancel it, queue again, resume")
     ap.add_argument("--fast", action="store_true", help="impatient user: tick, type the targets and press Start while the file lists still load (U5)")
     ap.add_argument("--scale", type=float, default=6); ap.add_argument("--bucket-kb", type=int, default=1024)
     a = ap.parse_args(); out = Path(a.out); out.mkdir(parents=True, exist_ok=True)
     work = Path(tempfile.mkdtemp(prefix="hbk-ui-")); home = work / "home"; (home / ".hbk-explorer").mkdir(parents=True)
-    hbk = work / "backups" / "e2e_1.hbk"; m = hbkgen.build(str(hbk), a.scale, a.bucket_kb * 1024)
+    hbk = work / "backups" / "e2e_1.hbk"; m = hbkgen.build(str(hbk), a.scale, a.bucket_kb * 1024, chunk_index=a.chunk_index)
     (home / ".hbk-explorer" / "sources.json").write_text(json.dumps([{"id": "e2e", "name": "E2E backup", "local": str(hbk), "remotes": [], "extra": []}]))
     port = int(os.environ.get("HBK_SMOKE_PORT") or shots.free_port()); assert port != 8765
     base = f"http://127.0.0.1:{port}"; log = open(work / "app.log", "w")

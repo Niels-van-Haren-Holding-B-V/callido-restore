@@ -22,7 +22,7 @@ Scenarios, each recorded in the manifest so a test can say which one broke:
 Layout choices the real format does not pin down are marked ASSUMED below; a failure on one of those is a question for
 the format notes, not necessarily an app bug.
 """
-import hashlib, json, os, random, re, sqlite3, struct, sys, zlib
+import collections, hashlib, json, os, random, re, sqlite3, struct, sys, zlib
 
 try:
     import lz4.block as _lz4
@@ -33,6 +33,7 @@ ROOT_PARENT = bytes.fromhex("5058F1AF5058F1AF8388633F609CADB75A75DC9D")
 BLOCK = 2260
 REC_MAGIC = 0xa93b0200
 TAGK = 9
+SLICE = 8 * 1024 * 1024                         # every sliced stream (*.idx) is cut at 8 MiB
 SET_OF_WRITER = {0: 4, 1: 3, 2: 1, 3: 2}
 CUT = re.compile(rb"\x00[\x00-\x07]")         # content-defined cut points: ~1 in 8 KiB of random data
 MIN_CHUNK, MAX_CHUNK = 2048, 32 * 1024
@@ -69,13 +70,16 @@ def content(seed, size):
 
 class Pool:
     """The four writers, their open buckets, the shared id counter and the record / virtual file streams."""
-    def __init__(self, root, bucket_cap):
+    def __init__(self, root, bucket_cap, id_base_blocks=0):
         self.root, self.cap = root, bucket_cap
-        self.next_block = 0; self.next_bucket = 0; self.next_fp = 1
+        self.next_block = id_base_blocks; self.next_bucket = 0; self.next_fp = 1     # ids may start high (history before the kept runs)
         self.blk = {w: None for w in range(4)}; self.used = {w: BLOCK for w in range(4)}
         self.open = {w: None for w in range(4)}                        # [entries, data]
         self.stored = {}                                               # chunk md5 -> global id
         self.where = {}                                                # global id -> (bucket, entry): the ground truth the map should find
+        self.refs = collections.Counter()                              # global id -> references (Pool/chunk_index refcount; ASSUMED semantics)
+        self.alias = {}                                                # phantom id -> the stored id with the same content
+        self.md5 = {}                                                  # global id -> md5 of the chunk
         self.recs = {s: bytearray(64) for s in (1, 2, 3, 4)}           # ASSUMED: header bytes are zeros
         self.vf = bytearray(64)
         self.bucket_writer = {}                                        # bucket -> (writer, revision)
@@ -142,12 +146,13 @@ class Pool:
         if phantom_ok and len(chs) >= 2 and all(known):
             ids = [self.new_id(w) for _ in chs]; kind = "phantom"; self.stats["phantoms"] += 1   # fresh ids, nothing appended
             src_ids = [self.stored[hashlib.md5(c).digest()] for c in chs]
+            for g, g0 in zip(ids, src_ids): self.alias[g] = g0; self.refs[g] += 1; self.refs[g0] += 1
         else:
             for c in chs:
                 h = hashlib.md5(c).digest()
-                if h in self.stored: ids.append(self.stored[h]); self.stats["dedup_refs"] += 1; kind = "partial_dedup" if kind == "stored" else kind
+                if h in self.stored: ids.append(self.stored[h]); self.refs[self.stored[h]] += 1; self.stats["dedup_refs"] += 1; kind = "partial_dedup" if kind == "stored" else kind
                 else:
-                    g = self.new_id(w); self.stored[h] = g; ids.append(g); self.append(w, c, g)
+                    g = self.new_id(w); self.stored[h] = g; ids.append(g); self.refs[g] += 1; self.md5[g] = h; self.append(w, c, g)
         s = SET_OF_WRITER[w]; st = self.recs[s]
         refs = b"".join(struct.pack(">Q", 64 + 29 * g) for g in ids)
         body = refs + struct.pack(">II", 0x74000000, zlib.crc32(refs))
@@ -163,6 +168,25 @@ class Pool:
         K = min(len(chs), TAGK)
         tag = hashlib.md5(b"".join(hashlib.md5(c).digest() for c in chs[:K])).digest() + struct.pack(">I", sum(len(c) for c in chs[:K]))
         return off, tag, {"kind": kind, "chunks": len(chs), "set": s, "rec_off": rec_off, "writer": w, "ids": ids, "src_ids": src_ids}
+
+    def chunk_index(self, rev):
+        """Pool/chunk_index/<k>.idx.<rev> (hbk-1, after woutervanranst/synology-hyperbackup-reverse-engineering §2): 64-byte header,
+        then one 29-byte record per chunk id g at 64 + 29*g: [0x00][u32 bucket][u32 64 + 32*entry in that bucket's .index][15 zero]
+        [u8 refcount][u32 fingerprint], sliced at 8 MiB. A copy's id (a phantom: fresh ids, nothing stored) is a kind-1 record,
+        measured by hbk-1 on the real backup: [0x01][u64 byte offset of the stored chunk's record, 64 + 29*g][15 zero][u8 refcount]
+        [u32 fingerprint]. ASSUMED: header bytes after the magic are zeros; ids that store nothing (unused ids of a block, purged
+        chunks) are all zeros; refcount = references from records, capped at 255; fingerprint = crc32 of the chunk md5."""
+        n = self.next_block * BLOCK; tab = bytearray(64 + 29 * n); tab[:4] = bytes.fromhex("7053a86e")
+        for g in range(n):
+            src = self.alias.get(g, g); loc = self.where.get(src)
+            if loc is None: continue
+            p = 64 + 29 * g; tail = bytes([min(255, self.refs[g] or 1)]) + struct.pack(">I", zlib.crc32(self.md5.get(src, b"")))
+            if src != g: tab[p:p + 29] = b"\x01" + struct.pack(">Q", 64 + 29 * src) + bytes(15) + tail          # a copy: kind 1
+            else: b, e = loc; tab[p:p + 29] = b"\0" + struct.pack(">II", b, 64 + 32 * e) + bytes(15) + tail
+        self.straddle = [g for g in range(n) if (64 + 29 * g) // SLICE != (64 + 29 * g + 28) // SLICE and self.alias.get(g, g) in self.where]
+        d = os.path.join(self.root, "Pool", "chunk_index"); os.makedirs(d, exist_ok=True)
+        for k in range(0, len(tab), SLICE):
+            with open(os.path.join(d, f"{k // SLICE}.idx.{rev}"), "wb") as f: f.write(tab[k:k + SLICE])
 
     def finish(self, rev):
         for s, st in self.recs.items():
@@ -201,18 +225,22 @@ def plan(scale):
     return run1, run2, run3_lock
 
 
-def build(root, scale=1.0, bucket_cap=256 * 1024, versions=(101, 102, 103), rotate=False, rotate_copy=True):
+def build(root, scale=1.0, bucket_cap=256 * 1024, versions=(101, 102, 103), rotate=False, rotate_copy=True, chunk_index=False, id_base_blocks=0):
     """Write the backup at `root`; returns the manifest {"versions": {ver: {share: {path: {...}}}}, ...}.
 
     rotate=True adds version rotation (hbk-1, 2026-10-31): a run before the first kept one whose files are gone from every
     kept snapshot; at the start of the second kept run its buckets that nothing needs are purged and their ids freed, the
     first writer to close a bucket then takes the lowest free ids (same revision as the fresh ids of the others), so its
     bucket order by (revision, id) is wrong for those. With rotate_copy one rotated file is copied in that run: a copy of an
-    untagged original whose content sits in an older bucket (phantom found under the revision clock)."""
+    untagged original whose content sits in an older bucket (phantom found under the revision clock).
+
+    chunk_index=True writes the backup's own chunk table (Pool/chunk_index, real Hyper Backup always has it; off by default so
+    the tests of the inferred map keep exercising the map). id_base_blocks starts the chunk ids that many 2260-id blocks up;
+    128 puts ids around 289,000, where a 29-byte record straddles the first 8 MiB slice boundary of the table."""
     root = os.path.abspath(root); os.makedirs(root, exist_ok=True)
     if os.listdir(root): raise FileExistsError(f"{root} is not empty")
     run1, run2, lock = plan(scale)
-    pool = Pool(root, bucket_cap)
+    pool = Pool(root, bucket_cap, id_base_blocks)
     v1, v2, v3 = versions; ts = {v1: T0, v2: T0 + 86400, v3: T0 + 2 * 86400}
     state = {}                     # (share, path) -> dict(data, mtime, off, tag, born, kind)
     snaps = {}                     # ver -> {(share, path): (entry, status)}
@@ -265,9 +293,13 @@ def build(root, scale=1.0, bucket_cap=256 * 1024, versions=(101, 102, 103), rota
             put(share, note, b"Your files are encrypted. (synthetic test note)\n" * 30, v3, ts[v3] - 1700, "N")
     pool.close_all(); snaps[v3] = {k: dict(e) for k, e in state.items()}
     last = v3; pool.finish(last)
+    if chunk_index: pool.chunk_index(last)
     shares = sorted(run1)
     _write_config(root, shares, versions, ts, snaps, last)
-    truth = {"buckets": {str(b): list(v) for b, v in sorted(pool.bucket_writer.items())}, "reused": {str(b): w for b, w in sorted(pool.reused.items())}, "rotated_run": (v1 - 1) if rotate else None}
+    truth = {"buckets": {str(b): list(v) for b, v in sorted(pool.bucket_writer.items())}, "reused": {str(b): w for b, w in sorted(pool.reused.items())}, "rotated_run": (v1 - 1) if rotate else None,
+             "chunk_index": chunk_index, "id_range": [id_base_blocks * BLOCK, pool.next_block * BLOCK],
+             "chunk_index_straddle": getattr(pool, "straddle", []),
+             "copies": sorted([g, g0] for g, g0 in pool.alias.items())}       # phantom id -> the stored id it copies       # used ids whose 29-byte record crosses an 8 MiB slice boundary
     manifest = {"format": "hbkgen-1", "truth": truth, "root": root, "last_clean": v2, "incident": v3, "bucket_cap": bucket_cap, "stats": pool.stats,
                 "versions": {str(v): {sh: {p: {"sha256": hashlib.sha256(e["data"]).hexdigest(), "size": len(e["data"]), "mtime": e["mtime"],
                                                "kind": e["info"]["kind"], "status": e["status"], "writer": e["info"].get("writer"),
@@ -324,9 +356,11 @@ def main(argv):
     ap.add_argument("out", help="folder to create, e.g. /tmp/e2e/e2e_1.hbk (must not exist or be empty)")
     ap.add_argument("--scale", type=float, default=1.0, help="file size factor (1 = ~6 MB)")
     ap.add_argument("--bucket-kb", type=int, default=256, help="bucket size in KiB (real backups: ~52 MB)")
+    ap.add_argument("--chunk-index", action="store_true", help="write Pool/chunk_index (the backup's own chunk table)")
+    ap.add_argument("--id-base-blocks", type=int, default=0, help="start chunk ids this many 2260-id blocks up (128: a record straddles the 8 MiB slice)")
     ap.add_argument("--rotate", action="store_true", help="add a rotated-away run: purged buckets, reused bucket ids, copy of an untagged original")
     a = ap.parse_args(argv)
-    m = build(a.out, a.scale, a.bucket_kb * 1024, rotate=a.rotate)
+    m = build(a.out, a.scale, a.bucket_kb * 1024, rotate=a.rotate, chunk_index=a.chunk_index, id_base_blocks=a.id_base_blocks)
     mp = a.out.rstrip("/\\") + ".manifest.json"
     with open(mp, "w") as f: json.dump(m, f, indent=1)
     print(f"{a.out}: {m['stats']}; manifest {mp}")
