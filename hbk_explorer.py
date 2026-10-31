@@ -599,7 +599,8 @@ class Backup:
             for f in q["flags"].split(","): w.append("flags like ?"); args.append(f"%{f}%")
         if q.get("status"): w.append("status = ?"); args.append(q["status"].upper())
         if q.get("dir") is not None and q.get("dir") != "*": w.append("dir = ?"); args.append(q["dir"])
-        if q.get("prefix"): w.append("(path = ? or path like ?)"); args.extend([q["prefix"], q["prefix"] + "/%"])
+        if q.get("prefix"):                      # exact, case-sensitive folder prefix (LIKE would treat _ and % as wildcards and ignore case)
+            pre = q["prefix"].rstrip("/") + "/"; w.append("(path = ? or substr(path, 1, ?) = ?)"); args.extend([q["prefix"], len(pre), pre])
         by = q.get("by") or "mtime"
         if by not in ("mtime", "ctime"): by = "mtime"
         if q.get("from"): w.append(f"{by} >= ?"); args.append(int(q["from"]))
