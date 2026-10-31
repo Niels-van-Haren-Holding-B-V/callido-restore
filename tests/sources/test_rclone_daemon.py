@@ -58,6 +58,29 @@ class Cache(unittest.TestCase):
             self.assertEqual(run.call_count, 2)
 
 
+class StaleDaemon(unittest.TestCase):
+    """A pid file from a killed app run: the pid is stopped only when it still runs an rclone rcd."""
+    def setUp(self):
+        self.d = tempfile.mkdtemp(); self.addCleanup(shutil.rmtree, self.d, True)
+        from callido_restore import paths
+        p = mock.patch.object(paths, "CONF_DIR", __import__("pathlib").Path(self.d)); p.start(); self.addCleanup(p.stop)
+
+    def test_no_pid_file(self):
+        self.assertFalse(rc.kill_stale())
+
+    def test_pid_reused_by_another_program_is_left_alone(self):
+        rc.PIDFILE().write_text("4242")
+        with mock.patch.object(rc, "_cmdline", return_value="/usr/bin/vim notes.txt"), mock.patch.object(os, "kill") as kill:
+            self.assertFalse(rc.kill_stale()); kill.assert_not_called()
+        self.assertFalse(rc.PIDFILE().exists())
+
+    def test_stale_rcd_is_stopped(self):
+        rc.PIDFILE().write_text("4242")
+        with mock.patch.object(rc, "_cmdline", return_value="/Applications/X.app/Contents/Frameworks/rclone rcd --rc-addr 127.0.0.1:5"), \
+             mock.patch.object(os, "kill") as kill:
+            self.assertTrue(rc.kill_stale()); kill.assert_called_once_with(4242, 15)
+
+
 class ViaDaemon(unittest.TestCase):
     """With the daemon 'running', calls go to operations/list etc. (rc() is faked here)."""
     def test_ls_uses_operations_list_with_max_depth(self):

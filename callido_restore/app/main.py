@@ -83,6 +83,10 @@ def main():
     _verify_frozen()
     load_sources()
     rclone.start_in_background()                               # one rclone daemon for all listings (fast wizard, fast scans)
+    import signal
+    for sig in (signal.SIGTERM, signal.SIGINT):                 # a kill from outside still stops the rclone daemon with the app
+        try: signal.signal(sig, lambda *_: _exit_app(0))
+        except (ValueError, OSError): pass
     windowed = not a.no_window and not a.browser
     try: srv = ThreadingHTTPServer(("127.0.0.1", a.port), H)
     except OSError as e:

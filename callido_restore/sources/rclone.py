@@ -4,7 +4,8 @@ daemon on a random 127.0.0.1 port with random credentials (no remote access, no 
 here uses it when it runs and otherwise falls back to the same ``rclone`` command line as before, so tests that mock
 ``subprocess.run`` and a machine where the daemon fails to start keep working. Copies and config changes still run as separate
 rclone processes; the daemon shares the config file with them."""
-import base64, json, secrets, socket, subprocess, threading, time, urllib.error, urllib.request
+import base64, json, os, secrets, socket, subprocess, threading, time, urllib.error, urllib.request
+from callido_restore import paths
 from callido_restore.paths import RCLONE
 
 
@@ -21,10 +22,12 @@ class _Daemon:
         return self.proc is not None and self.proc.poll() is None
 
     def start(self, timeout=10.0):
-        """Start ``rclone rcd`` once; True when it answers ``core/version``. A failure is remembered and not retried."""
+        """Start ``rclone rcd`` once; True when it answers ``core/version``. A failure is remembered and not retried.
+        A daemon left behind by a previous run that was killed (pid file in the settings folder) is stopped first."""
         with self.lock:
             if self.running: return True
             if self.failed or not RCLONE: return False
+            kill_stale()
             with socket.socket() as s:
                 s.bind(("127.0.0.1", 0)); port = s.getsockname()[1]
             user, pw = secrets.token_hex(8), secrets.token_hex(16)
@@ -34,6 +37,9 @@ class _Daemon:
                                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL)
             except OSError as e:
                 self.failed = str(e); self.proc = None; return False
+            try:
+                paths.CONF_DIR.mkdir(parents=True, exist_ok=True); PIDFILE().write_text(str(self.proc.pid))
+            except OSError: pass
             self.url = f"http://127.0.0.1:{port}/"
             self.auth = "Basic " + base64.b64encode(f"{user}:{pw}".encode()).decode()
             deadline = time.time() + timeout
@@ -50,6 +56,8 @@ class _Daemon:
             p.terminate()
             try: p.wait(3)
             except subprocess.TimeoutExpired: p.kill()
+        try: PIDFILE().unlink()
+        except OSError: pass
 
     def _call(self, method, params, timeout=None):
         req = urllib.request.Request(self.url + method, data=json.dumps(params).encode(), method="POST",
@@ -65,6 +73,27 @@ class _Daemon:
         """One remote-control call; raises RcloneError with rclone's message."""
         if not self.running: raise RcloneError("rclone daemon is not running")
         return self._call(method, params, timeout=timeout)
+
+
+def PIDFILE(): return paths.CONF_DIR / "rclone-rcd.pid"
+
+def _cmdline(pid):
+    """The command line of a process, '' when it does not exist (patched in tests)."""
+    if os.name == "nt": return ""
+    r = subprocess.run(["ps", "-o", "command=", "-p", str(pid)], capture_output=True, text=True)
+    return r.stdout.strip() if r.returncode == 0 else ""
+
+def kill_stale():
+    """Stop the daemon of a previous app run that did not exit cleanly (force quit, crash): the pid file names it, and it is
+    only killed when that pid still runs an ``rclone rcd``. Returns True when something was stopped."""
+    try: pid = int(PIDFILE().read_text().strip())
+    except (OSError, ValueError): return False
+    try: PIDFILE().unlink()
+    except OSError: pass
+    if pid <= 1 or "rclone" not in _cmdline(pid) or " rcd" not in _cmdline(pid): return False
+    try: os.kill(pid, 15)
+    except OSError: return False
+    return True
 
 
 DAEMON = _Daemon()
