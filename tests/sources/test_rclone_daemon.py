@@ -37,6 +37,27 @@ class Fallback(unittest.TestCase):
             self.assertEqual(rc.remotes(), [("nas:", "smb"), ("gdrive:", "drive")])
 
 
+class Cache(unittest.TestCase):
+    def setUp(self): rc.forget()
+    def tearDown(self): rc.forget()
+
+    def test_repeat_listing_is_served_from_cache_until_forgotten(self):
+        ok = subprocess.CompletedProcess([], 0, stdout=json.dumps([{"Path": "a", "Name": "a", "IsDir": True, "Size": -1}]), stderr="")
+        with mock.patch.object(subprocess, "run", return_value=ok) as run:
+            rc.ls("nas:", dirs_only=True, cache=True); rc.ls("nas:", dirs_only=True, cache=True)
+            self.assertEqual(run.call_count, 1)
+            rc.ls("nas:", dirs_only=True)                      # uncached call always asks rclone
+            self.assertEqual(run.call_count, 2)
+            rc.forget("nas:"); rc.ls("nas:", dirs_only=True, cache=True)
+            self.assertEqual(run.call_count, 3)
+
+    def test_cache_expires(self):
+        ok = subprocess.CompletedProcess([], 0, stdout="nas: smb\n", stderr="")
+        with mock.patch.object(subprocess, "run", return_value=ok) as run, mock.patch.object(rc, "CACHE_TTL", 0.0):
+            rc.remotes(cache=True); rc.remotes(cache=True)
+            self.assertEqual(run.call_count, 2)
+
+
 class ViaDaemon(unittest.TestCase):
     """With the daemon 'running', calls go to operations/list etc. (rc() is faked here)."""
     def test_ls_uses_operations_list_with_max_depth(self):
