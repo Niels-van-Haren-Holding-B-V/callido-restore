@@ -1,5 +1,13 @@
 **Callido Restore** restores files from a Synology Hyper Backup (`.hbk`) without Hyper Backup or a working NAS. It reads the backup's own metadata, shows every backup run on a timeline, and restores the folders you pick to a NAS share or a local folder. Files already at the destination are never overwritten or deleted, and the backup source is only read.
 
+## What's new in 0.3.0
+
+- **Your own Google key, explained and optional.** Google limits requests per second per app, not bandwidth; without a key of your own the app signs in through rclone's public key that every rclone user shares, and a backup is tens of thousands of small index files. The sign-in dialog now explains this, takes your client id and secret up front with a five-step how-to, and a key can be added later to an existing Google Drive connection ("Downloads slow? Give this connection a key of your own"). Everything still works without one.
+- **The page after the Google consent is the app's own**: "Signed in, you can close this tab and go back to the app", instead of rclone's plain white page. The sign-in asks for read-only Drive access only.
+- **Safer connections.** A name that already belongs to a connection of another type is refused, so an SMB restore target can never be replaced by a Drive connection or the other way round; an existing Drive connection is updated in place, keeping options set outside the app.
+- **Crash leftovers are cleaned up at start.** An app that died together with its disk image left its rclone helper and a download running for hours at full CPU on your Drive quota; the app now stops such orphans of its own (force-kill if they ignore a normal terminate) and never touches other rclone processes.
+- **True speed during the bucket-index download.** The byte counter follows rclone's live transfer instead of moving only when a batch of files is complete, so the speed no longer reads a few KB/s while megabytes per second are flowing.
+
 ## What's new in 0.2.6
 
 - Downloads through the app's rclone helper are throttled the same way the old one-process downloads were (a transactions-per-second cap, Google Drive pacing, more low-level retries). Four index-set slices at a time without that cap made Google rate-limit the preparation.
