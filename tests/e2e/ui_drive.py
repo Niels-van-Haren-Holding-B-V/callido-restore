@@ -23,15 +23,71 @@ class Browser(shots.Browser):
                 self.events.append(("console." + m["params"]["type"], " ".join(str(a.get("value", a.get("description", ""))) for a in m["params"]["args"])[:400]))
             elif m.get("method") == "Runtime.exceptionThrown":
                 d = m["params"]["exceptionDetails"]; self.events.append(("exception", (d.get("exception", {}).get("description") or d.get("text", ""))[:400]))
-            elif m.get("method") == "Page.javascriptDialogOpening":
+            elif m.get("method") == "Page.javascriptDialogOpening":     # a confirm() blocks the page: answer it (OK) and log it
                 self.events.append(("dialog", m["params"]["message"][:400])); self.dialog = m["params"]["message"]
+                self.n += 1; msg = {"id": self.n, "method": "Page.handleJavaScriptDialog", "params": {"accept": True}, "sessionId": self.sid}
+                os.write(self.w, json.dumps(msg).encode() + b"\0")
             return m
-    def text(self, sel): return self.js(f"(document.querySelector({json.dumps(sel)})||{{}}).innerText||''")
+    def text(self, sel): return self.js(f"(document.querySelector({json.dumps(sel)})||{{}}).innerText||''") or ""    # None while a dialog is answered
+
+
+def post(base, path, **body):
+    req = urllib.request.Request(base + path, data=json.dumps(body).encode(), headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=60) as r: return json.load(r)
+
+
+def queue_flow(b, base, work, m, notes, shot):
+    """#140: "Start when the backup is prepared" queues the restore; the preparation watcher starts it on any tab; the button
+    cancels a queued restore. The preparation is paused before the page opens (as a user pausing it would), so the queue
+    window is deterministic; Resume in the header pill lets it finish."""
+    gs = "(()=>{const g=document.querySelector('#rsGo');return g?{disabled:g.disabled,text:g.textContent}:null})()"
+    toasts = lambda: b.text("#toasts").replace("\n", " | ")
+    clear = lambda: b.js("document.querySelectorAll('#toasts > *').forEach(t=>t.remove())")
+    restores = lambda: [j for j in shots.api(base, "/api/jobs") if j["label"].startswith("restore")]
+    b.navigate(base + "/"); b.wait("typeof S!=='undefined' && S.info && S.info.readable", 60); time.sleep(1.5)
+    notes.append(f"queue: /api/pool at start: { {k: shots.api(base, '/api/pool', src='e2e').get(k) for k in ('paused', 'running', 'complete')} }")
+    notes.append("queue: pill: " + b.text("#prepPill").replace("\n", " "))
+    ver = m["last_clean"]; b.js(f"selectVersion({ver})"); time.sleep(2); b.js("showTab('restore')"); time.sleep(1.5)
+    for sh in ("Documents", "Photos", "homes"):
+        b.js(f"(()=>{{const c=document.querySelector('#rsTree .tc[data-share=\"{sh}\"][data-path=\"\"]');if(c&&!c.checked){{c.checked=true;c.dispatchEvent(new Event('change'))}}}})()")
+        t0 = time.time()
+        while time.time() - t0 < 30 and not b.js(f"!!(S.snaps&&S.snaps['{sh}']&&S.snaps['{sh}'].indexed) && [...document.querySelectorAll('#wzMap td.mono')].some(t=>t.textContent.startsWith('{sh}'))"): time.sleep(0.3)
+    dest = work / "restore-queue"; dest.mkdir()
+    b.js(f"""(()=>{{const ins=[...document.querySelectorAll('#tab-restore input')].filter(i=>i.placeholder==='/Volumes/share/folder');
+             const shares=['Documents','Photos','homes'];ins.forEach((i,k)=>{{i.value={json.dumps(str(dest))}+'/'+shares[k];i.dispatchEvent(new Event('input',{{bubbles:true}}))}})}})()""")
+    time.sleep(1); clear()
+    title = b.js("document.querySelector('#rsGo').title")
+    notes.append(f"queue: start button before: {b.js(gs)} · title: {title}")
+    # 1. queue, then cancel
+    b.js("document.querySelector('#rsGo').click()"); time.sleep(1.5)
+    notes.append(f"queue: after Start: toasts [{toasts()}] · button {b.js(gs)} · queued: {b.js('!!S.queued')} · restore jobs: {len(restores())}")
+    notes.append("queue: step 4 says: " + b.js("[...document.querySelectorAll('#tab-restore p.help')].map(p=>p.innerText).filter(t=>/Queued/.test(t)).join(' / ')"))
+    shot(b, "queued"); clear()
+    b.js("document.querySelector('#rsGo').click()"); time.sleep(1.5)
+    notes.append(f"queue: after cancel: toasts [{toasts()}] · button {b.js(gs)} · queued: {b.js('!!S.queued')}"); clear()
+    # 2. queue again, go to another tab, resume the preparation from the header pill
+    b.js("document.querySelector('#rsGo').click()"); time.sleep(1); clear()
+    b.js("showTab('changes')"); time.sleep(1)
+    notes.append(f"queue: on tab {b.js('S.tab')}, queued {b.js('!!S.queued')}; pill: " + b.text("#prepPill").replace("\n", " "))
+    b.js("document.querySelector('#prepBtn').click()"); t0 = time.time(); seen = []
+    while time.time() - t0 < 120 and not restores():
+        t = toasts()
+        if t and t not in seen: seen.append(t)
+        time.sleep(0.3)
+    notes.append(f"queue: restore job appeared after {time.time() - t0:.1f}s (tab {b.js('S.tab')}); toasts seen: {seen + [toasts()]}")
+    t0 = time.time()
+    while time.time() - t0 < 120 and any(j["state"] == "running" for j in restores()): time.sleep(0.5)
+    jobs = restores(); notes.append(f"queue: restore jobs: {[(j['state'], j.get('done_files'), j.get('total_files')) for j in jobs]}")
+    shot(b, "queue-started")
+    cmp_ = flow.compare(m, ver, {sh: dest / sh for sh in ("Documents", "Photos", "homes")})
+    notes.append(f"queue: on disk vs manifest: ok={len(cmp_['ok'])} missing={len(cmp_['missing'])} wrong_bytes={cmp_['wrong_bytes']} wrong_mtime={cmp_['wrong_mtime']}")
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--chrome", required=True); ap.add_argument("--out", required=True)
+    ap.add_argument("--queue", action="store_true", help="#140: queue a restore while the preparation is paused, cancel it, queue again, resume")
+    ap.add_argument("--fast", action="store_true", help="impatient user: tick, type the targets and press Start while the file lists still load (U5)")
     ap.add_argument("--scale", type=float, default=6); ap.add_argument("--bucket-kb", type=int, default=1024)
     a = ap.parse_args(); out = Path(a.out); out.mkdir(parents=True, exist_ok=True)
     work = Path(tempfile.mkdtemp(prefix="hbk-ui-")); home = work / "home"; (home / ".hbk-explorer").mkdir(parents=True)
@@ -50,6 +106,11 @@ def main():
             except Exception: time.sleep(0.1)
         with Browser(a.chrome, str(work / "chrome")) as b:
             b.call("Page.enable")
+            if a.queue:
+                post(base, "/api/pool/pause", src="e2e")
+                queue_flow(b, base, work, m, notes, lambda b_, name: shot(b_, name)); notes.extend(f"[{k}] {v}" for k, v in b.events)
+                return
+
             b.navigate(base + "/"); time.sleep(1.5); shot(b, "start")
             notes.append("header: " + b.text("header")[:300].replace("\n", " | "))
             b.wait("typeof S!=='undefined' && S.info && S.info.readable", 60); time.sleep(1); shot(b, "opened")
@@ -74,16 +135,37 @@ def main():
             for sh in ("Documents", "Photos", "homes"):
                 notes.append(f"tree row before ticking {sh}: " + b.js(f"(()=>{{const c=document.querySelector('#rsTree .tc[data-share=\"{sh}\"][data-path=\"\"]');return c?c.parentElement.innerText.replace(/\\n/g,' '):'(no checkbox)'}})()"))
                 b.js(f"(()=>{{const c=document.querySelector('#rsTree .tc[data-share=\"{sh}\"][data-path=\"\"]');if(c&&!c.checked){{c.checked=true;c.dispatchEvent(new Event('change'))}}}})()")
+                if a.fast: continue
                 t0 = time.time()                               # a person waits until the share shows as loaded and its target row is there
                 while time.time() - t0 < 30 and not b.js(f"!!(S.snaps&&S.snaps['{sh}']&&S.snaps['{sh}'].indexed) && [...document.querySelectorAll('#wzMap td.mono')].some(t=>t.textContent.startsWith('{sh}'))"): time.sleep(0.3)
                 notes.append(f"  {sh}: loaded and its row shown after {time.time() - t0:.1f}s")
-            time.sleep(1); notes.append("selection summary: " + b.text("#rsSelSum"))
+            if not a.fast: time.sleep(1)
+            notes.append("selection summary: " + b.text("#rsSelSum"))
             dest = work / "restore-ui"; dest.mkdir()           # the "mounted share": its subfolders are new
             # step 3: one target per shared folder (the rows' path fields), each a new folder
+            if a.fast:                                         # type as soon as the rows are on the page, lists or not
+                t0 = time.time()
+                while time.time() - t0 < 10 and b.js("[...document.querySelectorAll('#tab-restore input')].filter(i=>i.placeholder==='/Volumes/share/folder').length") < 3: time.sleep(0.05)
+                notes.append(f"fast: rows on the page after {time.time() - t0:.2f}s; lists loaded: {b.js('Object.fromEntries(Object.entries(S.snaps||{}).map(([k,v])=>[k,!!v.indexed]))')}")
             ok = b.js(f"""(()=>{{const ins=[...document.querySelectorAll('#tab-restore input')].filter(i=>i.placeholder==='/Volumes/share/folder');
                          const shares=['Documents','Photos','homes'];ins.forEach((i,k)=>{{i.value={json.dumps(str(dest))}+'/'+shares[k];
                          i.dispatchEvent(new Event('input',{{bubbles:true}}));i.dispatchEvent(new Event('change',{{bubbles:true}}))}});return ins.length}})()""")
-            notes.append(f"target rows filled: {ok}"); time.sleep(1.5); shot(b, "target-set")
+            notes.append(f"target rows filled: {ok}")
+            if a.fast: notes.append("fast: wzMap right after typing: " + str(b.js("localStorage.getItem('wzMap')")) + " · rows on page: " + str(b.js("[...document.querySelectorAll('#wzMap td.mono')].map(t=>t.textContent.slice(0,12))")))
+            if a.fast:                                         # press Start at once, while the lists are loading
+                gs = "(()=>{const g=document.querySelector('#rsGo');return g?{disabled:g.disabled,text:g.textContent}:null})()"
+                notes.append(f"fast: loading now: {b.js('Object.fromEntries(Object.entries(S.snaps||{}).map(([k,v])=>[k,!!v.indexed]))')} · start button: {b.js(gs)}")
+                b.js("document.querySelector('#rsGo').click()"); time.sleep(0.4)
+                notes.append("fast: toasts right after Start: " + b.text("#toasts").replace("\n", " | ") + " · progress: " + b.text("#rsProg")[:200])
+                n_exc = len([e for e in b.events if e[0] == "exception"]); notes.append(f"fast: page exceptions so far: {n_exc}")
+                t0 = time.time()
+                while time.time() - t0 < 30 and not b.js("['Documents','Photos','homes'].every(k=>S.snaps&&S.snaps[k]&&S.snaps[k].indexed)"): time.sleep(0.3)
+                time.sleep(1.5)
+                vals = b.js("[...document.querySelectorAll('#tab-restore input')].filter(i=>i.placeholder==='/Volumes/share/folder').map(i=>i.value)")
+                notes.append(f"fast: lists loaded after {time.time() - t0:.1f}s; target fields now: {vals}")
+                notes.append("fast: wzMap after the loads: " + str(b.js("localStorage.getItem('wzMap')")))
+                b.js("document.querySelectorAll('#toasts > *').forEach(t=>t.remove())")
+            time.sleep(1.5); shot(b, "target-set")
             notes.append("check/start area: " + b.text("#tab-restore")[-900:].replace("\n", " | "))
             gostate = "(()=>{const g=document.querySelector('#rsGo');return g?{disabled:g.disabled,text:g.textContent}:null})()"
             go = b.js(gostate); notes.append(f"start button: {go}")
@@ -123,7 +205,7 @@ def main():
         try: srv.wait(10)
         except subprocess.TimeoutExpired: srv.kill()
         log.close(); shutil.copy(work / "app.log", out / "app.log"); shutil.rmtree(work, ignore_errors=True)
-    (out / "notes.txt").write_text("\n".join(notes)); print("\n".join(notes))
+        (out / "notes.txt").write_text("\n".join(notes)); print("\n".join(notes))
 
 
 if __name__ == "__main__":
