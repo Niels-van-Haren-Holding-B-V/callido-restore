@@ -364,6 +364,19 @@ def smb_host(raw):
     if "@" in h: h = h.rsplit("@", 1)[1]                  # smb://user@nas: the user has its own field
     return h.strip()
 
+def smb_address(raw):
+    """(host, port or None) from what a person types: ``smb_host`` plus a port ("nas:445", "[fe80::1]:445") split off, because
+    rclone's smb backend takes the port as its own option. A bare IPv6 address ("fe80::1") is a host without a port."""
+    h = smb_host(raw)
+    if h.startswith("["):                                   # [v6] or [v6]:port
+        host, _, rest = h[1:].partition("]")
+        port = rest[1:] if rest.startswith(":") else ""
+        return host, (port if port.isdigit() else None)
+    if h.count(":") == 1:
+        host, port = h.split(":")
+        return host, (port if port.isdigit() else None)
+    return h, None
+
 def with_elapsed(job, message, fn, every=1.0):
     """Run ``fn()`` while ``job["message"]`` shows ``message`` plus the seconds so far ("Listing the shares on nas… 7 s"), so a
     slow first rclone start (a clean Windows install scans the exe) or a slow NAS never looks like a hang. Returns fn's result."""
