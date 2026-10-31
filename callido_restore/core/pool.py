@@ -460,6 +460,15 @@ class PoolReader:
         e = self.vf.entry(off); s, ro = e["set"], e["rec_off"]; ids = self.recs.record(s, ro)["ids"]
         seen = set(); st, why = self._rec_status(s, ro, len(ids), seen)
         if st == "unverified": return st, why
+        bad = self._refs_status(s, ro, ids, seen)
+        if bad: return bad
+        if st == "identical_copy":                                           # the copy is read through its source's entries: the source's
+            src = self.aliased[s][ro]                                        # own references count too (H32.2), worst of both wins
+            bad = self._refs_status(src[0], src[1], self.recs.record(src[0], src[1])["ids"], seen)
+            if bad: return bad
+        return st, why
+    def _refs_status(self, s, ro, ids, seen):
+        """(status, reason) when one of the records the ids reference outside the record's own ranges is not verified, else None"""
         own = self.recrng.get(s, {}).get(ro, []); starts = [a for a, L in own]; lens = [L for a, L in own]
         for g in ids:
             i = bisect.bisect_right(starts, g) - 1
@@ -468,7 +477,7 @@ class PoolReader:
             if x is None: return "unverified", "reads a chunk that no record stores"
             st2, why2 = self._rec_status(x[0], x[1], TAGK + 1, seen)         # a referenced record is never an identical copy
             if st2 != "verified": return "unverified", "reads chunks from a record that is " + (why2 or "unverified")
-        return st, why
+        return None
     def _rec_of_id(self, g):
         for s, (st, ln, ro) in self.rng2.items():
             i = bisect.bisect_right(st, g) - 1
