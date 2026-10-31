@@ -10,7 +10,7 @@ from callido_restore.oscompat import popen_kw
 from callido_restore.paths import RCLONE, _bundled, is_remote_path, ui_path
 from callido_restore.restore.backup import Backup
 from callido_restore.restore.destination import restore_target_error
-from callido_restore.restore.jobs import JOBS, start_job
+from callido_restore.restore.jobs import JOBS, log, start_job
 from callido_restore.sources import google, rclone
 from callido_restore.sources.source import SOURCES, add_source, save_sources
 
@@ -303,16 +303,22 @@ class H(BaseHTTPRequestHandler):
                             r = subprocess.run([RCLONE, "config", "create", name, "smb", f"host={host}", *([f"port={port}"] if port else []), f"user={body.get('user', '')}", f"pass={obs}",
                                                 "--obscure=false", "--non-interactive"], capture_output=True, text=True, timeout=600, **popen_kw())
                             if r.returncode != 0: raise RuntimeError(r.stderr.strip()[-400:] or "rclone config failed")
+                        user = body.get("user", "")
+                        log(f"connect smb '{name}': host={host} port={port or 445} user={user} (password not logged)")
+                        t0 = time.time()
                         rclone.with_elapsed(job, f"Saving the connection to {host}…", create)
+                        log(f"connect smb '{name}': connection saved in {time.time() - t0:.1f} s")
                     rclone.forget(); rclone.fscache_clear()                     # new or changed connection: cached listings and backends are stale
                     what = "Listing your Drive…" if kind == "drive" else f"Listing the shares on {host}…"     # the root listing can take a while
                     # SMB: fail within ~20 s with rclone's own error when the NAS does not answer (no 20 low-level retries)
                     probe = {"ConnectTimeout": "20s", "LowLevelRetries": 1, "Retries": 1} if kind == "smb" else None
+                    t0 = time.time()
                     try: shares = rclone.with_elapsed(job, what, lambda: [e["Name"] for e in rclone.ls(f"{name}:", dirs_only=True, timeout=60, config=probe)])
-                    except rclone.RcloneError as e:
-                        err = str(e)[-300:]
-                        if kind == "smb": err = f"connection saved, but {host} did not answer with its shares: {err} (check the address, the user and password, and that SMB is on in DSM)"
-                        raise RuntimeError(err)
+                    except (rclone.RcloneError, subprocess.TimeoutExpired) as e:
+                        log(f"connect {kind} '{name}': listing failed after {time.time() - t0:.1f} s: {e}")
+                        if kind == "smb": raise RuntimeError(rclone.smb_error_message(str(e), host, body.get("user", ""), port)) from None
+                        raise RuntimeError(str(e)[-300:]) from None
+                    log(f"connect {kind} '{name}': {len(shares)} share(s) listed in {time.time() - t0:.1f} s")
                     return {"remote": name + ":", "shares": shares}
                 return self._json(start_job(run, f"connect {kind}"))
 

@@ -377,6 +377,45 @@ def smb_address(raw):
         return host, (port if port.isdigit() else None)
     return h, None
 
+def smb_host_hint(host):
+    """A sentence when ``host`` is an IPv4 address outside the local-network ranges, which a NAS at home or in the office never
+    has: usually a typo (192.158.x.x for 192.168.x.x). '' otherwise (names, IPv6, local addresses)."""
+    import ipaddress
+    try: ip = ipaddress.IPv4Address(host)
+    except ValueError: return ""
+    if ip.is_private or ip.is_loopback or ip.is_link_local: return ""
+    a, b, c, d = str(ip).split(".")
+    guess = f" Did you mean {'.'.join(['192', '168', c, d])}?" if a == "192" and b != "168" else ""
+    return f"{host} is not an address on a local network; a NAS normally has one starting with 192.168., 10. or 172.16-31.{guess}"
+
+# rclone / go-smb2 / Windows socket wording -> what a person can act on. First match wins.
+_SMB_ERRORS = [
+    (("no such host", "server misbehaving", "getaddrinfo", "name resolution"),
+     "The name {host} could not be found on this network. Use the NAS's IP address instead (DSM → Control Panel → Network)."),
+    (("connection refused", "actively refused"),
+     "{host} refused the SMB connection. Turn on SMB in DSM (Control Panel → File Services → SMB) and check the port."),
+    (("logon failure", "status_logon_failure", "account restriction", "account_disabled", "password_expired", "wrong password"),
+     "The NAS rejected the user name or password for {user}."),
+    (("access denied", "status_access_denied"),
+     "The NAS refused access for {user}. Check the user's permissions in DSM (Control Panel → User & Group)."),
+    (("network is unreachable", "no route to host", "host is unreachable", "unreachable network"),
+     "This computer has no network route to {host}. Check that it is on the same network as the NAS (VPN, VM network mode)."),
+    (("i/o timeout", "deadline exceeded", "timed out", "no answer from rclone within", "timeout"),
+     "{host} did not answer on the SMB port ({port}) within 20 seconds. Check the address, that the NAS is on, and that SMB is enabled in DSM."),
+    (("negotiate", "dialect", "smb1"),
+     "{host} answered but does not speak SMB2/3. In DSM set the minimum SMB protocol to SMB2 (File Services → SMB → Advanced)."),
+]
+
+def smb_error_message(raw, host, user="", port=None):
+    """A plain message for a failed SMB connect, after the typo hint (``smb_host_hint``) and rclone's own text as
+    "Details:" for support. Unknown errors keep rclone's text as the message."""
+    low = (raw or "").lower()
+    msg = next((m for keys, m in _SMB_ERRORS if any(k in low for k in keys)), "")
+    msg = msg.format(host=host, user=user or "this user", port=port or 445) if msg else f"Could not connect to {host}."
+    hint = smb_host_hint(host)
+    detail = (raw or "").strip()[-300:]
+    return " ".join(x for x in (hint, msg, f"Details: {detail}" if detail else "") if x)     # a likely typo first
+
 def with_elapsed(job, message, fn, every=1.0):
     """Run ``fn()`` while ``job["message"]`` shows ``message`` plus the seconds so far ("Listing the shares on nas… 7 s"), so a
     slow first rclone start (a clean Windows install scans the exe) or a slow NAS never looks like a hang. Returns fn's result."""

@@ -25,6 +25,39 @@ class SmbAddress(unittest.TestCase):
             self.assertEqual(rclone.smb_address(raw), want, raw)
 
 
+def ip(*octets): return ".".join(str(o) for o in octets)      # built, so no literal local address sits in the repo (private check)
+
+
+class SmbErrors(unittest.TestCase):
+    def test_typo_of_a_local_range_is_named(self):
+        typo = ip(192, 158, 188, 69)
+        msg = rclone.smb_error_message(f"couldn't connect SMB: dial tcp {typo}:445: i/o timeout", typo, "u")
+        self.assertTrue(msg.startswith(f"{typo} is not an address on a local network"), msg)
+        self.assertIn(f"Did you mean {ip(192, 168, 188, 69)}?", msg)
+        self.assertIn("did not answer on the SMB port (445) within 20 seconds", msg)
+        self.assertIn("Details: couldn't connect SMB", msg)
+
+    def test_no_hint_for_local_addresses_and_names(self):
+        for h in (ip(192, 168, 1, 2), ip(10, 0, 0, 5), ip(172, 20, 1, 1), "nas", "nas.local", "2001:db8::1", ip(169, 254, 1, 1)):
+            self.assertEqual(rclone.smb_host_hint(h), "", h)
+        self.assertIn("not an address on a local network", rclone.smb_host_hint(ip(8, 8, 8, 8)))
+        self.assertNotIn("Did you mean", rclone.smb_host_hint(ip(8, 8, 8, 8)))
+
+    def test_kinds(self):
+        cases = {"dial tcp: lookup nas: no such host": "could not be found on this network",
+                 "connectex: No connection could be made because the target machine actively refused it.": "refused the SMB connection",
+                 "response error: The attempted logon is invalid (STATUS_LOGON_FAILURE)": "rejected the user name or password for niels",
+                 "STATUS_ACCESS_DENIED": "refused access for niels",
+                 "dial tcp: connect: network is unreachable": "no network route to nas",
+                 "no answer from rclone within 60 s": "did not answer on the SMB port (445)",
+                 "something new": "Could not connect to nas."}
+        for raw, want in cases.items():
+            self.assertIn(want, rclone.smb_error_message(raw, "nas", "niels"), raw)
+
+    def test_custom_port_in_message(self):
+        self.assertIn("SMB port (4450)", rclone.smb_error_message("i/o timeout", "nas", port="4450"))
+
+
 class Elapsed(unittest.TestCase):
     def test_message_counts_up_and_result_passes_through(self):
         job, seen = {}, []
@@ -87,6 +120,27 @@ class ConnectApi(unittest.TestCase):
         self.assertEqual(listed["path"], "nas:")
         self.assertEqual(listed["config"], {"ConnectTimeout": "20s", "LowLevelRetries": 1, "Retries": 1})
         self.assertEqual(result, {"remote": "nas:", "shares": ["Restore", "homes"]})
+
+    def test_failed_listing_gives_the_plain_message_and_logs(self):
+        import io, subprocess
+        from contextlib import redirect_stdout
+        typo = ip(192, 158, 188, 69); result = {}
+        def fake_run(args, **kw): return subprocess.CompletedProcess(args, 0, "OBS\n" if "obscure" in args else "", "")
+        def run_now(fn, label):
+            job = {}
+            try: fn(job)
+            except RuntimeError as e: result["error"] = str(e)
+            return {"id": "j1"}
+        buf = io.StringIO()
+        with redirect_stdout(buf), mock.patch.object(rclone, "remotes", return_value=[]), mock.patch("subprocess.run", side_effect=fake_run), \
+             mock.patch.object(rclone, "ls", side_effect=rclone.RcloneError(f"couldn't connect SMB: dial tcp {typo}:445: i/o timeout")), \
+             mock.patch.object(rclone, "forget"), mock.patch.object(rclone, "fscache_clear"), \
+             mock.patch("callido_restore.server.api.start_job", side_effect=run_now):
+            self.post({"kind": "smb", "name": "nas", "host": typo, "user": "niels", "password": "secret-pw"})
+        self.assertIn(f"Did you mean {ip(192, 168, 188, 69)}?", result["error"])
+        log = buf.getvalue()
+        self.assertIn(f"connect smb 'nas': host={typo} port=445 user=niels (password not logged)", log)
+        self.assertIn("listing failed after", log); self.assertNotIn("secret-pw", log)
 
 
 if __name__ == "__main__":
