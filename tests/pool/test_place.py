@@ -143,6 +143,34 @@ class Placer(unittest.TestCase):
         self.assertIn((0, 0), flags["guessed"])
         pool.tmp.cleanup()
 
+    def test_count_placed_spill_is_checked_at_the_end(self):
+        # C references the first chunk of writer 1's untagged E1, which only the gap pass places (after C's last chance), so C is
+        # laid out by count within the turn ({2, 4}). At the end its bytes are checked exactly: with the right size it becomes
+        # verified, with a size one byte off it is dropped and buckets 2 and 4 are given back.
+        def run(extra):
+            pool = Pool({0: (2, [10, 20, 30]), 1: (2, [100, 100]), 2: (2, [100, 110]), 3: (2, [100, 111]), 4: (2, [100, 120]), 5: (2, [100, 100]), 6: (2, [5, 6])})
+            C = _rec(0, 100, 7, size=20 + 30 + 210 + 220 + 5 + 100 + extra, tag="c", dedup=[(1002, 1003)]); D = _rec(1, 107, 1, size=6, tag="d")
+            E = [_rec(0, 1000, 2, size=200, tag="e0"), _rec(1, 1002, 2, size=211), _rec(2, 1004, 2, size=200, tag="e2")]
+            anchors = {(0, 0): [(0, 1, 2)], (0, 1): [(6, 1, 1)], (1, 0): [(1, 0, 2)], (1, 2): [(5, 0, 2)]}
+            old = (place.PERIOD_MIN_PAIRS, place.ROUNDS); place.PERIOD_MIN_PAIRS, place.ROUNDS = 1, 1
+            try: return self.run_placer(pool, {0: [C, D], 1: E, 2: [], 3: []}, anchors), pool
+            finally: place.PERIOD_MIN_PAIRS, place.ROUNDS = old
+        (owner, pl, R, flags), pool = run(0)
+        self.assertEqual(R["placed-by-count"], 1); self.assertEqual(R["by-count-verified-later"], 1); self.assertNotIn((0, 0), flags["guessed"])
+        self.assertEqual(pl[0][0], [(0, 1, 2), (2, 0, 2), (4, 0, 2), (6, 0, 1)]); pool.tmp.cleanup()
+        (owner, pl, R, flags), pool = run(1)
+        self.assertEqual(R["by-count-rejected-later"], 1); self.assertNotIn(0, pl[0]); self.assertNotIn(2, owner); self.assertNotIn(4, owner)
+        pool.tmp.cleanup()
+
+    def test_a_copy_needs_the_same_chunk_count(self):
+        # A2 has A's tag and size but one chunk more (same start and size, different chunking): not an identical copy.
+        pool = Pool({0: (2, [10, 20, 30, 40])})
+        A = _rec(0, 100, 2, size=30, tag="a"); A2 = _rec(1, 900, 3, size=30, tag="a"); B = _rec(2, 102, 2, size=70, tag="b")
+        pa = [(0, 0, 2)]
+        owner, pl, R, flags = self.run_placer(pool, {0: [A, A2, B], 1: [], 2: [], 3: []}, {(0, 0): pa, (0, 1): pa, (0, 2): [(0, 2, 2)]})
+        self.assertNotIn(1, pl[0]); self.assertEqual(R["alias-unplaced"], 1)
+        pool.tmp.cleanup()
+
     def test_gap_with_leftover_chunks_slides_records_to_their_bytes(self):
         # A (1 chunk), then two leftover entries of a deleted file (77, 88), then U (2 chunks, 30+40), then B anchored. The count
         # between A and B is 4 for 2 needed: U is placed where its own bytes match, the only such start.
