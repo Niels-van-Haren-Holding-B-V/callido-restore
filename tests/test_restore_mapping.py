@@ -4,7 +4,7 @@ Each basket item may carry its own ``dest``; its contents are written there dire
 between). Items without ``dest`` go under the common ``dest`` as ``<share>/<path>``. The mapping is persisted in the job
 file, so pause/resume keeps it. ``/api/restore`` refuses a mapped target inside the backup and creates new local roots.
 """
-import json, os, tempfile, threading, time, unittest
+import json, os, shutil, tempfile, threading, time, unittest
 from http.server import ThreadingHTTPServer
 from urllib.request import Request, urlopen
 
@@ -58,7 +58,7 @@ class FakeBackup(hbk_explorer.Backup):
     def __init__(self, src, files):
         self.src = src; self.pool = FakePool(); self._files = files
     def conn(self, share, ver):
-        """An in-memory 'files' table with the columns restore_count() reads, filled from self._files for that share."""
+        """An in-memory 'files' table with the columns restore_plan() and restore_count() read, filled from self._files for that share."""
         import sqlite3
         c = sqlite3.connect(":memory:"); c.row_factory = sqlite3.Row
         c.execute("create table files(path text, name text, dir text, size integer, mode integer, is_dir integer)")
@@ -145,8 +145,8 @@ class MappedRestoreTests(_Fixture):
 class RestoreCountTests(_Fixture):
     def test_counts_match_the_plan(self):                                  # H13: live "Selected: N files · size" without materialising rows
         self.assertEqual(self.b.restore_count(self.items), {"files": 4, "bytes": 36})
-        self.assertEqual(self.b.restore_count([{"share": "B", "ver": 2333, "path": "", "is_dir": 1}]), {"files": 3, "bytes": 27})
-        self.assertEqual(self.b.restore_count([{"share": "B", "ver": 2333, "path": "docs/z.txt", "is_dir": 0}]), {"files": 1, "bytes": 9})
+        self.assertEqual(self.b.restore_count([{"share": "B", "ver": 1234, "path": "", "is_dir": 1}]), {"files": 3, "bytes": 27})
+        self.assertEqual(self.b.restore_count([{"share": "B", "ver": 1234, "path": "docs/z.txt", "is_dir": 0}]), {"files": 1, "bytes": 9})
         self.assertEqual(self.b.restore_count([]), {"files": 0, "bytes": 0})
 
     def test_prefix_is_exact_and_case_sensitive(self):                         # H17: LIKE would match Foto_2024 -> FotoX2024, Photos -> photos
@@ -158,7 +158,7 @@ class RestoreCountTests(_Fixture):
     def test_skip_meta_in_sql(self):
         files = FILES + [{"share": "A", "path": "@eaDir/x.txt", "size": 5, "mtime": 0, "off": -9}, {"share": "A", "path": "a/@eaDir/SYNOPHOTO_THUMB.jpg", "size": 5, "mtime": 0, "off": -9},
                          {"share": "A", "path": "doc.docx@SynoResource", "size": 5, "mtime": 0, "off": -9}, {"share": "A", "path": "sub/.DS_Store", "size": 5, "mtime": 0, "off": -9}]
-        b = FakeBackup(self.src, files); sel = [{"share": "A", "ver": 2333, "path": "", "is_dir": 1}]
+        b = FakeBackup(self.src, files); sel = [{"share": "A", "ver": 1234, "path": "", "is_dir": 1}]
         self.assertEqual(b.restore_count(sel, skip_meta=True), {"files": 2, "bytes": 18})
         self.assertEqual(b.restore_count(sel, skip_meta=False), {"files": 6, "bytes": 38})
 
@@ -204,6 +204,34 @@ class RestoreApiTests(_Fixture):
         self.assertTrue(os.path.isfile(os.path.join(self.dB, "docs", "z.txt")))
         saved = self.get("/api/jobs/saved")[0]
         self.assertEqual(saved["roots"], [new, self.dB])
+
+    def test_restore_plan_prefix_is_exact_and_case_sensitive(self):        # H17: LIKE matched Foto_2024 -> FotoX2024, Photos -> photos, 100% -> 100x
+        files = [{"share": "A", "path": p, "size": 1, "mtime": 0, "off": -1} for p in ("Foto_2024/a.jpg", "FotoX2024/b.jpg", "Photos/c.jpg", "photos/d.jpg", "100%/e.txt", "100x/f.txt", "Photos.old/g.jpg")]
+        b = FakeBackup(self.src, files); plan = lambda folder: hbk_explorer.Backup.restore_plan(b, [{"share": "A", "ver": 1, "path": folder, "is_dir": 1}])
+        self.assertEqual([f["path"] for f in plan("Foto_2024")], ["Foto_2024/a.jpg"])
+        self.assertEqual([f["path"] for f in plan("Photos")], ["Photos/c.jpg"])
+        self.assertEqual([f["path"] for f in plan("photos")], ["photos/d.jpg"])
+        self.assertEqual([f["path"] for f in plan("100%")], ["100%/e.txt"])
+        self.assertEqual(len(plan("")), 7)
+
+    def test_resume_keeps_the_job_file_when_a_root_is_missing_or_unsafe(self):
+        job = self.job("keep"); job["cancel"] = True
+        self.b.restore(self.items, "", job)                                    # pauses at once and writes the job file
+        jf = hbk_explorer.JOBS_DIR / "jkee.json"; self.assertTrue(jf.is_file())
+        shutil.rmtree(self.dB)                                                 # the share is "unmounted"
+        code, out = self.post("/api/restore/resume", {"id": "jkee"})
+        self.assertEqual(code, 400); self.assertIn("not there any more", out["error"]); self.assertTrue(jf.is_file())
+        d = json.loads(jf.read_text()); d["items"][1]["dest"] = os.path.join(self.src.local, "Pool"); jf.write_text(json.dumps(d))
+        code, out = self.post("/api/restore/resume", {"id": "jkee"})
+        self.assertEqual(code, 400); self.assertIn("Pool", out["error"]); self.assertTrue(jf.is_file())
+        os.makedirs(self.dB); d["items"][1]["dest"] = self.dB; jf.write_text(json.dumps(d))
+        code, j = self.post("/api/restore/resume", {"id": "jkee"})
+        self.assertEqual(code, 200); self.assertFalse(jf.is_file())            # consumed only once the resume really starts
+        for _ in range(100):
+            x = self.get(f"/api/job?id={j['id']}")
+            if x["state"] != "running": break
+            time.sleep(0.05)
+        self.assertEqual(x["state"], "done", x)
 
     def test_plan_mappings_preview(self):
         out = self.get("/api/restore_plan?src=t8&dest=&items=" + json.dumps(self.items).replace(" ", "%20").replace('"', "%22"))

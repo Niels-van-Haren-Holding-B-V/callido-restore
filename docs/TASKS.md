@@ -110,6 +110,12 @@ restore plan, pause/resume and the H8 mapping need nothing new), parents with a 
 "Selected: N files · size" is counted live in SQL (`/api/restore_count`, honours the metadata skip). Single files are shown with an
 Advanced switch. The destination rule (per shared folder, subfolders keep their relative path) is in H8.
 
+## H17 — Exact folder selection, safe resume (Reviewer, 2026-10-31 00:34)
+IN REVIEW (hbk-3): branch `hbk3/h17` on main (after H8). `restore_plan` and `restore_count` select a folder by an exact,
+case-sensitive prefix (`substr(path, 1, n) = 'dir/'`) instead of `LIKE 'dir/%'` (case-insensitive, `_`/`%` wildcards). One
+`restore_target_error()` validates targets for `/api/restore` (creates roots) and `/api/restore/resume` (roots must still be
+there, source check again); a resume that fails keeps the job file. Neutral example names in the files H8 owns (H18 rule).
+
 ## Do not
 * Do not change the on-disk layout of `~/.hbk-explorer/index/<src>/pool/*` without a migration; the full map build takes hours of downloads.
 * Do not commit anything from `~/.hbk-explorer` or user paths/remotes into the repo, and no real share/folder/host names (H18 rule in docs/HANDOVER.md).
