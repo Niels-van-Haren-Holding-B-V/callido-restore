@@ -451,6 +451,14 @@ class BuildPoolWiringTests(unittest.TestCase):
             self.backup.build_pool({"cancel": False, "message": "", "progress": 0})
             self.assertTrue(self.backup.pool_prepared())
 
+    def test_chunk_table_skips_the_whole_preparation(self):
+        with mock.patch("callido_restore.core.pool.ChunkIndex.available", return_value=True), \
+             mock.patch("callido_restore.core.pool.build_runs", side_effect=AssertionError("runs")), \
+             mock.patch("callido_restore.pool.poolmap.build_poolmap_detached", side_effect=AssertionError("mapper")):
+            job = {"cancel": False, "message": "", "progress": 0}
+            self.assertEqual(self.backup.build_pool(job)["chunk_index"], True)
+            self.assertTrue(self.backup.pool_status()["complete"])
+
     def test_stop_does_not_start_the_mapper(self):
         self.src.remotes = ["remote:hbk"]
         mapped = {}

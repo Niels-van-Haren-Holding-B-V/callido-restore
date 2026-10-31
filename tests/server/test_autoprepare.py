@@ -101,6 +101,14 @@ class AutoPrepare(unittest.TestCase):
         time.sleep(0.05)
         self.assertEqual(len(self.built), 1); self.assertEqual(len([r for r in results if r]), 1); self.release.set()
 
+    def test_a_backup_with_its_own_chunk_table_needs_no_preparation(self):
+        """Pool/chunk_index locates every chunk: /api/pool says complete, the auto-start leaves it alone, and an explicit build
+        returns at once without mapping."""
+        with mock.patch.object(Backup, "pool_status", lambda b: {"chunk_index": True, "complete": True, "paused": False, "map": False}):
+            self.wait_job(self.get("/api/open", src="ap", job="1")["id"]); time.sleep(0.1)
+            self.assertEqual(self.built, [])
+        self.release.set()
+
     def test_off_switch(self):
         with mock.patch.object(api, "AUTOPREPARE", False):
             self.wait_job(self.get("/api/open", src="ap", job="1")["id"]); time.sleep(0.1)

@@ -24,6 +24,9 @@ def _rec(idx, n, entries=None, tagged=True):
 class _Src:
     def __init__(self, local): self.local = Path(local)
     def ensure(self, rel, job=None, progress=None, cancelled=None): return self.local / rel
+    def listdir(self, rel):
+        p = self.local / rel
+        return {e.name: {"size": e.stat().st_size, "dir": e.is_dir(), "local": True} for e in p.iterdir()} if p.is_dir() else {}
 
 
 class NewRange(unittest.TestCase):
@@ -166,6 +169,19 @@ class ReaderMaps(unittest.TestCase):
         self.assertEqual((st["mapped_buckets"], st["total_buckets"], st["map_complete"], st["records_placed"], st["records_total"], st["bytes_pct"]), (2, 5, True, 600, 780, 74.5))
         v2["map_complete"] = False; pool.dump_json(os.path.join(self.pool, "poolmap2.json"), v2)
         self.assertFalse(pool.PoolReader(src, self.pool).status()["map_complete"])                   # 2 of 5 buckets and not finished: not complete
+
+    def test_chunk_index_locates_exactly_and_wins_over_the_map(self):
+        # Pool/chunk_index: 64-byte header, then 29-byte records [pad][u32 bucket][u32 entry offset][15 zero][u8 refs][u32 fp]
+        d = os.path.join(self.pool, "src", "Pool", "chunk_index"); os.makedirs(d)
+        recs = [(7, 0), (7, 1), (9, 4)]
+        blob = b"\0" * 64 + b"".join(b"\0" + struct.pack(">II", b, 64 + 32 * e) + b"\0" * 15 + b"\1" + b"\0" * 4 for b, e in recs)
+        open(os.path.join(d, "0.idx.2"), "wb").write(blob)
+        r = pool.PoolReader(_Src(os.path.join(self.pool, "src")), self.pool)
+        r.vf = mock.Mock(); r.vf.entry = lambda off: {"set": 4, "rec_off": 100}; r.recs = mock.Mock(); r.recs.record = lambda s, ro: {"ids": [2, 0, 1]}
+        self.assertTrue(r.ci.available()); self.assertEqual(r.plan(64)[0], [(9, 4), (7, 0), (7, 1)])
+        self.assertEqual(r.verification(64), ("verified", ""))
+        r.recs.record = lambda s, ro: {"ids": [5]}                               # beyond the table: not located by it
+        self.assertRaises(KeyError, r.ci.loc, 5)
 
     def test_dump_json_atomic(self):
         p = os.path.join(self.pool, "x.json"); pool.dump_json(p, [1]); self.assertEqual(pool.load_json(p), [1]); self.assertEqual(os.listdir(self.pool), ["x.json"])
