@@ -1,5 +1,9 @@
 **Callido Restore** restores files from a Synology Hyper Backup (`.hbk`) without Hyper Backup or a working NAS. It reads the backup's own metadata, shows every backup run on a timeline, and restores the folders you pick to a NAS share or a local folder. Files already at the destination are never overwritten or deleted, and the backup source is only read.
 
+## What's new in 0.3.1
+
+- **The Google key is one click away.** The overview and the preparation step show "Downloads slow? Give your Google Drive connection a key of your own". It opens straight on your existing connection with the key panel unfolded, the button reads "Sign in again with this key", and the dialog closes when the sign-in is done. Nothing is added or re-downloaded: the connection keeps its name, and all index files and listings stay.
+
 ## What's new in 0.3.0
 
 - **Your own Google key, explained and optional.** Google limits requests per second per app, not bandwidth; without a key of your own the app signs in through rclone's public key that every rclone user shares, and a backup is tens of thousands of small index files. The sign-in dialog now explains this, takes your client id and secret up front with a five-step how-to, and a key can be added later to an existing Google Drive connection ("Downloads slow? Give this connection a key of your own"). Everything still works without one.
