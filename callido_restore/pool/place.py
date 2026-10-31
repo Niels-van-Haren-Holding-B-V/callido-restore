@@ -228,6 +228,24 @@ def resolve_and_place_v3(writers, anchors, index, log=print, max_bucket=None):
                 if ok: good.append((b, e))
             if len(good) == 1: anchor[(w, ri)] = good[0]
         owner, conf = owners_from(anchor); chain = chains(anchor, owner)
+    # An anchor in a bucket of an older revision than the writer's previous pin (by stream offset) cannot be the stored copy: the
+    # record is a copy of an untagged original the revision clock could not tell (a single record anchored in a rotated-away
+    # revision sets its own clock). It becomes a copy laid out from its found position; its chunks leave the stream offsets.
+    for rnd in range(3):
+        demoted = 0
+        for w in W:
+            ts = [t for t, b, s_ in chain[w]]; ss = [s_ for t, b, s_ in chain[w]]; cb = {b for t, b, s_ in chain[w]}
+            for (ww, ri), (b, e) in list(anchor.items()):
+                if ww != w or b in cb: continue
+                k = bisect.bisect_left(ss, P[w][ri] - e)
+                if k > 0 and rev.get(b, 0) < rev.get(torder[ts[k - 1]], 0):
+                    del anchor[(w, ri)]; found[(w, ri)] = (b, e); phys[w][ri] = 0; demoted += 1
+        if not demoted: break
+        R["anchor-behind-demoted"] += demoted
+        for w in W:
+            c = 0; P[w] = []
+            for r in W[w]: P[w].append(c); c += phys[w][r.idx]
+        owner, conf = owners_from(anchor); chain = chains(anchor, owner)
     R["owner-conflicts"] = conf; R["owned-by-anchors"] = len(owner)
     guard("pins")
     log(f"placer: {len(anchor):,} anchored records, {len(owner):,} buckets owned by anchors, {len(alias):,} copies, {len(found):,} copies of untagged originals, {time.time() - t0:.0f}s")

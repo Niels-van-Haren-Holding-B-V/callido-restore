@@ -89,6 +89,18 @@ class Placer(unittest.TestCase):
         self.assertNotIn(0, pl[0]); self.assertNotIn(1, pl[0]); self.assertGreaterEqual(R["spill-no-solution"] + R["spill-between-size-mismatch"], 1)
         pool.tmp.cleanup()
 
+    def test_anchor_behind_the_previous_pin_is_a_copy(self):
+        # E6: bucket 0 (rev 100, a rotated-away run) holds an untagged original; a record K from a later run copies it and its tag
+        # matches there, the only anchor of rev 100, so the revision clock cannot tell. On its writer K sits between A (rev 101,
+        # spilling from bucket 1 into bucket 2) and D (rev 103, bucket 3). K must become a copy; A then spills to D normally.
+        pool = Pool({0: (100, [10, 20, 30]), 1: (101, [40, 50, 60]), 2: (101, [70, 80]), 3: (103, [5, 6, 7])})
+        A = _rec(0, 500, 4, size=50 + 60 + 70 + 80, tag="a"); K = _rec(1, 504, 2, size=20 + 30, tag="k"); D = _rec(2, 506, 2, size=11, tag="d")
+        anchors = {(0, 0): [(1, 1, 2)], (0, 1): [(0, 1, 2)], (0, 2): [(3, 0, 2)]}
+        owner, pl, R, flags = self.run_placer(pool, {0: [A, K, D], 1: [], 2: [], 3: []}, anchors)
+        self.assertEqual(R["anchor-behind-demoted"], 1); self.assertEqual(pl[0][1], [(0, 1, 2)]); self.assertEqual(flags["aliased"].get((0, 1), 1), None)
+        self.assertEqual(pl[0][0], [(1, 1, 2), (2, 0, 2)]); self.assertEqual(pl[0][2], [(3, 0, 2)]); self.assertEqual(R["verified"], 2)
+        pool.tmp.cleanup()
+
     def test_gap_records_between_anchors_are_laid_out_and_verified(self):
         # bucket 0: A (1 chunk) then an untagged record U (2 chunks) then a record H whose head is a dedup reference to A's chunk
         # (so it has a tag but was never scanned), then B anchored; sizes: U unknown (guessed), H = own 70 + referenced 10
