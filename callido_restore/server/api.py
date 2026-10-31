@@ -198,8 +198,8 @@ class H(BaseHTTPRequestHandler):
                 name = re.sub(r"[^A-Za-z0-9_-]", "", body.get("name") or "gdrive") or "gdrive"
                 kind = body.get("kind", "drive")
                 if kind == "drive":
-                    args = [RCLONE, "config", "create", name, "drive", "scope=drive.readonly"]
-                    if body.get("client_id"): args += [f"client_id={body['client_id']}", f"client_secret={body.get('client_secret', '')}"]
+                    cid, csec = (body.get("client_id") or "").strip(), (body.get("client_secret") or "").strip()
+                    args = None
                 elif kind == "smb":
                     # the password is handed to rclone over stdin ("-"), so it never appears in a process list; the obscured
                     # form that lands in rclone.conf is the only thing passed as an argument
@@ -209,10 +209,21 @@ class H(BaseHTTPRequestHandler):
                     args = [RCLONE, "config", "create", name, "smb", f"host={body.get('host', '')}", f"user={body.get('user', '')}", f"pass={obs}", "--obscure=false", "--non-interactive"]
                 else: return self._json({"error": "unknown kind"}, 400)
                 def run(job):
-                    job["message"] = ("Signing in… a browser window opens for the Google sign-in. When it says “Success! All done”, close it and come back to this window."
-                                      if kind == "drive" else "Connecting…")
-                    r = subprocess.run(args, capture_output=True, text=True, timeout=600)
-                    if r.returncode != 0: raise RuntimeError(r.stderr.strip()[-400:] or "rclone config failed")
+                    if kind == "drive":
+                        # The sign-in runs through `rclone authorize` with the app's own landing page (static/oauth.html) instead of
+                        # rclone's plain one; the token it prints goes into the remote with `config create`, which then asks nothing.
+                        job["message"] = "Signing in… a browser window opens for the Google sign-in. When it says “Signed in”, close it and come back to this window."
+                        import webbrowser
+                        try: token = rclone.authorize_drive(cid, csec, on_url=lambda u: webbrowser.open(u), template=_bundled("static/oauth.html"))
+                        except rclone.RcloneError as e: raise RuntimeError("Google sign-in failed: " + str(e))
+                        params = {"scope": "drive.readonly", "token": token}
+                        if cid: params.update(client_id=cid, client_secret=csec)
+                        try: rclone.config_create(name, "drive", params)
+                        except rclone.RcloneError as e: raise RuntimeError(str(e))
+                    else:
+                        job["message"] = "Connecting…"
+                        r = subprocess.run(args, capture_output=True, text=True, timeout=600)
+                        if r.returncode != 0: raise RuntimeError(r.stderr.strip()[-400:] or "rclone config failed")
                     rclone.forget(); rclone.fscache_clear()                     # new or changed connection: cached listings and backends are stale
                     job["message"] = "Listing your Drive…" if kind == "drive" else "Listing the shares…"     # the root listing can take a while
                     try: shares = [e["Name"] for e in rclone.ls(f"{name}:", dirs_only=True, timeout=60)]

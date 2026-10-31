@@ -209,7 +209,7 @@ footer.madeBy img{width:18px;height:18px;border-radius:5px;vertical-align:middle
           <p class="help">The key only identifies this app towards Google; it gives nobody access to your Drive. It is stored in rclone's configuration on this Mac together with the sign-in token.</p></details>
         <p class="help"><b>Next</b> signs you in to Google once more, now with your key. The connection keeps its name, so your backups and everything already downloaded stay as they are.</p></details>
       <label><input type="radio" name="wsk" value="drive"> Google Drive — connect now (a browser window opens for the Google sign-in)</label>
-      <div id="wsDrive" style="display:none;margin-left:22px"><p class="help">Only read access to your Drive is requested. A browser window opens for the Google sign-in; when it shows “Success! All done”, close it and come back to this window: the app continues by itself.</p>
+      <div id="wsDrive" style="display:none;margin-left:22px"><p class="help">Only read access to your Drive is requested. A browser window opens for the Google sign-in; when it shows “Signed in”, close it and come back to this window: the app continues by itself.</p>
         <p style="margin:8px 0 2px;font-size:13px"><b>Your own Google key</b> <span class="help">optional · recommended for speed · can be added later</span></p>
         <p class="help" style="margin:4px 0 6px"><b>Why a key of your own makes downloads faster.</b> Google does not limit how fast you download, it limits how many <i>requests</i> an app may make per second. Without a key of your own this app signs in through the public key of rclone, which every rclone user in the world shares, so Google slows it down. A backup is tens of thousands of small index files, one request each: that is what turns the one-time preparation into hours. With your own key (free, about five minutes) the limit is yours alone, and the Google sign-in screen shows your own project name instead of “rclone”.</p>
         <label class="f">Google client id <input id="wsCid" placeholder="xxxxx.apps.googleusercontent.com"></label>
@@ -717,7 +717,7 @@ $('#wsNext').onclick=async()=>{
     else if(k==='local'){WS.remote='';WS.path='~'}
     else{const q=rekey?{kind:'drive',name:$('#wsRem').value.replace(/:$/,''),client_id:$('#wsCidEx').value.trim(),client_secret:$('#wsCsecEx').value.trim()}
         :k==='drive'?{kind:'drive',name:$('#wsDName').value,client_id:$('#wsCid').value.trim(),client_secret:$('#wsCsec').value.trim()}:{kind:'smb',name:$('#wsSName').value,host:$('#wsHost').value.trim(),user:$('#wsUser').value.trim(),password:$('#wsPass').value};
-      $('#wsConn').textContent=drive?'A browser window opens for the Google sign-in. When it shows “Success! All done”, close it and come back to this window…':'Connecting…';$('#wsNext').disabled=true;
+      $('#wsConn').textContent=drive?'A browser window opens for the Google sign-in. When it shows “Signed in”, close it and come back to this window…':'Connecting…';$('#wsNext').disabled=true;
       const busy=m=>{$('#wsBusy').style.display='inline-flex';$('#wsBusyText').textContent=m||'Working…';$('#wsConn').textContent=m||''};busy(drive?'Signing in…':'Connecting…');
       let job;try{const j=await post('/api/rclone/connect',q);job=await waitJob(j.id,busy)}catch(e){job={state:'error',error:e.message}}
       $('#wsBusy').style.display='none';$('#wsNext').disabled=false;   // whatever happened, the user is never stuck on step 1

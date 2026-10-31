@@ -181,7 +181,8 @@ class DestCheckApiTests(SourceFixture):
         body = json.dumps({"kind": "drive", "name": "gdrive", "client_id": "123.apps.googleusercontent.com", "client_secret": "GOCSPX-x"}).encode()
         base = f"http://127.0.0.1:{self.srv.server_address[1]}/api/rclone/connect"
         from callido_restore.sources import rclone
-        with mock.patch.object(subprocess, "run", run), mock.patch.object(rclone, "forget") as forget, mock.patch.object(rclone, "fscache_clear") as clear:
+        with mock.patch.object(subprocess, "run", run), mock.patch.object(rclone, "forget") as forget, mock.patch.object(rclone, "fscache_clear") as clear, \
+             mock.patch.object(rclone, "authorize_drive", return_value='{"access_token":"t"}') as auth:
             with urlopen(Request(base, data=body, headers={"Content-Type": "application/json"})) as r: job = json.loads(r.read())
             for _ in range(50):
                 with urlopen(f"http://127.0.0.1:{self.srv.server_address[1]}/api/job?id={job['id']}") as r: j = json.loads(r.read())
@@ -191,6 +192,9 @@ class DestCheckApiTests(SourceFixture):
         create = [c for c in calls if c[1] == "config"][0]
         self.assertEqual(create[1:5], ["config", "create", "gdrive", "drive"])
         self.assertIn("client_id=123.apps.googleusercontent.com", create); self.assertIn("client_secret=GOCSPX-x", create)
+        self.assertIn('token={"access_token":"t"}', create); self.assertIn("--non-interactive", create)      # the token from the sign-in, no questions
+        self.assertEqual(auth.call_args[0][:2], ("123.apps.googleusercontent.com", "GOCSPX-x"))
+        self.assertTrue(str(auth.call_args[1]["template"]).endswith("static/oauth.html"))
         forget.assert_called_once(); clear.assert_called_once()
 
 

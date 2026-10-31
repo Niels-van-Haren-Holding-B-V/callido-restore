@@ -225,6 +225,59 @@ class CopyFile(unittest.TestCase):
         self.assertEqual(open(os.path.join(d, "out", "a.bin"), "rb").read(), b"z" * 100000); self.assertEqual(seen[-1], 100000)
 
 
+class _FakeAuthorize:
+    """A Popen stand-in for `rclone authorize`: the lines rclone prints, then an exit code."""
+    def __init__(self, lines, rc=0): self.stdout = iter(l + "\n" for l in lines); self.returncode = rc
+    def wait(self): return self.returncode
+    def kill(self): self.returncode = -9
+
+
+class Authorize(unittest.TestCase):
+    LINES = ['NOTICE: Make sure your Redirect URL is set to "http://127.0.0.1:53682/" in your custom config.',
+             "NOTICE: Please go to the following link: http://127.0.0.1:53682/auth?state=AbC123",
+             "NOTICE: Log in and authorize rclone for access", "NOTICE: Waiting for code...", "NOTICE: Got code",
+             "Paste the following into your remote machine --->", '{"access_token":"a","token_type":"Bearer","refresh_token":"r","expiry":"2026-12-31T00:00:00Z"}', "<---End paste"]
+
+    def test_opens_the_url_once_and_returns_the_token(self):
+        opened = []
+        with mock.patch.object(rc, "RCLONE", "/fake/rclone"), mock.patch.object(subprocess, "Popen", return_value=_FakeAuthorize(self.LINES)) as popen:
+            tok = rc.authorize_drive("id.apps.googleusercontent.com", "sec", on_url=opened.append, template="/tpl/oauth.html")
+        self.assertEqual(json.loads(tok)["refresh_token"], "r"); self.assertEqual(opened, ["http://127.0.0.1:53682/auth?state=AbC123"])
+        args = popen.call_args[0][0]
+        self.assertEqual(args[:5], ["/fake/rclone", "authorize", "drive", "id.apps.googleusercontent.com", "sec"])
+        self.assertIn("--auth-no-open-browser", args); self.assertEqual(args[args.index("--template") + 1], "/tpl/oauth.html")
+
+    def test_without_a_key_rclone_uses_its_own(self):
+        with mock.patch.object(rc, "RCLONE", "/fake/rclone"), mock.patch.object(subprocess, "Popen", return_value=_FakeAuthorize(self.LINES)) as popen:
+            rc.authorize_drive()
+        self.assertEqual(popen.call_args[0][0][:4], ["/fake/rclone", "authorize", "drive", "--auth-no-open-browser"])
+
+    def test_failure_raises_with_rclone_text(self):
+        lines = self.LINES[:4] + ["NOTICE: Fatal error: config failed to refresh token: Error: access_denied"]
+        with mock.patch.object(rc, "RCLONE", "/fake/rclone"), mock.patch.object(subprocess, "Popen", return_value=_FakeAuthorize(lines, rc=1)):
+            with self.assertRaises(rc.RcloneError) as cm: rc.authorize_drive(on_url=lambda u: None)
+        self.assertIn("access_denied", str(cm.exception))
+
+
+class ConfigCreate(unittest.TestCase):
+    def test_questions_are_answered_no_until_rclone_is_done(self):
+        states = ['{"State": "*oauth-confirm,teamdrive,oauth,", "Option": {"Name": "config_refresh_token"}}',
+                  '{"State": "teamdrive_ok", "Option": {"Name": "config_team_drive"}}', "{}"]
+        calls = []
+        def run(args, **kw):
+            calls.append(args); return subprocess.CompletedProcess(args, 0, stdout=states[len(calls) - 1], stderr="")
+        with mock.patch.object(rc, "RCLONE", "/fake/rclone"), mock.patch.object(subprocess, "run", run):
+            rc.config_create("gdrive", "drive", {"scope": "drive.readonly", "token": '{"a":1}', "client_id": "x"})
+        self.assertEqual(len(calls), 3)
+        self.assertEqual(calls[0][:5], ["/fake/rclone", "config", "create", "gdrive", "drive"]); self.assertIn("--non-interactive", calls[0]); self.assertIn('token={"a":1}', calls[0])
+        self.assertEqual(calls[1][-4:], ["--state", "*oauth-confirm,teamdrive,oauth,", "--result", "false"])
+        self.assertEqual(calls[2][-4:], ["--state", "teamdrive_ok", "--result", "false"])
+
+    def test_failure_raises(self):
+        with mock.patch.object(rc, "RCLONE", "/fake/rclone"), mock.patch.object(subprocess, "run", return_value=subprocess.CompletedProcess([], 1, stdout="", stderr="boom")):
+            with self.assertRaises(rc.RcloneError): rc.config_create("x", "drive", {})
+
+
 class FsCache(unittest.TestCase):
     def test_clear_only_when_the_daemon_runs(self):
         with mock.patch.object(type(rc.DAEMON), "running", new_callable=mock.PropertyMock, return_value=False), mock.patch.object(rc.DAEMON, "rc") as call:

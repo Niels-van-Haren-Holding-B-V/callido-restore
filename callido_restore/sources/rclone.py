@@ -4,7 +4,7 @@ daemon on a random 127.0.0.1 port with random credentials (no remote access, no 
 here uses it when it runs and otherwise falls back to the same ``rclone`` command line as before, so tests that mock
 ``subprocess.run`` and a machine where the daemon fails to start keep working. Downloads go through the daemon too (``copyfile``,
 an async job polled for bytes and speed); config changes still run as separate rclone processes, which share the config file."""
-import base64, json, os, secrets, socket, subprocess, threading, time, urllib.error, urllib.request
+import base64, json, os, re, secrets, socket, subprocess, threading, time, urllib.error, urllib.request
 from callido_restore import paths
 from callido_restore.paths import RCLONE
 
@@ -166,6 +166,57 @@ def forget(prefix=None):
     """Drop cached listings (all, or those whose path starts with ``prefix``) after a connection was added or a remote changed."""
     with _cache_lock:
         for k in [k for k in _cache if prefix is None or (isinstance(k, tuple) and str(k[1]).startswith(prefix))]: _cache.pop(k, None)
+
+
+AUTH_URL = re.compile(r"https?://127\.0\.0\.1:\d+/auth\?state=\S+")
+
+def authorize_drive(client_id="", client_secret="", on_url=None, template=None, timeout=600):
+    """Run the Google sign-in with ``rclone authorize`` and return the token JSON rclone prints. rclone listens on 127.0.0.1 for
+    Google's redirect and renders ``template`` (a Go HTML template, our own page instead of rclone's plain one) when it arrives;
+    the browser is not opened by rclone but by ``on_url(url)``, so the app decides how. Without a client id rclone's shared
+    one is used. Raises RcloneError with rclone's last lines when the sign-in fails or the user never completes it."""
+    args = [RCLONE, "authorize", "drive"]
+    if client_id: args += [client_id, client_secret or ""]
+    args.append("--auth-no-open-browser")
+    if template: args += ["--template", str(template)]
+    p = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, text=True)
+    lines, token, grab, opened = [], [], False, False
+    timer = threading.Timer(timeout, p.kill); timer.start()
+    try:
+        for line in p.stdout:
+            line = line.rstrip("\n"); lines.append(line)
+            if not opened:
+                m = AUTH_URL.search(line)
+                if m:
+                    opened = True
+                    if on_url: on_url(m.group(0))
+            if line.startswith("<---"): grab = False
+            if grab: token.append(line)
+            if line.endswith("--->"): grab = True
+        p.wait()
+    finally:
+        timer.cancel()
+    tok = "\n".join(token).strip()
+    if p.returncode != 0 or not tok:
+        tail = "\n".join(l for l in lines[-6:] if l.strip())
+        raise RcloneError(("the sign-in did not finish within %d s" % timeout) if p.returncode == -9 else (tail[-400:] or "rclone authorize failed"))
+    return tok
+
+
+def config_create(name, typ, params, timeout=120):
+    """``rclone config create`` without questions: the backend's remaining questions (for drive: replace the token? shared
+    drive?) are answered with their 'no' through rclone's --continue state machine, so no prompt and no browser ever appears."""
+    base = [RCLONE, "config", "create", name, typ, *[f"{k}={v}" for k, v in params.items()], "--non-interactive"]
+    state = None
+    for _ in range(10):
+        args = base if state is None else base + ["--continue", "--state", state, "--result", "false"]
+        r = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
+        if r.returncode != 0: raise RcloneError(r.stderr.strip()[-400:] or f"rclone config create {name} failed")
+        try: out = json.loads(r.stdout or "{}")
+        except ValueError: out = {}
+        state = (out.get("State") or "") if isinstance(out, dict) else ""
+        if not state: return
+    raise RcloneError(f"rclone config create {name}: too many questions")
 
 
 def fscache_clear():
