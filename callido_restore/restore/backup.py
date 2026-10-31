@@ -172,7 +172,7 @@ class Backup:
         if out.is_file(): return str(out)
         src = self.src.ensure(f"Config/@Share/{share}/{e['name']}", job)
         if not is_sqlite(src): raise RuntimeError(f"{e['name']} is not SQLite (encrypted?)")
-        job["message"] = "reading snapshot"; job["progress"] = 0.3
+        job["message"] = "reading the file list"; job["progress"] = 0.3
         con = sqlite3.connect(f"file:{src}?mode=ro", uri=True)
         rows = con.execute("""select hex(name_id_v2), hex(pname_id_v2), file_name, mtime_sec, ctime_sec, size, mode, status,
                                inode, off_virtual_file, dedup_id, version_id, cr_time, nlink from version_list""").fetchall()
@@ -191,7 +191,7 @@ class Backup:
                 base = f"{base}/{nm}" if base else nm
                 paths[x] = base
             return paths[i]
-        job["message"] = "resolving paths"; job["progress"] = 0.5
+        job["message"] = "resolving folder paths"; job["progress"] = 0.5
         tmp = out.with_suffix(".tmp")
         if tmp.exists(): tmp.unlink()
         db = sqlite3.connect(tmp)
@@ -235,7 +235,7 @@ class Backup:
                 db.executemany("insert or replace into files values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", batch); batch = []
                 job["progress"] = 0.5 + 0.4 * n / max(total, 1); job["message"] = f"indexing {n:,}/{total:,}"
         if batch: db.executemany("insert or replace into files values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", batch)
-        job["message"] = "creating indexes"; job["progress"] = 0.92
+        job["message"] = "creating the index"; job["progress"] = 0.92
         db.executescript("""
             create index f_path on files(path); create index f_dir on files(dir); create index f_mtime on files(mtime);
             create index f_ctime on files(ctime); create index f_status on files(status); create index f_name on files(name);
@@ -418,7 +418,7 @@ class Backup:
         if job.get("cancel"): return stopped("start")
         listing = pool_dir / "listing.json"
         if not listing.is_file():
-            job["message"] = "listing pool directories"; out = []
+            job["message"] = "listing the backup folders"; out = []
             dirs = sorted(int(n) for n, e in self.src.listdir("Pool/0").items() if e["dir"] and n.isdigit())
             for i, d in enumerate(dirs):
                 if job.get("cancel"): return stopped("listing")
@@ -430,18 +430,18 @@ class Backup:
             tmp.write_text(json.dumps(out)); os.replace(tmp, listing)
         if job.get("cancel"): return stopped("listing")
         if not all((pool_dir / f"runs_set{k}.bin").is_file() for k in (1, 2, 3, 4)):
-            job["message"] = "parsing chunk records (downloads the 4 file_chunk index sets if needed)"; job["progress"] = 0.1
+            job["message"] = "reading the file records (downloads the 4 record sets if needed)"; job["progress"] = 0.1
             def report(message, done, total):                    # bytes of the set's slices fetched so far: the UI shows speed
                 job["message"] = message; job["done_bytes"] = done; job["total_bytes"] = total
             pool.build_runs(self.src, str(pool_dir), log, cancelled=lambda: bool(job.get("cancel")),
                             progress=lambda f: job.__setitem__("progress", 0.1 + 0.2 * f), report=report)   # this phase spans 10-30 % of the job
         if job.get("cancel"): return stopped("chunk-records")
-        job["message"] = "collecting file sizes from loaded snapshots"; job["progress"] = 0.3
+        job["message"] = "collecting file sizes"; job["progress"] = 0.3
         dbs = [(str(p), "index") for p in self.src.index_dir.glob("*__*.sqlite")] + [(p, "raw") for p in self.raw_snapshots()]
         pool.build_recsizes(self.src, dbs, str(pool_dir), log, cancelled=lambda: bool(job.get("cancel")))
         if job.get("cancel"): return stopped("record-sizes")
         # The anchor-first mapper (T1) identifies records by the file tags of the raw snapshots: recmeta_set<s>.json.
-        job["message"] = "collecting file tags from loaded snapshots"; job["progress"] = 0.32
+        job["message"] = "collecting file tags"; job["progress"] = 0.32
         raw = [p for p, kind in dbs if kind == "raw"]
         if pool.build_recmeta(self.src, raw, str(pool_dir), log, cancelled=lambda: bool(job.get("cancel"))) is None: return stopped("record-tags")
         entries = json.loads(listing.read_text())
@@ -459,7 +459,7 @@ class Backup:
         # built above from the snapshots on this Mac): without any, the map would silently have no anchors at all.
         if not [p for p, kind in dbs if kind == "raw"]:
             raise RuntimeError("no snapshot database is on this computer yet: load the file list of at least one share for the chosen run (the chips above the tabs), then run the preparation again")
-        job["message"] = "mapping buckets to writers"; job["progress"] = 0.7
+        job["message"] = "building the map"; job["progress"] = 0.7
         def mlog(m):
             # The mapper's lines carry counters and stats for the log; the job shows a plain phrase (mapper_phase) and takes
             # its progress from the counters. The raw line stays on the job as "detail" (not shown, there for support).

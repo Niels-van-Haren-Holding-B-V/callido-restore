@@ -240,7 +240,7 @@ def _fetch_slices(st, keys, sizes, total, s, report, cancelled):
         if report is None: return
         with lock:
             done = min(total, finished + sum(inflight.values())); note = next((n for n in notes.values() if n), "")
-        report(f"downloading index set {s}/4 · {done / 1048576:,.0f} of {total / 1048576:,.0f} MB" + (f" · {note}" if note else ""), done, total)
+        report(f"downloading record set {s} of 4 · {done / 1048576:,.0f} of {total / 1048576:,.0f} MB" + (f" · {note}" if note else ""), done, total)
     def fetch(k):
         nonlocal finished
         def prog(b, speed, note):
@@ -279,10 +279,10 @@ def build_runs(source, outdir, log=print, cancelled=None, progress=None, report=
         names = st.names(); paths = []
         sizes = {n: (e.get("size") or 0) for n, e in source.listdir(st.reldir).items()} if report else {}
         total = sum(sizes.get(names[k], 0) for k in names)
-        if report: report(f"downloading index set {s}/4 · 0 of {total / 1048576:,.0f} MB", 0, total)
+        if report: report(f"downloading record set {s} of 4 · 0 of {total / 1048576:,.0f} MB", 0, total)
         try: paths = _fetch_slices(st, sorted(names), sizes, total, s, report, cancelled)
         except Cancelled: return None
-        if report: report(f"parsing index set {s}/4", total, total)
+        if report: report(f"reading record set {s} of 4", total, total)
         rec_off = array("q"); g0 = array("q"); ln = array("l"); nrec = 0; nrefs = 0
         def on_record(off, ids):
             nonlocal nrec, nrefs
