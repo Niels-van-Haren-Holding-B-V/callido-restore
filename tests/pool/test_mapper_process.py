@@ -67,11 +67,11 @@ class AnchorFirst(unittest.TestCase):
         calls = []; flags = {"guessed": set(), "aliased": set()}
         with mock.patch.object(poolmap2, "build_writers", return_value="W"), \
              mock.patch.object(anchor, "scan_anchors", return_value=("A", {0: 5, 1: 5, 2: 5})) as scan, \
-             mock.patch.object(place, "resolve_and_place_v3", return_value=({0: 1, 1: 2, 2: 0}, "P", {"placed": 3}, flags)) as placer, \
+             mock.patch.object(place, "resolve_and_place_v3", return_value=({0: 1, 2: 0}, "P", {"placed": 3}, flags)) as placer, \
              mock.patch.object(anchor, "export_map", side_effect=lambda *a, **k: calls.append(k)) as export:
             res, upto = poolmap.build_poolmap_anchor(Src(), out, log=lambda m: None)
-        self.assertEqual((res, upto), ({0: 1, 1: 2, 2: 0}, 3)); self.assertEqual(calls[0]["mapped_upto"], 3)
-        self.assertIs(calls[0]["flags"], flags); self.assertEqual(calls[0]["report"], {"placed": 3})
+        self.assertEqual((res, upto), ({0: 1, 2: 0}, 3)); self.assertEqual(calls[0]["mapped_upto"], 3)     # v3 ran over all 3 buckets: complete, one unowned
+        self.assertTrue(calls[0]["complete"]); self.assertIs(calls[0]["flags"], flags); self.assertEqual(calls[0]["report"], {"placed": 3})
         self.assertEqual(scan.call_args[0][:2], (scan.call_args[0][0], out)); placer.assert_called_once()
         index = placer.call_args[0][2]
         self.assertEqual((index.counts, index.revs, index.ubytes), ({0: 5, 1: 5, 2: 5}, {0: 2}, {0: 1234}))   # totals from anchors.json
@@ -80,10 +80,10 @@ class AnchorFirst(unittest.TestCase):
         from callido_restore.pool import anchor, poolmap2
         out = tempfile.mkdtemp(); json.dump([], open(os.path.join(out, "listing.json"), "w"))
         with mock.patch.object(poolmap2, "build_writers", return_value="W"), mock.patch.object(anchor, "scan_anchors", return_value=("A", {0: 5, 1: 5, 2: 5})), \
-             mock.patch.object(anchor, "resolve_and_place", return_value=({0: 1}, "P", {})) as v2, mock.patch.object(anchor, "export_map"), \
+             mock.patch.object(anchor, "resolve_and_place", return_value=({0: 1}, "P", {})) as v2, mock.patch.object(anchor, "export_map") as export, \
              mock.patch.dict(os.environ, {"HBK_PLACER": "v2"}):
             self.assertEqual(poolmap.build_poolmap_anchor(Src(), out, log=lambda m: None)[1], 1)       # partial owner set: partial map
-        v2.assert_called_once()
+        v2.assert_called_once(); self.assertFalse(export.call_args[1]["complete"])
 
     def test_build_map_picks_v1_only_on_request(self):
         with mock.patch.object(poolmap, "build_poolmap_anchor", return_value=({}, 0)) as a, mock.patch.object(poolmap, "build_poolmap", return_value=({}, 0)) as v1:
