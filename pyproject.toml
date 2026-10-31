@@ -5,6 +5,7 @@ description = "Browse a Synology Hyper Backup (.hbk) on a timeline and restore f
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "MIT" }
+authors = [{ name = "Callido B.V." }]
 dependencies = ["lz4", "pywebview"]
 
 [project.scripts]
