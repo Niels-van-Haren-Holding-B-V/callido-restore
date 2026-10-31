@@ -1,5 +1,16 @@
 **Callido Restore** restores files from a Synology Hyper Backup (`.hbk`) without Hyper Backup or a working NAS. It reads the backup's own metadata, shows every backup run on a timeline, and restores the folders you pick to a NAS share or a local folder. Files already at the destination are never overwritten or deleted, and the backup source is only read.
 
+## What's new in 0.4.1
+
+- **Connecting a NAS over SMB tells you what is happening and what went wrong.** While it connects you see "Saving the connection to nas… 3 s" and "Listing the shares on nas… 12 s"; when it works, "Connected to nas: · 3 shares: …" stays on screen. A NAS that does not answer fails within about 20 seconds instead of minutes, with a plain reason: the name is not found (use the IP address), SMB is off in DSM, the user or password is wrong, there is no network route, or the address is not on your local network ("Did you mean 192.168.…?" for a mistyped address) (#138, #139, #141, #143).
+- The NAS address can be typed the way Windows and Finder show it: `\\nas`, `\\nas\share`, `smb://nas/share`, or with a port (`nas:445`) (#138, #139).
+- **Faster listings**: one connection per NAS or Drive is reused instead of a new one per folder, and a slow answer no longer restarts rclone (#135).
+- `app.log` now records every failed task and each step of a NAS connection with how long it took (never the password) (#141).
+- Restore step 4 is clearer: the one-time preparation shows as one line, Start can be pressed while it runs (the restore is queued and starts by itself), and shares whose file list is not loaded yet say so and load only those when ticked (#123, #125, #132, #140, #144).
+- The preparation and the file-list loading speak plain words ("reading the file records", "resolving duplicate files") instead of log lines (#126, #137).
+- The pool map places more files correctly: fixes found by the new end-to-end tests on a synthetic backup (copies, rotated bucket ids, large files) (#118, #122, #127, #136, #145). The restore report keeps its error and unverified counts across pause and resume, and an identical copy is checked like its original (#119, #120, #121).
+- Copyright holder is Callido B.V.; the README and release page cover Windows (#129, #133, #134, #146, #147, #148).
+
 ## What's new in 0.4.0
 
 - **Windows 10 and 11.** Callido Restore now comes as a Windows installer, `CallidoRestore-x64.msi`, next to the two Mac disk images. It installs to Program Files with a Start menu and desktop shortcut, opens in its own window (Microsoft Edge WebView2, built into Windows 11 and current Windows 10), and can be removed under Settings → Apps. Your settings and downloaded backup data are kept on uninstall (#108).
