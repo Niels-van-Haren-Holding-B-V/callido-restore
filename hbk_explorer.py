@@ -190,6 +190,11 @@ def list_destination(dest):
     return {e["Path"] for e in json.loads(r.stdout or "[]")}
 
 JOBS = {}
+JOB_ID = re.compile(r"^[0-9a-f-]{8,64}$")          # job ids are uuid4 hex (10 chars); the id names a file under JOBS_DIR, so nothing else may pass
+def job_file(jid):
+    """Path of a persisted restore job, or None when the id is not a job id (never a path)."""
+    return JOBS_DIR / f"{jid}.json" if isinstance(jid, str) and JOB_ID.match(jid) else None
+
 def start_job(fn, label):
     jid = uuid.uuid4().hex[:10]
     job = {"id": jid, "label": label, "state": "running", "progress": 0.0, "message": "starting", "result": None, "error": None, "started": time.time()}
@@ -1167,11 +1172,14 @@ class H(BaseHTTPRequestHandler):
                 if err: return self._json({"error": err}, 400)
                 return self._json(start_job(lambda job: b.restore(items, dest, job, body.get("skip_meta", True)), "restore"))
             if u.path == "/api/restore/resume":
-                d = json.loads((JOBS_DIR / f"{body['id']}.json").read_text()); b = backup_for(d["src"])
-                err = restore_target_error(b.src, d["items"], d.get("dest") or "", create=False)     # source check again, roots still there
-                if err: return self._json({"error": err}, 400)                                       # the job file stays, so it can be resumed later
-                (JOBS_DIR / f"{body['id']}.json").unlink()
-                job = start_job(lambda job: b.restore(d["items"], d["dest"], job, d.get("skip_meta", True), start_at=d.get("next_index", 0)), "restore (resumed)")
+                jf = job_file(body.get("id"))
+                if jf is None: return self._json({"error": "not a job id"}, 400)
+                if not jf.is_file(): return self._json({"error": "no such saved job"}, 404)
+                d = json.loads(jf.read_text()); b = backup_for(d["src"]); dest = d.get("dest") or ""
+                err = restore_target_error(b.src, d["items"], dest, create=False)     # source check again, roots still there
+                if err: return self._json({"error": err}, 400)                        # the job file stays, so it can be resumed later
+                jf.unlink()
+                job = start_job(lambda job: b.restore(d["items"], dest, job, d.get("skip_meta", True), start_at=d.get("next_index", 0)), "restore (resumed)")
                 return self._json(job)
             if u.path == "/api/sources/delete":
                 SOURCES.pop(body["id"], None); BACKUPS.pop(body["id"], None); save_sources(); return self._json({"ok": True})
