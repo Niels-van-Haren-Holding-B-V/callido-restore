@@ -558,8 +558,8 @@ async function prepRunAgain(){try{await api('/api/pool/build',{src:S.src})}catch
 async function prepResume(){try{await post('/api/pool/resume',{src:S.src})}catch(e){try{localStorage.removeItem('prepPaused:'+S.src);await api('/api/pool/build',{src:S.src})}catch(e2){toastError(e2)}}}
 // What a finished preparation can restore (placer v3): the bucket counts are not progress (a bucket is "owned" only when a verified
 // file covers it), so the sentence uses the data coverage and the files located; loading more shares or runs is what raises it.
-function coverageText(pool){if(!pool)return '';const pct=pool.bytes_pct==null?null:(pool.bytes_pct<=1?pool.bytes_pct*100:pool.bytes_pct);const parts=[];
-  if(pct!=null)parts.push(`${Math.round(pct)} % of the data can be restored`);if(pool.records_placed!=null&&pool.records_total)parts.push(`${pool.records_placed.toLocaleString()} of ${pool.records_total.toLocaleString()} files located`);
+function coverageText(pool){if(!pool)return '';const parts=[];                     // bytes_pct is a percentage, 0-100 (agreed with hbk-1)
+  if(pool.bytes_pct!=null)parts.push(`${Math.round(pool.bytes_pct)} % of the data can be restored`);if(pool.records_placed!=null&&pool.records_total)parts.push(`${pool.records_placed.toLocaleString()} of ${pool.records_total.toLocaleString()} files located`);
   return parts.join(' · ')}
 function prepPillRender(st){const pill=$('#prepPill');if(!pill)return;if(!st||st.error||st.complete||(!st.running&&!st.paused)){pill.style.display='none';return}
   pill.style.display='inline-flex';$('#prepSpin').style.display=st.running?'':'none';const b=$('#prepBtn');
@@ -600,7 +600,8 @@ async function tabRestore(){const el=$('#tab-restore');
   // job's own progress is shown; the buttons come back when the job ends (pollJob's done callback re-renders this tab).
   let jobs=[];try{jobs=(await api('/api/jobs')).filter(j=>j.state==='running')}catch(e){}S.jobs=jobs;
   const running=pre=>jobs.find(j=>j.label.startsWith(pre));const poolRun=prep.job||(prep.running?{id:prep.running}:null),restoreRun=running('restore');
-  const mapped=prep.mapped,total=prep.total;const pct=total?Math.round(100*mapped/total):0;const mapOk=prep.complete;
+  const mapped=prep.mapped,total=prep.total;const mapOk=prep.complete;
+  const pct=pool.index_bytes?Math.round(100*Math.min(1,(pool.index_bytes_local||0)/pool.index_bytes)):0;   // the bar of an unfinished preparation shows the index download, not bucket counts
   const v=S.info.versions.find(x=>x.id===S.ver);const latest=S.info.versions[S.info.versions.length-1];
   const basketV=S.basket.length?S.basket[0].ver:S.ver;
   const idxFiles=pool.index_files||0, idxLocal=pool.indexes_local||0;
