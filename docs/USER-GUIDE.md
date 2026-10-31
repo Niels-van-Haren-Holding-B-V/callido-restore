@@ -46,4 +46,4 @@ Getting one is free and takes about five minutes (the same steps are in the app,
    name, so your backups and everything already downloaded stay; you sign in to Google once more.
 
 The key identifies the app towards Google and gives nobody access to your Drive. It is stored in rclone's configuration on this
-Mac together with the sign-in token.
+computer together with the sign-in token.
