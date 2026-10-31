@@ -213,7 +213,7 @@ class H(BaseHTTPRequestHandler):
                                       if kind == "drive" else "Connecting…")
                     r = subprocess.run(args, capture_output=True, text=True, timeout=600)
                     if r.returncode != 0: raise RuntimeError(r.stderr.strip()[-400:] or "rclone config failed")
-                    rclone.forget()                                             # a new connection: cached listings are stale
+                    rclone.forget(); rclone.fscache_clear()                     # new or changed connection: cached listings and backends are stale
                     job["message"] = "Listing your Drive…" if kind == "drive" else "Listing the shares…"     # the root listing can take a while
                     try: shares = [e["Name"] for e in rclone.ls(f"{name}:", dirs_only=True, timeout=60)]
                     except rclone.RcloneError as e: raise RuntimeError("remote created but listing failed: " + str(e)[-300:])

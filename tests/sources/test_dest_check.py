@@ -169,6 +169,30 @@ class DestCheckApiTests(SourceFixture):
         except HTTPError as e:
             self.assertEqual(e.code, 405)
 
+    def test_connect_drive_with_own_key_recreates_the_remote_and_clears_the_daemon_caches(self):
+        """A Google key typed for an existing connection re-creates that remote under the same name with client id and secret
+        (rclone config create replaces an existing section and runs the sign-in); the daemon's listing cache and backend cache
+        are dropped so the next call uses the new key."""
+        calls = []
+        def run(args, **kw):
+            calls.append(args)
+            if args[1] == "config": return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+            return subprocess.CompletedProcess(args, 0, stdout=json.dumps([{"Name": "Synology"}]), stderr="")
+        body = json.dumps({"kind": "drive", "name": "gdrive", "client_id": "123.apps.googleusercontent.com", "client_secret": "GOCSPX-x"}).encode()
+        base = f"http://127.0.0.1:{self.srv.server_address[1]}/api/rclone/connect"
+        from callido_restore.sources import rclone
+        with mock.patch.object(subprocess, "run", run), mock.patch.object(rclone, "forget") as forget, mock.patch.object(rclone, "fscache_clear") as clear:
+            with urlopen(Request(base, data=body, headers={"Content-Type": "application/json"})) as r: job = json.loads(r.read())
+            for _ in range(50):
+                with urlopen(f"http://127.0.0.1:{self.srv.server_address[1]}/api/job?id={job['id']}") as r: j = json.loads(r.read())
+                if j["state"] != "running": break
+                time.sleep(0.05)
+        self.assertEqual(j["state"], "done", j); self.assertEqual(j["result"], {"remote": "gdrive:", "shares": ["Synology"]})
+        create = [c for c in calls if c[1] == "config"][0]
+        self.assertEqual(create[1:5], ["config", "create", "gdrive", "drive"])
+        self.assertIn("client_id=123.apps.googleusercontent.com", create); self.assertIn("client_secret=GOCSPX-x", create)
+        forget.assert_called_once(); clear.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()

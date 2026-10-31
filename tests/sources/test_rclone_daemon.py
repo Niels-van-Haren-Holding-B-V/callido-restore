@@ -225,6 +225,14 @@ class CopyFile(unittest.TestCase):
         self.assertEqual(open(os.path.join(d, "out", "a.bin"), "rb").read(), b"z" * 100000); self.assertEqual(seen[-1], 100000)
 
 
+class FsCache(unittest.TestCase):
+    def test_clear_only_when_the_daemon_runs(self):
+        with mock.patch.object(type(rc.DAEMON), "running", new_callable=mock.PropertyMock, return_value=False), mock.patch.object(rc.DAEMON, "rc") as call:
+            rc.fscache_clear(); call.assert_not_called()
+        with mock.patch.object(type(rc.DAEMON), "running", new_callable=mock.PropertyMock, return_value=True), mock.patch.object(rc.DAEMON, "rc") as call:
+            rc.fscache_clear(); call.assert_called_once_with("fscache/clear")
+
+
 class StartFlags(unittest.TestCase):
     """The daemon runs with the same Drive throttling as the one-process fallback: four slice downloads at a time without a
     transactions-per-second cap hit Google's rate limit."""

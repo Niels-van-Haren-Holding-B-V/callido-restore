@@ -168,6 +168,14 @@ def forget(prefix=None):
         for k in [k for k in _cache if prefix is None or (isinstance(k, tuple) and str(k[1]).startswith(prefix))]: _cache.pop(k, None)
 
 
+def fscache_clear():
+    """Drop the daemon's cached backends. After a connection's config changed (a new Google key, a new token) every later call
+    must open the remote afresh; otherwise the daemon keeps using the backend it built with the old settings."""
+    if not DAEMON.running: return
+    try: DAEMON.rc("fscache/clear")
+    except RcloneError: pass
+
+
 def start_in_background():
     """Start the daemon without blocking the caller (the app does this right after its server is up)."""
     threading.Thread(target=DAEMON.start, daemon=True, name="rclone-rcd").start()

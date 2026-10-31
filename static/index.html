@@ -196,12 +196,32 @@ footer.madeBy img{width:18px;height:18px;border-radius:5px;vertical-align:middle
     <p>Where is the Hyper Backup (<code>.hbk</code>) folder?</p>
     <div class="row" style="flex-direction:column;align-items:flex-start;gap:6px">
       <label><input type="radio" name="wsk" value="existing" checked> a connection I already set up: <select id="wsRem"></select></label>
+      <details class="adv" id="wsKeyEx" style="margin:0 0 4px 22px"><summary>Downloads slow? Give this Google Drive connection a key of your own</summary>
+        <p class="help" style="margin:4px 0 6px"><b>Why a key of your own makes downloads faster.</b> Google does not limit how fast you download, it limits how many <i>requests</i> an app may make per second. Without a key of your own this app signs in through the public key of rclone, which every rclone user in the world shares, so Google slows it down. A backup is tens of thousands of small index files, one request each: that is what turns the one-time preparation into hours. With your own key (free, about five minutes) the limit is yours alone, and the Google sign-in screen shows your own project name instead of “rclone”.</p>
+        <label class="f">Google client id <input id="wsCidEx" placeholder="xxxxx.apps.googleusercontent.com"></label>
+        <label class="f">client secret <input id="wsCsecEx" type="password"></label>
+        <details class="adv"><summary>How to get a key (about five minutes, free)</summary><ol class="help" style="margin:6px 0 0 18px;padding:0">
+          <li>Open <a href="https://console.cloud.google.com/" target="_blank" rel="noopener">console.cloud.google.com</a> with the Google account that holds the backup and create a project (any name, e.g. “Callido Restore”).</li>
+          <li><i>APIs &amp; Services → Library</i>: search “Google Drive API” and click <i>Enable</i>.</li>
+          <li><i>APIs &amp; Services → OAuth consent screen</i>: user type <i>External</i>, app name “Callido Restore”, your e-mail as support and developer contact. Under <i>Test users</i> add your own Google account (the app stays in testing mode, that is fine for one user).</li>
+          <li><i>APIs &amp; Services → Credentials → Create credentials → OAuth client ID</i>, application type <i>Desktop app</i>.</li>
+          <li>Copy the <b>Client ID</b> (ends in <code>.apps.googleusercontent.com</code>) and the <b>Client secret</b> into the fields here.</li></ol>
+          <p class="help">The key only identifies this app towards Google; it gives nobody access to your Drive. It is stored in rclone's configuration on this Mac together with the sign-in token.</p></details>
+        <p class="help"><b>Next</b> signs you in to Google once more, now with your key. The connection keeps its name, so your backups and everything already downloaded stay as they are.</p></details>
       <label><input type="radio" name="wsk" value="drive"> Google Drive — connect now (a browser window opens for the Google sign-in)</label>
       <div id="wsDrive" style="display:none;margin-left:22px"><p class="help">Only read access to your Drive is requested. A browser window opens for the Google sign-in; when it shows “Success! All done”, close it and come back to this window: the app continues by itself.</p>
-        <details class="adv"><summary>Advanced</summary><label class="f">connection name <input id="wsDName" value="gdrive"></label>
-        <label class="f">your own Google OAuth client id (optional, recommended: avoids the shared rate limit) <input id="wsCid" placeholder="xxxxx.apps.googleusercontent.com"></label>
+        <p style="margin:8px 0 2px;font-size:13px"><b>Your own Google key</b> <span class="help">optional · recommended for speed · can be added later</span></p>
+        <p class="help" style="margin:4px 0 6px"><b>Why a key of your own makes downloads faster.</b> Google does not limit how fast you download, it limits how many <i>requests</i> an app may make per second. Without a key of your own this app signs in through the public key of rclone, which every rclone user in the world shares, so Google slows it down. A backup is tens of thousands of small index files, one request each: that is what turns the one-time preparation into hours. With your own key (free, about five minutes) the limit is yours alone, and the Google sign-in screen shows your own project name instead of “rclone”.</p>
+        <label class="f">Google client id <input id="wsCid" placeholder="xxxxx.apps.googleusercontent.com"></label>
         <label class="f">client secret <input id="wsCsec" type="password"></label>
-        <p class="help">How to get one: console.cloud.google.com → APIs &amp; Services → enable “Google Drive API” → Credentials → “OAuth client ID”, type <i>Desktop app</i>. Copy id and secret here.</p></details></div>
+        <details class="adv"><summary>How to get a key (about five minutes, free)</summary><ol class="help" style="margin:6px 0 0 18px;padding:0">
+          <li>Open <a href="https://console.cloud.google.com/" target="_blank" rel="noopener">console.cloud.google.com</a> with the Google account that holds the backup and create a project (any name, e.g. “Callido Restore”).</li>
+          <li><i>APIs &amp; Services → Library</i>: search “Google Drive API” and click <i>Enable</i>.</li>
+          <li><i>APIs &amp; Services → OAuth consent screen</i>: user type <i>External</i>, app name “Callido Restore”, your e-mail as support and developer contact. Under <i>Test users</i> add your own Google account (the app stays in testing mode, that is fine for one user).</li>
+          <li><i>APIs &amp; Services → Credentials → Create credentials → OAuth client ID</i>, application type <i>Desktop app</i>.</li>
+          <li>Copy the <b>Client ID</b> (ends in <code>.apps.googleusercontent.com</code>) and the <b>Client secret</b> into the fields here.</li></ol>
+          <p class="help">The key only identifies this app towards Google; it gives nobody access to your Drive. It is stored in rclone's configuration on this Mac together with the sign-in token.</p></details>
+        <details class="adv"><summary>Advanced</summary><label class="f">connection name <input id="wsDName" value="gdrive"></label></details></div>
       <label><input type="radio" name="wsk" value="smb"> a NAS share over SMB — connect now</label>
       <div id="wsSmb" style="display:none;margin-left:22px"><label class="f">connection name <input id="wsSName" value="nas"></label><label class="f">host (IP or name) <input id="wsHost"></label><label class="f">user <input id="wsUser"></label><label class="f">password <input id="wsPass" type="password"></label></div>
       <label><input type="radio" name="wsk" value="local"> a folder on this Mac / a mounted disk</label>
@@ -689,16 +709,21 @@ async function wsList(){if(WS.busy)return;WS.busy=true;const lst=$('#wsList');ls
 $('#wsUp').onclick=()=>{if(WS.busy)return;const p=WS.path.replace(/\/$/,'');WS.path=p.includes('/')?p.slice(0,p.lastIndexOf('/')):(WS.remote?'':'/');wsList()};$('#wsGoPath').onclick=()=>{if(WS.busy)return;WS.path=$('#wsPath').value;wsList()};
 $('#wsNext').onclick=async()=>{
   if(WS.step===1){const k=WS.kind;
-    if(k==='existing'){WS.remote=$('#wsRem').value;if(!WS.remote){toast('Choose a connection first.',{kind:'warn'});return}WS.path=''}
+    // An existing connection with a key typed under it is re-created under the same name with that key (a new Google sign-in).
+    const rekey=k==='existing'&&$('#wsCidEx').value.trim();const drive=k==='drive'||!!rekey;
+    if(k==='existing'&&!$('#wsRem').value){toast('Choose a connection first.',{kind:'warn'});return}
+    if(rekey&&!$('#wsCsecEx').value.trim()){toast('Enter the client secret that belongs to the client id.',{kind:'warn'});return}
+    if(k==='existing'&&!rekey){WS.remote=$('#wsRem').value;WS.path=''}
     else if(k==='local'){WS.remote='';WS.path='~'}
-    else{const q=k==='drive'?{kind:'drive',name:$('#wsDName').value,client_id:$('#wsCid').value.trim(),client_secret:$('#wsCsec').value.trim()}:{kind:'smb',name:$('#wsSName').value,host:$('#wsHost').value.trim(),user:$('#wsUser').value.trim(),password:$('#wsPass').value};
-      $('#wsConn').textContent=k==='drive'?'A browser window opens for the Google sign-in. When it shows “Success! All done”, close it and come back to this window…':'Connecting…';$('#wsNext').disabled=true;
-      const busy=m=>{$('#wsBusy').style.display='inline-flex';$('#wsBusyText').textContent=m||'Working…';$('#wsConn').textContent=m||''};busy(k==='drive'?'Signing in…':'Connecting…');
+    else{const q=rekey?{kind:'drive',name:$('#wsRem').value.replace(/:$/,''),client_id:$('#wsCidEx').value.trim(),client_secret:$('#wsCsecEx').value.trim()}
+        :k==='drive'?{kind:'drive',name:$('#wsDName').value,client_id:$('#wsCid').value.trim(),client_secret:$('#wsCsec').value.trim()}:{kind:'smb',name:$('#wsSName').value,host:$('#wsHost').value.trim(),user:$('#wsUser').value.trim(),password:$('#wsPass').value};
+      $('#wsConn').textContent=drive?'A browser window opens for the Google sign-in. When it shows “Success! All done”, close it and come back to this window…':'Connecting…';$('#wsNext').disabled=true;
+      const busy=m=>{$('#wsBusy').style.display='inline-flex';$('#wsBusyText').textContent=m||'Working…';$('#wsConn').textContent=m||''};busy(drive?'Signing in…':'Connecting…');
       let job;try{const j=await post('/api/rclone/connect',q);job=await waitJob(j.id,busy)}catch(e){job={state:'error',error:e.message}}
       $('#wsBusy').style.display='none';$('#wsNext').disabled=false;   // whatever happened, the user is never stuck on step 1
       try{if(job.state==='error'){$('#wsConn').textContent='Failed: '+job.error;return}
         WS.remote=job.result.remote;WS.path='';const sel=$('#wsRem');if(![...sel.options].some(o=>o.value===WS.remote))sel.add(new Option(WS.remote,WS.remote));sel.value=WS.remote;   // the new connection is the selected one from now on
-        $('#wsConn').textContent='Connected: '+WS.remote+' — now pick the backup folder on it.'}catch(e){$('#wsConn').textContent=e.message;$('#wsNext').disabled=false;return}
+        $('#wsConn').textContent=(rekey?'Signed in again with your own key: ':'Connected: ')+WS.remote+' — now pick the backup folder on it.';if(rekey){$('#wsCidEx').value='';$('#wsCsecEx').value='';$('#wsKeyEx').open=false}}catch(e){$('#wsConn').textContent=e.message;$('#wsNext').disabled=false;return}
       $('#wsNext').disabled=false}
     WS.step=2;wsShow();wsList();return}
   if(WS.step===2){if(WS.busy)return;$('#wsBusy').style.display='inline-flex';$('#wsBusyText').textContent='Checking the folder…';$('#wsNext').disabled=true;
