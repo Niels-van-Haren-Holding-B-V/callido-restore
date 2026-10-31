@@ -26,7 +26,8 @@ class AppFlow(unittest.TestCase):
     def setUpClass(cls):
         cls.work = Path(tempfile.mkdtemp(prefix="hbk-e2e-app-")); cls.home = cls.work / "home"; cls.home.mkdir()
         cls.hbk = cls.work / "backups" / "e2e_1.hbk"
-        cls.m = hbkgen.build(str(cls.hbk), scale=float(os.environ.get("HBK_E2E_SCALE", "6")), bucket_cap=1 << 20)
+        cls.ci = os.environ.get("HBK_E2E_CHUNK_INDEX") == "1"      # the backup carries its own chunk table (Pool/chunk_index)
+        cls.m = hbkgen.build(str(cls.hbk), scale=float(os.environ.get("HBK_E2E_SCALE", "6")), bucket_cap=1 << 20, chunk_index=cls.ci)
         port = int(os.environ.get("HBK_SMOKE_PORT") or free_port())
         if port == 8765: raise unittest.SkipTest("refusing port 8765: that is the user's running app")
         cls.base = f"http://127.0.0.1:{port}"
@@ -93,7 +94,9 @@ class AppFlow(unittest.TestCase):
             self.assertEqual(cm.exception.code, 400, bad); self.assertIn("error", json.loads(cm.exception.read()))
         st = self.get("/api/pool", src=src); self.assertTrue(st["running"] or st["complete"], f"preparation did not start: {st}")
         if st["running"]: pj = self.wait_job(st["running"], timeout=600); self.assertEqual(pj["state"], "done", pj.get("error") or pj)
-        st = self.get("/api/pool", src=src); self.assertTrue(st["complete"] and st["map"], st)
+        st = self.get("/api/pool", src=src)
+        if self.ci: self.assertTrue(st["complete"] and st.get("chunk_index"), st)             # no map needed: the table locates every chunk
+        else: self.assertTrue(st["complete"] and st["map"], st)
         kids = self.get("/api/children", src=src, share="Documents", ver=ver, dir="")
         self.assertIn("Finance", [k["name"] for k in kids])
         S["ready"] = True
