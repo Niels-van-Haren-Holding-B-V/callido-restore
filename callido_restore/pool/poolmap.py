@@ -281,7 +281,8 @@ def _ps_commands():
 
 def kill_orphan_helpers():
     """At app start: mapper children and scan workers of a crashed or killed app (the app binary with --mapper or
-    --scan-worker, parent gone) are ended, so they stop burning CPU. Returns the number ended."""
+    --scan-worker, parent gone) are ended, so they stop burning CPU. Returns the number ended.
+    Windows: a deliberate no-op for now (``_ps_commands`` returns []). Follow-up in docs/TASKS.md T14."""
     import signal
     from callido_restore.about import APP_NAME
     marker = f"{APP_NAME}.app/Contents/MacOS/{APP_NAME} --"

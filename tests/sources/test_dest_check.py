@@ -47,8 +47,9 @@ class ContainsDestTests(SourceFixture):
     def test_local_written_roots(self):
         c = self.src.contains_dest
         parent = os.path.dirname(self.local)                                       # .../mirror, which holds backup_1.hbk
-        self.assertEqual(c(parent, ["backup_1.hbk"]), os.path.join(parent, "backup_1.hbk"))      # would write into the backup
-        self.assertEqual(c(os.path.dirname(parent), ["mirror"]), os.path.join(self.tmp.name, "mirror"))   # the backup lies inside the written root
+        n = os.path.normpath                                                        # Windows reports these with forward slashes
+        self.assertEqual(n(c(parent, ["backup_1.hbk"])), os.path.join(parent, "backup_1.hbk"))      # would write into the backup
+        self.assertEqual(n(c(os.path.dirname(parent), ["mirror"])), os.path.join(self.tmp.name, "mirror"))   # the backup lies inside the written root
         self.assertEqual(c(parent, ["homes", "Photos"]), "")                  # siblings of the backup are fine
         self.assertEqual(c(os.path.join(self.tmp.name, "restore"), ["homes"]), "")
 

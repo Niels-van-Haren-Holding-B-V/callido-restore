@@ -154,7 +154,8 @@ def kill_orphans():
     """Stop rclone processes of this app that outlived it: processes whose executable is the bundled rclone
     (``<app>.app/Contents/Frameworks/rclone``, any install location) and whose parent is gone (re-parented to pid 1). A crashed app leaves its daemon and the copy it was running
     behind; they keep using the user's Google Drive quota, so the live app's downloads crawl. Processes with a living parent
-    (another running copy of the app) and rclone binaries from elsewhere are never touched. Returns the number stopped."""
+    (another running copy of the app) and rclone binaries from elsewhere are never touched. Returns the number stopped.
+    Windows: a deliberate no-op for now (``_ps`` returns [] there; ppid 1 has no meaning). Follow-up in docs/TASKS.md T14."""
     marker = f"/{APP_NAME}.app/Contents/Frameworks/rclone"
     stopped = 0
     for pid, ppid, exe in _ps():

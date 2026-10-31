@@ -198,7 +198,7 @@ footer.madeBy img{width:18px;height:18px;border-radius:5px;vertical-align:middle
           <li><i>APIs &amp; Services → OAuth consent screen</i>: user type <i>External</i>, app name “Callido Restore”, your e-mail as support and developer contact. Under <i>Test users</i> add your own Google account (the app stays in testing mode, that is fine for one user).</li>
           <li><i>APIs &amp; Services → Credentials → Create credentials → OAuth client ID</i>, application type <i>Desktop app</i>.</li>
           <li>Copy the <b>Client ID</b> (ends in <code>.apps.googleusercontent.com</code>) and the <b>Client secret</b> into the fields here.</li></ol>
-          <p class="help">The key only identifies this app towards Google; it gives nobody access to your Drive. It is stored in rclone's configuration on this Mac together with the sign-in token.</p></details></template>
+          <p class="help">The key only identifies this app towards Google; it gives nobody access to your Drive. It is stored in rclone's configuration on this computer together with the sign-in token.</p></details></template>
 <dialog id="dlgSrc" style="min-width:640px">
   <h3>Add a backup <span id="wzS" class="help">step 1 of 3</span></h3>
   <div id="ws1">
@@ -222,7 +222,7 @@ footer.madeBy img{width:18px;height:18px;border-radius:5px;vertical-align:middle
         <details class="adv"><summary>Advanced</summary><label class="f">connection name <input id="wsDName" value="gdrive"></label></details></div>
       <label><input type="radio" name="wsk" value="smb"> a NAS share over SMB — connect now</label>
       <div id="wsSmb" style="display:none;margin-left:22px"><label class="f">connection name <input id="wsSName" value="nas"></label><label class="f">host (IP or name) <input id="wsHost"></label><label class="f">user <input id="wsUser"></label><label class="f">password <input id="wsPass" type="password"></label></div>
-      <label><input type="radio" name="wsk" value="local"> a folder on this Mac / a mounted disk</label>
+      <label><input type="radio" name="wsk" value="local"> a folder on this computer / a mounted disk</label>
     </div>
     <div id="wsConn" class="status" style="margin-top:6px"></div>
   </div>
@@ -234,7 +234,7 @@ footer.madeBy img{width:18px;height:18px;border-radius:5px;vertical-align:middle
   </div>
   <div id="ws3" style="display:none">
     <label class="f">Name for this backup <input id="nName"></label>
-    <details class="adv"><summary>Advanced</summary><label class="f">Local cache folder on this Mac (metadata and temporarily fetched bucket data land here) <input id="nLocal"></label></details>
+    <details class="adv"><summary>Advanced</summary><label class="f">Local cache folder on this computer (metadata and temporarily fetched bucket data land here) <input id="nLocal"></label></details>
     <p class="help" id="wsSummary"></p>
   </div>
   <div class="row" style="justify-content:flex-end;margin-top:10px"><span id="wsBusy" class="muted" style="display:none;align-items:center;gap:8px"><span class="spin"></span><span id="wsBusyText">Signing in…</span></span><button id="nCancel" class="ghost">Cancel</button><button id="wsBack" style="display:none">Back</button><button id="wsNext" class="primary">Next</button></div>
@@ -625,7 +625,7 @@ async function tabRestore(){const el=$('#tab-restore');
        <p class="help" style="margin:4px 0 0">The app never deletes anything on the NAS. It creates the target folder and writes the restored files; a target inside the backup itself is refused.</p>
      </details>
      <details class="adv"><summary>Advanced: everything under one folder</summary><div class="row"><label><input type="checkbox" id="wzOne"> put all selected folders under one folder, as <code>&lt;folder&gt;/&lt;share&gt;/&lt;path&gt;</code></label><input id="wzOnePath" placeholder="nas:Restore/restore-${S.ver} or ${LOCAL_EG}/Restore/restore-${S.ver}" style="width:380px"></div></details>
-     <details class="adv"><summary>How the data flows</summary><p class="help">Google Drive → this Mac (decompress and verify) → NAS. The Drive download speed is the limit; data blocks are fetched 4 in parallel ahead of the writer and deleted from the Mac after use (cache ≤ 20 GB).</p></details>`,false)+
+     <details class="adv"><summary>How the data flows</summary><p class="help">Google Drive → this computer (decompress and verify) → NAS. The Drive download speed is the limit; data blocks are fetched 4 in parallel ahead of the writer and deleted from the Mac after use (cache ≤ 20 GB).</p></details>`,false)+
   step(4,'Check and start',`<div class="row"><button class="small" id="rsPlan">Count files and size</button><button class="${S.basket.length&&mapOk&&!restoreRun?'primary':''}" id="rsGo" ${S.basket.length&&mapOk&&!restoreRun?'':'disabled'}>${restoreRun?'Restoring…':mapOk?'Start restore':poolRun?'Waiting for the preparation…':prep.paused?'Preparation paused':'Waiting for the preparation'}</button><span class="help">counting needs no preparation, only the restore does · nothing at the target is ever overwritten or deleted: files already there are skipped, so an interrupted restore can simply be started again</span></div>
      ${mapOk&&total&&mapped<total&&!poolRun?`<p class="help" style="margin:4px 0;color:var(--warn)">The map covers ${mapped.toLocaleString()} of ${total.toLocaleString()} blocks. Files stored in the other blocks cannot be restored yet and are reported as errors. <button class="small" id="prepAgain" title="The downloaded index files are kept; the map is computed again, which takes a while.">Run the preparation again</button></p>`:mapOk&&!poolRun?`<p class="help" style="margin:4px 0">The backup is prepared${total?` (${mapped.toLocaleString()} of ${total.toLocaleString()} blocks mapped)`:''}. <button class="small ghost" id="prepAgain" title="The downloaded index files are kept; the map is computed again, which takes a while.">Run the preparation again</button></p>`:''}
      ${mapOk?'':`<div id="prepBox" style="margin:6px 0"><p class="help" style="margin:0 0 4px">Before it can restore, the app learns where every piece of every file is stored: it downloads the backup's index files (a few GB, no file data) and builds a map. This starts by itself${poolRun?'':prep.paused?' once you resume it':(idxLocal||total)?'':' as soon as a share\'s file list is loaded for this run (step 1)'}, continues after a pause or a restart (the downloaded index files are kept; the map itself is computed again), and is kept for later restores.${keyLine(S.info.source.remote,true)?` ${keyLine(S.info.source.remote,true)}`:''}</p>

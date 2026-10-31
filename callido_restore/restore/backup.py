@@ -12,7 +12,7 @@ from callido_restore.core.hbkmeta import SCRIPT_EXT
 from callido_restore.core.hbkmeta import is_sqlite
 from callido_restore.core.hbkmeta import rev_of
 from callido_restore.oscompat import popen_kw
-from callido_restore.paths import RCLONE
+from callido_restore.paths import RCLONE, ui_path
 from callido_restore.restore.destination import file_target
 from callido_restore.restore.destination import list_destination
 from callido_restore.restore.destination import place_file
@@ -496,7 +496,7 @@ class Backup:
             m["files"] += len(mine); m["bytes"] += sum(f["size"] for f in mine)
             if mine and m["sample_from"] is None:
                 root, rel = file_target(mine[0], items, dest)
-                m["sample_from"] = f"{mine[0]['share']}/{mine[0]['path']}"; m["sample_to"] = f"{root}/{rel}" if root else rel
+                m["sample_from"] = f"{mine[0]['share']}/{mine[0]['path']}"; m["sample_to"] = (f"{root}/{rel}" if is_remote_path(root) else ui_path(f"{root}/{rel}")) if root else rel   # Windows: one separator
         return {"files": len(files), "bytes": sum(f["size"] for f in files), "mappings": out, "sample": [f"{f['share']}/{f['path']}" for f in files[:20]]}
     def restore(self, items, dest, job, skip_meta=True, start_at=0):
         """Restore the selected items. An item with its own 'dest' gets its contents there (H8: one target per folder);
