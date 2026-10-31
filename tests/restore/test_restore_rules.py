@@ -113,7 +113,7 @@ class RestoreLoopLocal(unittest.TestCase):
         self.assertEqual(Path(old).read_bytes(), b"OLD"); self.assertEqual(int(os.stat(old).st_mtime), 1000)
         self.assertEqual(Path(self.dest, "share", "b.txt").read_bytes(), b"bbbb")
         self.assertEqual(int(os.stat(os.path.join(self.dest, "share", "b.txt")).st_mtime), 1700000001)
-        self.assertEqual((res["files"], res["restored"], res["skipped"], res["errors"]), (2, 2, 1, 0))
+        self.assertEqual((res["files"], res["restored"], res["skipped"], res["errors"]), (2, 1, 1, 0))      # restored = files written
         self.assertEqual(job["skipped"], 1); self.assertEqual(b.pool.calls, ["b.txt"])
         self.assertEqual(sorted(os.listdir(self.dest)), ["share"])            # staging folder removed, nothing else added
 
@@ -127,7 +127,7 @@ class RestoreLoopLocal(unittest.TestCase):
     def test_file_appearing_during_extract_is_kept(self):
         res, job, b = self.run_restore([("c.txt", 3, 1700000000)], appear={"c.txt"})
         self.assertEqual(Path(self.dest, "share", "c.txt").read_bytes(), b"INTRUDER")
-        self.assertEqual((res["restored"], res["skipped"], res["errors"]), (1, 1, 0))
+        self.assertEqual((res["restored"], res["skipped"], res["errors"]), (0, 1, 0))
         self.assertEqual(sorted(os.listdir(self.dest)), ["share"])
 
 
@@ -241,7 +241,7 @@ class RestoreLoopRemote(unittest.TestCase):
         moves = [c for c in self.calls if c[1] == "moveto"]
         self.assertEqual([c[3] for c in moves], ["nas:Restore/share/b.txt", "nas:Restore/share/c.txt"])
         self.assertTrue(all("--ignore-existing" in c for c in moves))
-        self.assertEqual((res["files"], res["restored"], res["skipped"], res["errors"]), (3, 3, 2, 0))
+        self.assertEqual((res["files"], res["restored"], res["skipped"], res["errors"]), (3, 1, 2, 0))
         self.assertEqual(b.pool.calls, ["b.txt", "c.txt"])
 
 

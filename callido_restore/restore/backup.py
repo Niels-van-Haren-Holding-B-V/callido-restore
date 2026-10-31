@@ -520,8 +520,11 @@ class Backup:
                 persist("error"); raise
         files = self.restore_plan(items, skip_meta)
         total_bytes = sum(f["size"] for f in files); done_bytes = 0
-        job["total_files"] = len(files); job["total_bytes"] = total_bytes; job["done_files"] = 0; job["errors"] = []; job["skipped"] = 0
-        job["verified"] = 0; job["identical_copy"] = 0; job["unverified"] = []      # per restored file: how its placement was established
+        job["total_files"] = len(files); job["total_bytes"] = total_bytes
+        # A resumed job (start_at > 0) keeps the counts and the error list seeded from its saved file; a fresh one starts at zero.
+        for k, zero in (("done_files", 0), ("errors", []), ("skipped", 0), ("verified", 0), ("identical_copy", 0), ("unverified", [])):
+            if not start_at or k not in job: job[k] = zero if not isinstance(zero, list) else list(zero)
+        # verified / identical_copy / unverified: per restored file, how its placement was established
         pool = self.pool; fh_cache = {}
         def restored(f):
             """count the file as restored by how the map established its placement (PoolReader.verification): "verified" = the
@@ -537,7 +540,7 @@ class Backup:
             elif st == "identical_copy": job["identical_copy"] += 1
             elif len(job["unverified"]) < UNVERIFIED_MAX: job["unverified"].append({"path": f"{f['share']}/{f['path']}", "reason": why})
         def result(**extra):
-            return {**extra, "restored": job["done_files"], "skipped": job["skipped"], "errors": len(job["errors"]), "verified": job["verified"],
+            return {**extra, "restored": job["done_files"] - job["skipped"], "skipped": job["skipped"], "errors": len(job["errors"]), "verified": job["verified"],
                     "identical_copy": job["identical_copy"], "unverified": len(job["unverified"])}
         # --- bucket prefetch (parallel downloads ahead of the extractor) + LRU eviction of downloaded bucket data
         import concurrent.futures, threading
@@ -634,6 +637,7 @@ class Backup:
                         job["message"] = f"{f['share']}/{f['path']}: {e} — retrying"; time.sleep([2, 10][attempt]); continue
                     job["errors"].append({"path": f"{f['share']}/{f['path']}", "error": str(e)})
                     if len(job["errors"]) > 2000: raise RuntimeError("too many errors, aborting")
+                    break                                              # recorded once; without this a non-retried error was logged on every attempt
                 done_bytes += f["size"]; job["done_bytes"] = done_bytes
                 if len(fh_cache) > 64:
                     for k in list(fh_cache)[:32]: fh_cache.pop(k).close()

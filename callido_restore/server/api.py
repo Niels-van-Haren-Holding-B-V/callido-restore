@@ -318,7 +318,10 @@ class H(BaseHTTPRequestHandler):
                 err = restore_target_error(b.src, d["items"], dest, create=False)     # source check again, roots still there
                 if err: return self._json({"error": err}, 400)                        # the job file stays, so it can be resumed later
                 jf.unlink()
-                job = start_job(lambda job: b.restore(d["items"], dest, job, d.get("skip_meta", True), start_at=d.get("next_index", 0)), "restore (resumed)")
+                seed = {k: d[k] for k in ("done_files", "skipped", "errors", "verified", "identical_copy", "unverified") if k in d}   # counts and errors from before the pause
+                def resumed(job):
+                    job.update(seed); return b.restore(d["items"], dest, job, d.get("skip_meta", True), start_at=d.get("next_index", 0))
+                job = start_job(resumed, "restore (resumed)")
                 return self._json(job)
             if u.path == "/api/sources/delete":
                 SOURCES.pop(body["id"], None); BACKUPS.pop(body["id"], None); save_sources(); return self._json({"ok": True})
