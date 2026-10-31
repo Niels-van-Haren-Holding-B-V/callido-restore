@@ -1,32 +1,36 @@
 # Architecture
 
-Package layout (H16, in progress): `callido_restore/core/` holds the .hbk format (pure parsing and file reconstruction);
-`pool/` (pool map v1/v2, index fetch), `restore/` (plan, destinations, no-overwrite writer, jobs), `sources/` (local folders and
-rclone remotes, read-only), `server/` (HTTP API) and `app/` (desktop window, entry point) follow, one layer per PR; `tests/`
-mirrors the packages. Lower layers never import higher ones. `core` and `pool` have moved; the rest still lives in `hbk_explorer.py` until steps 3 and 4.
+Package `callido_restore/`, one folder per layer; a layer never imports a higher one, `tests/` mirrors the layers.
 
-* `hbk_explorer.py` — HTTP server (stdlib `http.server`), JSON API, static UI, sources, snapshot indexing, jobs, restore.
-* `callido_restore/core/pool.py` — pool format: sliced streams, virtual file index, chunk records, buckets, LZ4, `PoolReader` (reconstructs files).
-  (`hbk_pool.py` at the root is a shim that returns this module; it goes away with the last H16 step.)
-* `callido_restore/pool/` — the pool map: `poolmap.py` (v1, sequential mapping of chunk ids to buckets, see `docs/FORMAT.md`),
-  `poolmap2.py` (v2, tag-based), `anchor.py` (anchor scan with subprocess workers, `python -m callido_restore.pool.anchor --worker`),
-  `indexfetch.py` (resumable bucket-index download). The anchor workers are started with `sys.executable -m`, which only works from a
-  source checkout; the frozen app uses one in-process worker, and an in-app anchor scan will need a `--worker` dispatch in the entry point. Root `hbk_poolmap*.py`, `hbk_anchor.py`, `hbk_indexfetch.py` are shims until step 5.
-* `static/index.html` — single-page UI, no build step, no external dependencies. Shown in a native window (pywebview, WebKit on macOS)
-  by `run_window`; the HTTP server listens on 127.0.0.1 only and the process exits when the window closes (`_exit_app`).
-* `~/.hbk-explorer/` — `sources.json`, `index/<source>/<share>__<ver>.sqlite` (derived, queryable snapshot), `index/<source>/pool/`
-  (`listing.json`, `runs_set*.bin`, `recsize_set*.json`, `poolmap.json`), `cache/<source>/` (bytes fetched from a remote;
-  same relative paths as in the `.hbk`), `jobs/` (persisted restore jobs).
+* `paths.py` — where things live: `~/.hbk-explorer/` (`sources.json`, `index/`, `cache/`, `jobs/`), bundled resources (`static/`,
+  rclone) in a checkout or a PyInstaller bundle, the `RCLONE` binary. Code reads the folders through the module (`paths.INDEX_DIR`),
+  so tests point them at a temp folder. `about.py` — `APP_NAME`, tagline, notice, `VERSION` (build_app.sh reads `APP_NAME` from here).
+* `core/` — the .hbk format, pure parsing: `pool.py` (sliced streams, virtual file index, chunk records, buckets, LZ4, `PoolReader`
+  that reconstructs files), `hbkmeta.py` (file revisions, share-root id, ransomware markers, flag extension sets).
+* `pool/` — the pool map: `poolmap.py` (v1, sequential, see `docs/FORMAT.md`), `poolmap2.py` (v2, tag-based), `anchor.py` (anchor
+  scan with subprocess workers, `python -m callido_restore.pool.anchor --worker`; the frozen app uses one in-process worker, an
+  in-app anchor scan will need a `--worker` dispatch in the entry point), `indexfetch.py` (resumable bucket-index download).
+* `sources/source.py` — `Source`: a local .hbk folder plus optional rclone remotes (first wins) and extra read-only roots; `ensure`
+  downloads a missing file into `cache/<source>/` only, nothing in a source is ever modified; `contains_dest` refuses restore
+  destinations inside the backup; the registry (`SOURCES`, `load_sources`, `add_source`).
+* `restore/` — `destination.py` (never overwrite or delete: `place_file`, per-folder targets `file_target`/`restore_roots`,
+  `restore_target_error`, `list_destination`), `jobs.py` (`start_job`, `JOBS`), `backup.py` (`Backup`: discovery of task, shares
+  and versions, derived SQLite snapshot index, queries for the explorer tabs, pool access, `restore_plan`/`restore` with prefetch,
+  LRU cache, retries, persisted and resumable jobs).
+* `server/api.py` — the JSON API and static UI on 127.0.0.1 (`H`), thin handlers over `sources` and `restore`; `backup_for` registry.
+* `app/main.py` — command line, logging to `app.log` when frozen, the pywebview window (`run_window`), `main()`;
+  `callido_restore/__main__.py` is the entry point (`python -m callido_restore`) and the PyInstaller script.
+* `static/index.html` — single-page UI, no build step, no external dependencies.
 
-Data flow: a **Source** is a local folder plus optional rclone remotes (first wins) plus extra local roots. Those folders and
-the remotes are read-only. `Source.ensure(rel)` returns a file that is already in the app cache or in a source folder, and
-downloads a missing file from the remote into `cache/<source>/` only. **Backup** scans version list and shares. Loading a snapshot = fetching
-`<ver>.db` and building a derived SQLite with resolved paths and flags. Timeline/search/compare query that SQLite.
-Restore: `restore_plan` (rows) → `PoolReader.extract` per file (file_pool or chunks via pool map) → local path or `rclone moveto` to a remote;
-buckets are prefetched 4-wide and evicted LRU (≤ `HBK_CACHE_GB`, default 20). Jobs are persisted every 50 files; pause = cancel flag;
-resume restarts at `next_index` and also skips files already present with the same size.
+Data flow: `Source.ensure(rel)` returns a file from the app cache or a source folder, downloading from the remote into the cache only.
+`Backup` scans the version list and shares; loading a snapshot fetches `<ver>.db` and builds a derived SQLite with resolved paths and
+flags; timeline/search/compare query that SQLite. Restore: `restore_plan` (rows) → `PoolReader.extract` per file (file_pool or chunks
+via the pool map) into a per-root staging folder → `place_file` (local) or `rclone moveto --ignore-existing` (remote); buckets are
+prefetched 4-wide and evicted LRU (≤ `HBK_CACHE_GB`, default 20). Jobs persist every 50 files; pause = cancel flag; resume restarts
+at `next_index` and skips files already at the destination.
 
 API (all GET unless noted): `/api/sources`, `POST /api/sources`, `/api/open`, `/api/snapshot_info`, `/api/index` (job), `/api/query`,
 `/api/children`, `/api/histogram`, `/api/file`, `/api/diff`, `/api/extract`, `/api/download`, `/api/pool`, `/api/pool/build` (job),
-`/api/restore_plan`, `POST /api/restore` (job), `POST /api/restore/resume`, `/api/job`, `/api/jobs`, `/api/jobs/saved`, `/api/job/cancel`,
-`/api/remotes`, `/api/rclone/ls`, `/api/rclone/connect` (job), `/api/about`, `/api/quit`.
+`/api/restore_plan`, `/api/restore_count`, `/api/dest/check`, `POST /api/restore` (job), `POST /api/restore/resume`, `/api/job`,
+`/api/jobs`, `/api/jobs/saved`, `/api/job/cancel`, `/api/remotes`, `/api/rclone/ls`, `POST /api/rclone/connect` (job), `/api/about`,
+`/api/quit`.

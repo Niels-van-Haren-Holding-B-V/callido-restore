@@ -4,8 +4,8 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-APP_NAME=$(sed -n 's/^APP_NAME = "\([^"]*\)".*/\1/p' hbk_explorer.py)
-[ -n "$APP_NAME" ] || { echo "APP_NAME not found in hbk_explorer.py" >&2; exit 1; }
+APP_NAME=$(sed -n 's/^APP_NAME = "\([^"]*\)".*/\1/p' callido_restore/about.py)
+[ -n "$APP_NAME" ] || { echo "APP_NAME not found in callido_restore/about.py" >&2; exit 1; }
 DMG_BASE=$(printf '%s' "$APP_NAME" | tr -d ' ')
 PORT=${HBK_SMOKE_PORT:-8765}
 MNT=

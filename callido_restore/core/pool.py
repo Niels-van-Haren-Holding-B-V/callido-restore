@@ -118,7 +118,6 @@ class ChunkRecords:
 
 def parse_record_stream(path_iter, on_record):
     """Sequentially parse a set's slices (list of local paths in order); calls on_record(stream_off, ids)."""
-    buf = b""; base = 0; pos = 64 if True else 0
     data = b"".join(open(p, "rb").read() for p in path_iter)
     n = len(data); p = 64
     while p + 8 <= n:
@@ -158,7 +157,6 @@ class PoolMap:
         """global chunk id -> (bucket, entry) or raises."""
         w, j = self.writer_of_id(g)
         if w is None: raise KeyError(f"chunk id {g}: block {g // BLOCK} has no known writer")
-        import bisect
         lst = self.cum.get(w, [])
         i = bisect.bisect_right(lst, (j, 1 << 60)) - 1
         if i < 0: raise KeyError(f"chunk id {g}: writer {w} position {j} before first mapped bucket")
@@ -301,7 +299,7 @@ def build_recsizes(source, snapshot_dbs, outdir, log=print):
 
 # ----------------------------------------------------------------------------- reading chunks back
 class PoolReader:
-    """Reconstructs file contents from the pool using poolmap.json (built by hbk_poolmap)."""
+    """Reconstructs file contents from the pool using poolmap.json (built by pool/poolmap.py)."""
     def __init__(self, source, pool_dir, log=None):
         self.src, self.pool_dir = source, pool_dir
         self.vf = VirtualFileIndex(source); self.recs = ChunkRecords(source)

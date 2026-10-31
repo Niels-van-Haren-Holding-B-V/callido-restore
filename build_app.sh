@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build "<APP_NAME>.app" (APP_NAME from hbk_explorer.py, currently "Callido Restore") and a .dmg.
+# Build "<APP_NAME>.app" (APP_NAME from callido_restore/about.py, currently "Callido Restore") and a .dmg.
 # Arch comes from RCLONE_ARCH (arm64 or amd64) or from uname.
 # Needs python3, pip, curl, unzip, gpg, and hdiutil. Packaging only; the app stays cross-platform.
 set -euo pipefail
@@ -7,8 +7,8 @@ cd "$(dirname "$0")"
 
 RCLONE_VERSION=v1.75.2
 RCLONE_SIGNING_FPR=FBF737ECE9F8AB18604BD2AC93935E02FF3B54FA
-APP_NAME=$(sed -n 's/^APP_NAME = "\([^"]*\)".*/\1/p' hbk_explorer.py)
-[ -n "$APP_NAME" ] || { echo "APP_NAME not found in hbk_explorer.py" >&2; exit 1; }
+APP_NAME=$(sed -n 's/^APP_NAME = "\([^"]*\)".*/\1/p' callido_restore/about.py)
+[ -n "$APP_NAME" ] || { echo "APP_NAME not found in callido_restore/about.py" >&2; exit 1; }
 DMG_BASE=$(printf '%s' "$APP_NAME" | tr -d ' ')
 ROOT=$(pwd)
 ARCH=
@@ -187,20 +187,15 @@ build_bundle() {
     --add-data "$ROOT/assets/logo.png:assets" \
     --add-data "$ROOT/build/licenses/rclone-COPYING:Licenses" \
     --add-data "$ROOT/build/licenses/THIRD-PARTY-NOTICES.txt:Licenses" \
-    --hidden-import callido_restore.core.pool \
-    --hidden-import hbk_pool \
-    --hidden-import callido_restore.pool.poolmap \
-    --hidden-import callido_restore.pool.poolmap2 \
-    --hidden-import callido_restore.pool.anchor \
-    --hidden-import callido_restore.pool.indexfetch \
-    --hidden-import hbk_poolmap \
+    --paths "$ROOT" \
+    --collect-submodules callido_restore \
     --hidden-import lz4 \
     --hidden-import lz4.block \
     --collect-submodules lz4 \
     --hidden-import webview \
     --hidden-import webview.platforms.cocoa \
     --collect-submodules webview \
-    "$ROOT/hbk_explorer.py"
+    "$ROOT/callido_restore/__main__.py"
   bundle_file "static/index.html" || die "static/index.html missing from the app bundle"
   [ -f "$APP/Contents/Resources/AppIcon.icns" ] || die "AppIcon.icns missing from the app bundle"
   bundle_file "Licenses/rclone-COPYING" || die "rclone license missing from the app bundle"

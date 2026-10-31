@@ -11,26 +11,28 @@ import inspect, json, os, shutil, subprocess, tempfile, unittest
 from pathlib import Path
 from unittest import mock
 
-import hbk_explorer
+from callido_restore import paths
+from callido_restore.restore.backup import Backup
+from callido_restore.restore.destination import list_destination, place_file
 
 
 class ListDestination(unittest.TestCase):
     def test_failure_raises_instead_of_empty(self):
         failed = subprocess.CompletedProcess(args=[], returncode=1, stdout="", stderr="directory not found")
-        with mock.patch.object(hbk_explorer.subprocess, "run", return_value=failed):
+        with mock.patch.object(subprocess, "run", return_value=failed):
             with self.assertRaises(RuntimeError) as cm:
-                hbk_explorer.list_destination("nas:share/missing")
+                list_destination("nas:share/missing")
         self.assertIn("directory not found", str(cm.exception))
 
     def test_success_returns_paths(self):
         ok = subprocess.CompletedProcess(args=[], returncode=0, stdout=json.dumps([{"Path": "homes/a/x.txt", "Size": 3}, {"Path": "b.jpg", "Size": 9}]), stderr="")
-        with mock.patch.object(hbk_explorer.subprocess, "run", return_value=ok):
-            self.assertEqual(hbk_explorer.list_destination("nas:share/restore"), {"homes/a/x.txt", "b.jpg"})
+        with mock.patch.object(subprocess, "run", return_value=ok):
+            self.assertEqual(list_destination("nas:share/restore"), {"homes/a/x.txt", "b.jpg"})
 
     def test_empty_listing_is_empty_set(self):
         ok = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
-        with mock.patch.object(hbk_explorer.subprocess, "run", return_value=ok):
-            self.assertEqual(hbk_explorer.list_destination("nas:share/new"), set())
+        with mock.patch.object(subprocess, "run", return_value=ok):
+            self.assertEqual(list_destination("nas:share/new"), set())
 
 
 class PlaceFile(unittest.TestCase):
@@ -41,29 +43,29 @@ class PlaceFile(unittest.TestCase):
         self.out = os.path.join(self.d, "share", "sub", "f")
 
     def test_places_new_file_with_mtime(self):
-        self.assertTrue(hbk_explorer.place_file(self.tmp, self.out))
+        self.assertTrue(place_file(self.tmp, self.out))
         self.assertEqual(Path(self.out).read_bytes(), b"NEW")
         self.assertEqual(int(os.stat(self.out).st_mtime), 1700000000)
         self.assertFalse(os.path.exists(self.tmp))
 
     def test_existing_file_is_kept(self):
         os.makedirs(os.path.dirname(self.out)); Path(self.out).write_bytes(b"OLD-LONGER"); os.utime(self.out, (1000, 1000))
-        self.assertFalse(hbk_explorer.place_file(self.tmp, self.out))
+        self.assertFalse(place_file(self.tmp, self.out))
         self.assertEqual(Path(self.out).read_bytes(), b"OLD-LONGER")
         self.assertEqual(int(os.stat(self.out).st_mtime), 1000)
         self.assertFalse(os.path.exists(self.tmp))
 
     def test_existing_symlink_even_dangling_is_kept(self):
         os.makedirs(os.path.dirname(self.out)); os.symlink("/nonexistent/target", self.out)
-        self.assertFalse(hbk_explorer.place_file(self.tmp, self.out))
+        self.assertFalse(place_file(self.tmp, self.out))
         self.assertTrue(os.path.islink(self.out)); self.assertEqual(os.readlink(self.out), "/nonexistent/target")
 
     def test_without_hard_links_places_and_keeps_existing(self):
-        with mock.patch.object(hbk_explorer.os, "link", side_effect=PermissionError("no hard links")):
-            self.assertTrue(hbk_explorer.place_file(self.tmp, self.out))
+        with mock.patch.object(os, "link", side_effect=PermissionError("no hard links")):
+            self.assertTrue(place_file(self.tmp, self.out))
             self.assertEqual(Path(self.out).read_bytes(), b"NEW")
             Path(self.tmp).write_bytes(b"NEW2")
-            self.assertFalse(hbk_explorer.place_file(self.tmp, self.out))
+            self.assertFalse(place_file(self.tmp, self.out))
             self.assertEqual(Path(self.out).read_bytes(), b"NEW")
             self.assertFalse(os.path.exists(self.tmp))
 
@@ -82,7 +84,7 @@ class _FakePool:
         return size
 
 
-class _Backup(hbk_explorer.Backup):
+class _Backup(Backup):
     """Real ``restore``; the pool and the file list come from the test (``pool`` is a read-only property on Backup)."""
     pool = property(lambda self: self._fake_pool)
 
@@ -98,7 +100,7 @@ class RestoreLoopLocal(unittest.TestCase):
     def setUp(self):
         self.d = tempfile.mkdtemp(); self.addCleanup(shutil.rmtree, self.d, True)
         self.dest = os.path.join(self.d, "dest"); os.makedirs(os.path.join(self.dest, "share"))
-        p = mock.patch.object(hbk_explorer, "JOBS_DIR", Path(self.d) / "jobs"); p.start(); self.addCleanup(p.stop)
+        p = mock.patch.object(paths, "JOBS_DIR", Path(self.d) / "jobs"); p.start(); self.addCleanup(p.stop)
 
     def run_restore(self, files, appear=()):
         b = _fake_backup(self.dest, files, appear)
@@ -136,7 +138,7 @@ class RestoreLoopTwoLocalRoots(unittest.TestCase):
     def setUp(self):
         self.d = tempfile.mkdtemp(); self.addCleanup(shutil.rmtree, self.d, True)
         self.ra = os.path.join(self.d, "ShareA"); self.rb = os.path.join(self.d, "Docs"); os.makedirs(self.ra); os.makedirs(self.rb)
-        p = mock.patch.object(hbk_explorer, "JOBS_DIR", Path(self.d) / "jobs"); p.start(); self.addCleanup(p.stop)
+        p = mock.patch.object(paths, "JOBS_DIR", Path(self.d) / "jobs"); p.start(); self.addCleanup(p.stop)
         self.items = [{"share": "A", "ver": 1, "path": "", "is_dir": True, "dest": self.ra}, {"share": "B", "ver": 1, "path": "docs", "is_dir": True, "dest": self.rb}]
         self.plan = [{"share": "A", "path": "x.txt", "off": -1, "size": 3, "mtime": 1700000000, "item": 0},
                      {"share": "A", "path": "sub/y.txt", "off": -1, "size": 4, "mtime": 1700000001, "item": 0},
@@ -187,7 +189,7 @@ class RestoreLoopTwoLocalRoots(unittest.TestCase):
 class RestoreLoopRemote(unittest.TestCase):
     def setUp(self):
         self.d = tempfile.mkdtemp(); self.addCleanup(shutil.rmtree, self.d, True)
-        p = mock.patch.object(hbk_explorer, "JOBS_DIR", Path(self.d) / "jobs"); p.start(); self.addCleanup(p.stop)
+        p = mock.patch.object(paths, "JOBS_DIR", Path(self.d) / "jobs"); p.start(); self.addCleanup(p.stop)
         self.calls = []
         def run(cmd, **kw):
             self.calls.append(cmd)
@@ -198,7 +200,7 @@ class RestoreLoopRemote(unittest.TestCase):
                 if not target.endswith("/c.txt"): os.unlink(staged)        # moved; c.txt "appeared" after the listing: left in place
                 return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
             raise AssertionError(cmd)
-        p = mock.patch.object(hbk_explorer.subprocess, "run", side_effect=run); p.start(); self.addCleanup(p.stop)
+        p = mock.patch.object(subprocess, "run", side_effect=run); p.start(); self.addCleanup(p.stop)
 
     def test_listed_and_late_files_are_skipped_others_uploaded(self):
         b = _fake_backup("nas:Restore", [("a.txt", 5, 1), ("b.txt", 4, 2), ("c.txt", 3, 3)])
@@ -213,7 +215,7 @@ class RestoreLoopRemote(unittest.TestCase):
 
 class NoOverwriteParameter(unittest.TestCase):
     def test_restore_has_no_overwrite_option(self):
-        self.assertNotIn("overwrite", inspect.signature(hbk_explorer.Backup.restore).parameters)
+        self.assertNotIn("overwrite", inspect.signature(Backup.restore).parameters)
 
 
 if __name__ == "__main__":

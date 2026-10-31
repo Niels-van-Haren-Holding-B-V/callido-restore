@@ -261,7 +261,7 @@ def fetch_bucket_indexes(cache_root, remotes, listing, job, run=None, attempts=2
     if run is None:
         run = run_rclone
     if rclone is None:
-        from hbk_explorer import RCLONE
+        from callido_restore.paths import RCLONE
         rclone = RCLONE
     by_dir = indexes_by_dir(listing)
     dirs = sorted(by_dir)

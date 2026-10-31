@@ -1,9 +1,9 @@
-"""hbk_anchor scanner: hits are stored per tag (shared lists), not as a per-record cross product (that cross product
+"""pool.anchor scanner: hits are stored per tag (shared lists), not as a per-record cross product (that cross product
 is what exhausted the RAM on the full scan); resolve/place work on the shared lists."""
 import hashlib, json, os, struct, tempfile, unittest
 from pathlib import Path
 
-from callido_restore.pool import anchor as hbk_anchor
+from callido_restore.pool import anchor
 from callido_restore.pool.poolmap2 import Rec
 
 
@@ -52,22 +52,22 @@ class Scan(unittest.TestCase):
         d = json.load(open(self.out / "anchors.json"))
         self.assertEqual(sum(len(v) for v in d["positions"].values()), 4)      # linear, not 1 + 5*3
         self.assertEqual(len(d["records"]), 6)
-        loaded = hbk_anchor.load_anchors(self.out)
+        loaded = anchor.load_anchors(self.out)
         self.assertEqual({k: list(v) for k, v in loaded.items()}, {k: list(v) for k, v in anchors.items()})
 
     def test_serial(self):
-        self._check(*hbk_anchor.scan_anchors(self.src, self.out, self.listing, self.writers, log=lambda *a: None, workers=1))
+        self._check(*anchor.scan_anchors(self.src, self.out, self.listing, self.writers, log=lambda *a: None, workers=1))
 
     def test_parallel_capped(self):
-        self.assertLessEqual(hbk_anchor.MAX_WORKERS, 4)
-        self._check(*hbk_anchor.scan_anchors(self.src, self.out, self.listing, self.writers, log=lambda *a: None, workers=64))
+        self.assertLessEqual(anchor.MAX_WORKERS, 4)
+        self._check(*anchor.scan_anchors(self.src, self.out, self.listing, self.writers, log=lambda *a: None, workers=64))
 
     def test_resolve_uses_neighbours(self):
-        anchors, counts = hbk_anchor.scan_anchors(self.src, self.out, self.listing, self.writers, log=lambda *a: None, workers=1)
-        owner, placements, report = hbk_anchor.resolve_and_place(self.writers, anchors, counts, log=lambda *a: None)
+        anchors, counts = anchor.scan_anchors(self.src, self.out, self.listing, self.writers, log=lambda *a: None, workers=1)
+        owner, placements, report = anchor.resolve_and_place(self.writers, anchors, counts, log=lambda *a: None)
         self.assertEqual(report["unique"], 1); self.assertEqual(report["multi"], 5)
         self.assertIn(0, placements[0])
-        self.assertEqual(hbk_anchor._hits_between([(0, 2, 1), (1, 1, 1), (1, 4, 1), (3, 0, 1)], 1, 1), [(1, 1, 1), (1, 4, 1)])
+        self.assertEqual(anchor._hits_between([(0, 2, 1), (1, 1, 1), (1, 4, 1), (3, 0, 1)], 1, 1), [(1, 1, 1), (1, 4, 1)])
 
 
 if __name__ == "__main__": unittest.main()
@@ -80,16 +80,16 @@ class Placement(unittest.TestCase):
         self.anchors = {(0, 0): [(101, 0, 1)], (0, 1): [(101, 2, 1)]}; self.counts = {101: 10}
 
     def test_place_from_anchors_stops_at_next_anchor(self):
-        owner, placements, report = hbk_anchor.place_from_anchors(self.writers, self.anchors, self.counts, log=lambda *a: None)
+        owner, placements, report = anchor.place_from_anchors(self.writers, self.anchors, self.counts, log=lambda *a: None)
         self.assertEqual(report["unplaced"], 1); self.assertNotIn(0, placements[0])
         self.assertEqual(placements[0][1], [(101, 2, 3)])
 
     def test_resolve_and_place_stops_at_next_anchor(self):
-        owner, placements, report = hbk_anchor.resolve_and_place(self.writers, self.anchors, self.counts, log=lambda *a: None)
+        owner, placements, report = anchor.resolve_and_place(self.writers, self.anchors, self.counts, log=lambda *a: None)
         self.assertEqual(report["unplaced"], 1); self.assertNotIn(0, placements[0])
         self.assertEqual(placements[0][1], [(101, 2, 3)])
 
     def test_dump_json_is_atomic(self):
         with tempfile.TemporaryDirectory() as d:
-            p = os.path.join(d, "x.json"); hbk_anchor.dump_json(p, {"a": 1})
+            p = os.path.join(d, "x.json"); anchor.dump_json(p, {"a": 1})
             self.assertEqual(json.load(open(p)), {"a": 1}); self.assertEqual(os.listdir(d), ["x.json"])

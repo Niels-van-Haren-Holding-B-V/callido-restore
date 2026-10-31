@@ -1,4 +1,4 @@
-"""Parser tests for hbk_pool against synthetic files.
+"""Parser tests for core.pool against synthetic files.
 
 Assumptions where docs/FORMAT.md and the code disagree, or where the doc is
 silent (asserted against the current code):
@@ -24,7 +24,7 @@ silent (asserted against the current code):
 import hashlib, struct, tempfile, unittest, zlib
 from pathlib import Path
 
-from callido_restore.core import pool as hbk_pool
+from callido_restore.core import pool as cpool
 
 # Single-token literal block (token high nibble = length, no match). Valid for
 # both the lz4 package and lz4_decompress_py.
@@ -86,10 +86,10 @@ class _LocalSource:
 class Lz4Tests(unittest.TestCase):
     def test_handcrafted_blocks_roundtrip(self):
         literal = b"Hello, "
-        self.assertEqual(hbk_pool.lz4_decompress(lz4_literals(literal), len(literal)), literal)
-        self.assertEqual(hbk_pool.lz4_decompress_py(lz4_literals(literal), len(literal)), literal)
-        self.assertEqual(hbk_pool.lz4_decompress(MATCH_BLOCK, len(MATCH_PLAIN)), MATCH_PLAIN)
-        self.assertEqual(hbk_pool.lz4_decompress_py(MATCH_BLOCK, len(MATCH_PLAIN)), MATCH_PLAIN)
+        self.assertEqual(cpool.lz4_decompress(lz4_literals(literal), len(literal)), literal)
+        self.assertEqual(cpool.lz4_decompress_py(lz4_literals(literal), len(literal)), literal)
+        self.assertEqual(cpool.lz4_decompress(MATCH_BLOCK, len(MATCH_PLAIN)), MATCH_PLAIN)
+        self.assertEqual(cpool.lz4_decompress_py(MATCH_BLOCK, len(MATCH_PLAIN)), MATCH_PLAIN)
 
     def test_library_block_decodes_with_fallback(self):
         try:
@@ -98,8 +98,8 @@ class Lz4Tests(unittest.TestCase):
             self.skipTest("lz4 not installed")
         raw = b"abcdefghij" * 3
         block = lz4.compress(raw, store_size=False)
-        self.assertEqual(hbk_pool.lz4_decompress(block, len(raw)), raw)
-        self.assertEqual(hbk_pool.lz4_decompress_py(block, len(raw)), raw)
+        self.assertEqual(cpool.lz4_decompress(block, len(raw)), raw)
+        self.assertEqual(cpool.lz4_decompress_py(block, len(raw)), raw)
 
 
 class FilePoolTests(unittest.TestCase):
@@ -109,7 +109,7 @@ class FilePoolTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             path = Path(td) / "7.file.3"
             path.write_bytes(data)
-            chunks = hbk_pool.file_pool_chunks(path)
+            chunks = cpool.file_pool_chunks(path)
         self.assertEqual(chunks, [plain1, MATCH_PLAIN])
 
     def test_bad_magic_raises(self):
@@ -118,7 +118,7 @@ class FilePoolTests(unittest.TestCase):
             path = Path(td) / "1.file.1"
             path.write_bytes(data)
             with self.assertRaises(ValueError):
-                hbk_pool.file_pool_chunks(path)
+                cpool.file_pool_chunks(path)
 
 
 class BucketIndexTests(unittest.TestCase):
@@ -137,7 +137,7 @@ class BucketIndexTests(unittest.TestCase):
     def test_header_and_entries(self):
         with tempfile.TemporaryDirectory() as td:
             md1, md2, crc1, crc2, index = self._write(td)
-            entries = hbk_pool.bucket_index_entries(Path(td) / "0.index.1")
+            entries = cpool.bucket_index_entries(Path(td) / "0.index.1")
             self.assertEqual(len(entries), 2)
             self.assertEqual(entries[0][0], len(MATCH_BLOCK))
             self.assertEqual(entries[0][1], 0)
@@ -151,7 +151,7 @@ class BucketIndexTests(unittest.TestCase):
             flipped[64 + 28] ^= 0xFF
             flipped_path = Path(td) / "flipped.index"
             flipped_path.write_bytes(flipped)
-            self.assertEqual(hbk_pool.bucket_index_entries(flipped_path), entries)
+            self.assertEqual(cpool.bucket_index_entries(flipped_path), entries)
             self.assertNotEqual(crc1, crc2)
 
     def test_read_chunk_checks_md5_of_decompressed_bytes(self):
@@ -166,13 +166,13 @@ class BucketIndexTests(unittest.TestCase):
             listing = [{"b": 0, "t": "index", "rev": 1, "name": "0.index.1", "size": idx.stat().st_size},
                        {"b": 0, "t": "bucket", "rev": 1, "name": "0.bucket.1", "size": bucket.stat().st_size}]
             (pool / "listing.json").write_text(__import__("json").dumps(listing))
-            reader = hbk_pool.PoolReader(_LocalSource(root), str(pool))
+            reader = cpool.PoolReader(_LocalSource(root), str(pool))
             fh = {}
             try:
                 self.assertEqual(reader.read_chunk(0, 0, fh), MATCH_PLAIN)
                 self.assertEqual(reader.read_chunk(0, 1, fh), b"Hello, ")
                 # md5 of the compressed bytes must not be accepted
-                entries = hbk_pool.bucket_index_entries(idx)
+                entries = cpool.bucket_index_entries(idx)
                 bad = bytearray(idx.read_bytes())
                 bad[64 + 12:64 + 28] = hashlib.md5(MATCH_BLOCK).digest()
                 idx.write_bytes(bad)
@@ -214,7 +214,7 @@ class VirtualFileIndexTests(unittest.TestCase):
             (d / "0.idx.1").write_bytes(b"\x00" * 120)
             data = bytearray(b"\xee" * 64 + blob)
             (d / "0.idx.9").write_bytes(data)
-            entry = hbk_pool.VirtualFileIndex(_LocalSource(root)).entry(64)
+            entry = cpool.VirtualFileIndex(_LocalSource(root)).entry(64)
         self.assertEqual(entry["set"], 4)          # word 12, not word 0
         self.assertEqual(entry["list_off"], list_off)
         self.assertEqual(entry["rec_off"], rec_off)
@@ -231,7 +231,7 @@ class VirtualFileIndexTests(unittest.TestCase):
         list_off = 0x200
         rec_off = list_off - 12  # the relationship the format describes
         blob = self._pack(set_a=4, list_off=list_off, set_b=4, rec_off=rec_off, mtime_hi=1700001111, mtime_lo=0)
-        off = hbk_pool.SLICE - 20
+        off = cpool.SLICE - 20
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             d = root / "Config" / "virtual_file.index"
@@ -240,7 +240,7 @@ class VirtualFileIndexTests(unittest.TestCase):
                 f.seek(off)
                 f.write(blob[:20])
             (d / "1.idx.1").write_bytes(blob[20:])
-            entry = hbk_pool.VirtualFileIndex(_LocalSource(root)).entry(off)
+            entry = cpool.VirtualFileIndex(_LocalSource(root)).entry(off)
         self.assertEqual(entry["set"], 4)
         self.assertEqual(entry["list_off"], list_off)
         self.assertEqual(entry["rec_off"], rec_off)
@@ -264,7 +264,7 @@ class PoolStatusTests(unittest.TestCase):
                 {"b": 0, "t": "bucket", "rev": 1, "name": "0.bucket.1", "size": 1},
             ]
             (pool / "listing.json").write_text(__import__("json").dumps(listing))
-            st = hbk_pool.PoolReader(_LocalSource(root), str(pool)).status()
+            st = cpool.PoolReader(_LocalSource(root), str(pool)).status()
         self.assertEqual(st["index_files"], 3)
         self.assertEqual(st["indexes_local"], 1)
         self.assertEqual(st["total_buckets"], 3)
