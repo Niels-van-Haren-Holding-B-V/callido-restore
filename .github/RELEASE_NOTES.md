@@ -1,5 +1,11 @@
 **Callido Restore** restores files from a Synology Hyper Backup (`.hbk`) without Hyper Backup or a working NAS. It reads the backup's own metadata, shows every backup run on a timeline, and restores the folders you pick to a NAS share or a local folder. Files already at the destination are never overwritten or deleted, and the backup source is only read.
 
+## What's new in 0.4.3
+
+- **Photos and other files that failed with "no record magic" restore now.** Some files carry an extra block of file attributes in the backup, in front of the list of their data blocks; the app looked for that list in the wrong place and refused those files (safely: nothing was written). It now follows the backup's own pointer to the list. On a real backup all 349,914 files of three shares read, 4,421 of them with the extra block (#161, #162).
+- **If you saw those errors:** start the same restore into the same folder again. Files already there are skipped; only the missing ones are added.
+- Restore errors are shown while a restore runs ("Errors (12) so far"), not only at the end, and every failed file is written to `app.log` (#160).
+
 ## What's new in 0.4.2
 
 - **Every file can be restored, with nothing to prepare.** The backup keeps its own table of where every piece of every file is stored (`Pool/chunk_index`). The app now reads that table directly, so each file is found exactly and the long "Preparing the backup" step is gone: load a share's file list, pick what you want, and start the restore right away (#152, #154, #156, #157). Every piece is still checked against its checksum while it is read, and a file whose data is missing from the backup itself is reported as an error.
