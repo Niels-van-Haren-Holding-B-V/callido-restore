@@ -17,12 +17,18 @@ match exactly and verified where their size is known; phantoms are aliased; smal
 positions take one whose bytes match. Everything placed without a byte check is flagged (`guessed`), copies as well
 (`aliased`).
 """
-import os, bisect, collections, struct, sys, time
+import os, bisect, collections, struct, time
 from array import array
+from callido_restore.pool.anchor import _rss_mb, PARENT_RSS_MB
 
 SEARCH_NODES = 20000         # DFS budget per claim search; over budget counts as ambiguous
 MAX_CANDIDATES = 6000        # widest search window (a whole revision band)
 MULTI_MAX = 64               # a tag with more positions than this is too common to resolve
+CLOCK_PERCENTILE = 0.95      # a revision's "max id" is this percentile of the ids anchored in its buckets (outliers are copies)
+CLOCK_SLACK = 1.02           # ... and a record counts as too new for a bucket beyond that times this, plus CLOCK_MARGIN ids
+CLOCK_MARGIN = 1000
+PHANTOM_TRIES = 6            # untagged records of a gap tried as "stored nothing" when the gap has no exact solution
+ROUNDS = 6                   # placement rounds: dedup references resolve as the records they point at get placed
 
 
 class Index:
@@ -68,29 +74,30 @@ def _claim_search(cands, need_c, need_b, index=None, tail=False, budget=SEARCH_N
     Returns (keys, partial tail count or None, solutions found (stops at 2), over budget)."""
     n = len(cands); sc = [0] * (n + 1); sb = [0] * (n + 1)
     for i in range(n - 1, -1, -1): sc[i] = sc[i + 1] + cands[i][1]; sb[i] = sb[i + 1] + cands[i][2]
-    sol = []; nodes = [0]; found = [0]; first = [None]
-    sys.setrecursionlimit(max(sys.getrecursionlimit(), n + 2000))
-    def rec(i, nc, nb):
+    sol = []; nodes = 0; found = 0; first = None
+    stack = [(0, need_c, need_b, False)]          # (i, remaining count, remaining bytes, True = leaving: pop the choice made at i)
+    while stack:
+        i, nc, nb, leaving = stack.pop()
+        if leaving: sol.pop(); continue
         if nc == 0 and (nb is None or nb == 0):
-            found[0] += 1
-            if first[0] is None: first[0] = (list(sol), None)
-            return found[0] >= 2
-        if i == n or nc < 0 or (nb is not None and nb < 0): return False
-        if not tail and (nc > sc[i] or (nb is not None and nb > sb[i])): return False
-        nodes[0] += 1
-        if nodes[0] > budget: return True
+            found += 1
+            if first is None: first = (list(sol), None)
+            if found >= 2: break
+            continue
+        if i == n or nc < 0 or (nb is not None and nb < 0): continue
+        if not tail and (nc > sc[i] or (nb is not None and nb > sb[i])): continue
+        nodes += 1
+        if nodes > budget: break
         key, c, by = cands[i]
         if tail and 0 < nc < c and (nb is None or index.prefix(key)[nc] == nb):
-            found[0] += 1
-            if first[0] is None: first[0] = (list(sol) + [key], nc)
-            if found[0] >= 2: return True
-        sol.append(key)
-        if rec(i + 1, nc - c, None if nb is None else nb - by): return True
-        sol.pop()
-        return rec(i + 1, nc, nb)
-    rec(0, need_c, need_b)
-    if first[0] is None: return None, None, 0, nodes[0] > budget
-    return first[0][0], first[0][1], found[0], nodes[0] > budget
+            found += 1
+            if first is None: first = (list(sol) + [key], nc)
+            if found >= 2: break
+        # explore "take cands[i]" first (a contiguous run is the common case), then "skip it"
+        stack.append((i + 1, nc, nb, False))
+        stack.append((i + 1, nc, nb, True)); sol.append(key); stack.append((i + 1, nc - c, None if nb is None else nb - by, False))
+    if first is None: return None, None, 0, nodes > budget
+    return first[0], first[1], found, nodes > budget
 
 
 def resolve_and_place_v3(writers, anchors, index, log=print, max_bucket=None):
@@ -98,6 +105,9 @@ def resolve_and_place_v3(writers, anchors, index, log=print, max_bucket=None):
     per tag (anchor.scan_anchors / load_anchors); index: Index. Returns (owner {bucket: w}, placements {w: {ri: [(b, e, n)]}},
     report Counter, flags {"guessed": set((w, ri)), "aliased": set((w, ri))})."""
     t0 = time.time(); R = collections.Counter(); W = writers; counts = index.counts; rev = index.revs
+    def guard(phase):                             # H9: the placer runs in the mapper child next to the writer tables; never past the scan's limit
+        R["peak-rss-mb"] = max(R["peak-rss-mb"], int(_rss_mb()))
+        if _rss_mb() > PARENT_RSS_MB: raise MemoryError(f"placer RSS {_rss_mb():.0f} MB > {PARENT_RSS_MB} MB after {phase}; aborted")
     buckets = sorted(b for b in counts if max_bucket is None or b <= max_bucket); bset = set(buckets)
     torder = sorted(buckets, key=lambda b: (rev.get(b, 0), b)); tpos = {b: i for i, b in enumerate(torder)}
     flags = {"guessed": set(), "aliased": set()}
@@ -112,11 +122,11 @@ def resolve_and_place_v3(writers, anchors, index, log=print, max_bucket=None):
         if len(pl) == 1: byrev[rev.get(pl[0][0], 0)].append(rl[0][0])
     env = {}; run = 0
     for r_ in sorted(byrev):
-        gs = sorted(byrev[r_]); run = max(run, gs[int(len(gs) * 0.95)]); env[r_] = run
+        gs = sorted(byrev[r_]); run = max(run, gs[int(len(gs) * CLOCK_PERCENTILE)]); env[r_] = run
     revs_sorted = sorted(env)
     def maxid_at(r_):
         k = bisect.bisect_right(revs_sorted, r_) - 1; return env[revs_sorted[k]] if k >= 0 else 0
-    def too_new(g, b): return g > maxid_at(rev.get(b, 0)) * 1.02 + 1000         # ids beyond what existed at the bucket's revision
+    def too_new(g, b): return g > maxid_at(rev.get(b, 0)) * CLOCK_SLACK + CLOCK_MARGIN      # ids beyond what existed at the bucket's revision
     phys = {w: [r.n for r in W[w]] for w in W}; alias = {}; found = {}; cand = {}
     for pl, rl in groups:
         stored = rl[:len(pl)] if len(pl) < len(rl) else rl
@@ -219,6 +229,7 @@ def resolve_and_place_v3(writers, anchors, index, log=print, max_bucket=None):
             if len(good) == 1: anchor[(w, ri)] = good[0]
         owner, conf = owners_from(anchor); chain = chains(anchor, owner)
     R["owner-conflicts"] = conf; R["owned-by-anchors"] = len(owner)
+    guard("pins")
     log(f"placer: {len(anchor):,} anchored records, {len(owner):,} buckets owned by anchors, {len(alias):,} copies, {len(found):,} copies of untagged originals, {time.time() - t0:.0f}s")
     # ---- C. claims. Anchored records in time order of their anchor; a spill claims the anchorless buckets between its
     # head and the next anchored record of its writer by exact count and bytes (unique solutions only).
@@ -317,7 +328,7 @@ def resolve_and_place_v3(writers, anchors, index, log=print, max_bucket=None):
                         bd = band(b0, bB)
                         if len(win) < len(bd) <= MAX_CANDIDATES: win = bd; sol, _, nsol, over = _claim_search([(x, counts[x], index.total(x)) for x in win], need - avail, nb)
                     if sol is None:
-                        for x in [y for y in between if W[w][y].tag is None][:6]:      # one untagged record may be a copy that stored nothing
+                        for x in [y for y in between if W[w][y].tag is None][:PHANTOM_TRIES]:      # one untagged record may be a copy that stored nothing
                             s2, _, n2, o2 = _claim_search([(y, counts[y], index.total(y)) for y in win], need - avail - phys[w][x], None)
                             if s2 is not None and n2 == 1 and not o2:
                                 phys[w][x] = 0; between.remove(x); need -= W[w][x].n; sol, nsol, over = s2, n2, o2; R["gap-phantom-untagged"] += 1; break
@@ -342,9 +353,10 @@ def resolve_and_place_v3(writers, anchors, index, log=print, max_bucket=None):
                     placements[w][x] = sg; placed_n += 1; R["placed-gap"] += 1
                     if own_bytes(w, x) is None: flags["guessed"].add((w, x))
         return placed_n
-    for rnd in range(6):
+    for rnd in range(ROUNDS):
         todo, deferred = deferred, []
-        for w, ri, b, e in todo: place_anchored(w, ri, b, e, final=(rnd == 5))
+        for w, ri, b, e in todo: place_anchored(w, ri, b, e, final=(rnd == ROUNDS - 1))
+        guard("claims")
         if not gap_pass() and not deferred: break
     # ---- E. copies of untagged originals: from the found position through the owner's buckets, else a tail-less search
     seqs = {w: [b for b in torder if claimed.get(b) == w] for w in W}; spos = {w: {b: i for i, b in enumerate(seqs[w])} for w in W}
@@ -385,6 +397,7 @@ def resolve_and_place_v3(writers, anchors, index, log=print, max_bucket=None):
     for (w, ri), (w2, ri2) in alias.items():
         if ri2 in placements[w2] and W[w][ri].size == W[w2][ri2].size: placements[w][ri] = placements[w2][ri2]; flags["aliased"].add((w, ri)); R["aliased"] += 1
         else: R["alias-unplaced"] += 1
+    guard("placement")
     owner_out = {b: w for b, w in claimed.items() if isinstance(w, int)}
     R["owned"] = len(owner_out); R["records"] = sum(len(W[w]) for w in W); R["placed"] = sum(len(p) for p in placements.values())
     sz_all = sum(r.size for w in W for r in W[w] if r.size); sz_pl = sum(W[w][ri].size for w in W for ri in placements[w] if W[w][ri].size)

@@ -56,7 +56,8 @@ buckets, the interiors of large files, are accounted for by the pins to within a
 order, phantom aliasing, pins, a byte-and-count partition of the anchorless buckets, every placed record verified by its ulen
 sum against the file size) is in `callido_restore/pool/place.py` (default; `HBK_PLACER=v2` for the old placer). Measured on
 the real backup: 618 k of 845 k records placed, 74.5 % of the bytes, 454 k records verified by their byte sum, 1,279 of 1,593
-files > 100 MB (the old placer: 57.6 % of bytes, 696 large files). What is left sits mostly in the initial backup, where the
+files > 100 MB (the old placer: 57.6 % of bytes, 696 large files); the placer phase peaks at 1.9 GB RSS (H9 guard at the
+scan's limit at every phase boundary) and takes about 2.5 minutes. What is left sits mostly in the initial backup, where the
 buckets are so alike that the interior search of a large file is ambiguous and is left unplaced rather than guessed; next:
 a model of the initial backup's bucket allocation (ids handed out four at a time, round-robin), then T2.
 
