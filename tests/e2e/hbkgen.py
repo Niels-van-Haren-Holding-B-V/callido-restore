@@ -79,6 +79,8 @@ class Pool:
         self.recs = {s: bytearray(64) for s in (1, 2, 3, 4)}           # ASSUMED: header bytes are zeros
         self.vf = bytearray(64)
         self.bucket_writer = {}                                        # bucket -> (writer, revision)
+        self.bucket_ids = {}                                           # bucket -> the chunk ids stored in it
+        self.free = []; self.reuse_writer = None; self.reused = {}     # bucket ids freed by a purge, and who took them
         self.rev = 0; self.stats = {"buckets": 0, "phantoms": 0, "dedup_refs": 0, "file_pool": 0}
 
     def new_id(self, w):
@@ -94,7 +96,10 @@ class Pool:
     def close(self, w):
         if not self.open[w]: return
         ents, data, gs = self.open[w]; self.open[w] = None
-        b = self.next_bucket; self.next_bucket += 1; self.stats["buckets"] += 1
+        if self.free and self.reuse_writer in (None, w):               # after a purge one writer takes the lowest free ids,
+            self.reuse_writer = w; b = self.free.pop(0); self.reused[b] = w   # the others keep getting fresh, higher ones
+        else: b = self.next_bucket; self.next_bucket += 1
+        self.stats["buckets"] += 1; self.bucket_ids[b] = list(gs)
         for i, g in enumerate(gs): self.where[g] = (b, i)
         self.bucket_writer[b] = (w, self.rev)
         d = os.path.join(self.root, "Pool", "0", str(b // 2048)); os.makedirs(d, exist_ok=True)
@@ -104,6 +109,20 @@ class Pool:
             e = struct.pack(">III", clen, off, ulen) + md5
             idx += e + struct.pack(">I", zlib.crc32(e))
         with open(os.path.join(d, f"{b % 2048}.index.{self.rev}"), "wb") as f: f.write(idx)
+
+    def purge(self, keep_ids):
+        """Version rotation: buckets (of any revision) none of whose chunks a kept record needs are deleted and their ids
+        freed. ASSUMED: the chunk-record streams keep the records of the rotated run (their chunks are simply gone)."""
+        gone = sorted(b for b, gs in self.bucket_ids.items() if not any(g in keep_ids for g in gs))
+        for b in gone:
+            d = os.path.join(self.root, "Pool", "0", str(b // 2048)); rev = self.bucket_writer[b][1]
+            for kind in ("bucket", "index"): os.unlink(os.path.join(d, f"{b % 2048}.{kind}.{rev}"))
+            for g in self.bucket_ids.pop(b): self.where.pop(g, None)
+            self.bucket_writer.pop(b); self.stats["buckets"] -= 1
+        dead = {g for g in range(self.next_block * BLOCK) if g not in self.where}
+        self.stored = {h: g for h, g in self.stored.items() if g not in dead}
+        self.free = gone; self.stats["purged"] = len(gone)
+        return gone
 
     def close_all(self):
         for w in range(4): self.close(w)
@@ -119,9 +138,10 @@ class Pool:
             with open(os.path.join(d, f"{n}.file.{self.rev}"), "wb") as f: f.write(body)
             return -n, None, {"kind": "file_pool"}
         chs = chunks_of(data); known = [hashlib.md5(c).digest() in self.stored for c in chs]
-        ids = []; kind = "stored"
+        ids = []; kind = "stored"; src_ids = None
         if phantom_ok and len(chs) >= 2 and all(known):
             ids = [self.new_id(w) for _ in chs]; kind = "phantom"; self.stats["phantoms"] += 1   # fresh ids, nothing appended
+            src_ids = [self.stored[hashlib.md5(c).digest()] for c in chs]
         else:
             for c in chs:
                 h = hashlib.md5(c).digest()
@@ -142,7 +162,7 @@ class Pool:
         self.vf += struct.pack(">14I", *f)
         K = min(len(chs), TAGK)
         tag = hashlib.md5(b"".join(hashlib.md5(c).digest() for c in chs[:K])).digest() + struct.pack(">I", sum(len(c) for c in chs[:K]))
-        return off, tag, {"kind": kind, "chunks": len(chs), "set": s, "rec_off": rec_off, "writer": w, "ids": ids}
+        return off, tag, {"kind": kind, "chunks": len(chs), "set": s, "rec_off": rec_off, "writer": w, "ids": ids, "src_ids": src_ids}
 
     def finish(self, rev):
         for s, st in self.recs.items():
@@ -181,8 +201,14 @@ def plan(scale):
     return run1, run2, run3_lock
 
 
-def build(root, scale=1.0, bucket_cap=256 * 1024, versions=(101, 102, 103)):
-    """Write the backup at `root`; returns the manifest {"versions": {ver: {share: {path: {...}}}}, ...}."""
+def build(root, scale=1.0, bucket_cap=256 * 1024, versions=(101, 102, 103), rotate=False, rotate_copy=True):
+    """Write the backup at `root`; returns the manifest {"versions": {ver: {share: {path: {...}}}}, ...}.
+
+    rotate=True adds version rotation (hbk-1, 2026-10-31): a run before the first kept one whose files are gone from every
+    kept snapshot; at the start of the second kept run its buckets that nothing needs are purged and their ids freed, the
+    first writer to close a bucket then takes the lowest free ids (same revision as the fresh ids of the others), so its
+    bucket order by (revision, id) is wrong for those. With rotate_copy one rotated file is copied in that run: a copy of an
+    untagged original whose content sits in an older bucket (phantom found under the revision clock)."""
     root = os.path.abspath(root); os.makedirs(root, exist_ok=True)
     if os.listdir(root): raise FileExistsError(f"{root} is not empty")
     run1, run2, lock = plan(scale)
@@ -195,6 +221,15 @@ def build(root, scale=1.0, bucket_cap=256 * 1024, versions=(101, 102, 103)):
         w = rr[0] % 4; rr[0] += 1
         off, tag, info = pool.store_file(w, data, mtime)
         state[(share, path)] = {"data": data, "mtime": mtime, "off": off, "tag": tag, "status": status, "info": info, "ctime": mtime}
+    rotated = {}
+    if rotate:                     # run v1-1: backed up, then rotated away (no snapshot, no version_info row)
+        v0 = v1 - 1; ts[v0] = T0 - 86400; pool.rev = v0; S = lambda n: max(1, int(n * scale))
+        for p, size in sorted({"Archive/2024/old-report.pdf": 300_000, "Archive/2024/scan.tif": 640_000, "Archive/2024/notes-2024.docx": 140_000,
+                               "Archive/2024/contract-orig.pdf": 230_000}.items()):
+            put("Documents", p, content(f"rotated/{p}", S(size)), v0, ts[v0] - 86400 * 40, "N")
+        pool.close_all()
+        rotated = {p: state.pop(("Documents", p)) for p in [k[1] for k in list(state)]}
+        if rotate_copy: run2["copy"].setdefault("Documents", {})["Archive/contract-copy.pdf"] = ("rotated", "Archive/2024/contract-orig.pdf")
     # run 1
     pool.rev = v1
     for share in run1:
@@ -203,6 +238,9 @@ def build(root, scale=1.0, bucket_cap=256 * 1024, versions=(101, 102, 103)):
     pool.close_all(); snaps[v1] = {k: dict(e) for k, e in state.items()}
     # run 2
     pool.rev = v2
+    if rotate:                     # the rotation's purge: keep what run 1 and the coming copy of the rotated contract need
+        keep = {g for e in state.values() for g in e["info"].get("ids", [])} | set(rotated["Archive/2024/contract-orig.pdf"]["info"]["ids"])
+        pool.purge(keep)
     for e in state.values(): e["status"] = "U"
     for share, files in run2["delete"].items():
         for p in files: state.pop((share, p))
@@ -210,7 +248,7 @@ def build(root, scale=1.0, bucket_cap=256 * 1024, versions=(101, 102, 103)):
         for p, extra in files.items():
             old = state[(share, p)]["data"]; put(share, p, old + content(f"append/{p}", extra), v2, ts[v2] - 3600, "M")
     for share, files in run2["copy"].items():
-        for p, (s0, p0) in files.items(): put(share, p, state[(s0, p0)]["data"], v2, ts[v2] - 7200, "N")
+        for p, (s0, p0) in files.items(): put(share, p, (rotated[p0] if s0 == "rotated" else state[(s0, p0)])["data"], v2, ts[v2] - 7200, "N")
     for share, files in run2["add"].items():
         for p, size in sorted(files.items()): put(share, p, content(f"{share}/{p}", size), v2, ts[v2] - 5400, "N")
     pool.close_all(); snaps[v2] = {k: dict(e) for k, e in state.items()}
@@ -229,11 +267,11 @@ def build(root, scale=1.0, bucket_cap=256 * 1024, versions=(101, 102, 103)):
     last = v3; pool.finish(last)
     shares = sorted(run1)
     _write_config(root, shares, versions, ts, snaps, last)
-    truth = {"buckets": {str(b): list(v) for b, v in sorted(pool.bucket_writer.items())}}
+    truth = {"buckets": {str(b): list(v) for b, v in sorted(pool.bucket_writer.items())}, "reused": {str(b): w for b, w in sorted(pool.reused.items())}, "rotated_run": (v1 - 1) if rotate else None}
     manifest = {"format": "hbkgen-1", "truth": truth, "root": root, "last_clean": v2, "incident": v3, "bucket_cap": bucket_cap, "stats": pool.stats,
                 "versions": {str(v): {sh: {p: {"sha256": hashlib.sha256(e["data"]).hexdigest(), "size": len(e["data"]), "mtime": e["mtime"],
                                                "kind": e["info"]["kind"], "status": e["status"], "writer": e["info"].get("writer"),
-                                               "buckets": sorted({pool.where[g][0] for g in e["info"].get("ids", []) if g in pool.where})}
+                                               "buckets": sorted({pool.where[g][0] for g in (e["info"].get("src_ids") or e["info"].get("ids") or []) if g in pool.where})}
                                            for (s, p), e in sorted(snaps[v].items()) if s == sh} for sh in shares} for v in versions}}
     return manifest
 
@@ -286,8 +324,9 @@ def main(argv):
     ap.add_argument("out", help="folder to create, e.g. /tmp/e2e/e2e_1.hbk (must not exist or be empty)")
     ap.add_argument("--scale", type=float, default=1.0, help="file size factor (1 = ~6 MB)")
     ap.add_argument("--bucket-kb", type=int, default=256, help="bucket size in KiB (real backups: ~52 MB)")
+    ap.add_argument("--rotate", action="store_true", help="add a rotated-away run: purged buckets, reused bucket ids, copy of an untagged original")
     a = ap.parse_args(argv)
-    m = build(a.out, a.scale, a.bucket_kb * 1024)
+    m = build(a.out, a.scale, a.bucket_kb * 1024, rotate=a.rotate)
     mp = a.out.rstrip("/\\") + ".manifest.json"
     with open(mp, "w") as f: json.dump(m, f, indent=1)
     print(f"{a.out}: {m['stats']}; manifest {mp}")
