@@ -20,7 +20,14 @@ Repo: https://github.com/Niels-van-Haren-Holding-B-V/callido-restore · read `do
 Status snapshot at 2026-10-30 21:21: bucket-index download "dir 11 done: 2048 21:21:31"; mapper test (first 6144 buckets): "still running".
 T4 (resumable index fetch, per-directory stats, Stop) and T6 (parser unit tests + ubuntu CI) are implemented in code. T1 and T2 still need the real backup and are not touched here.
 
-## T1 — Full pool map (blocking for restores) — owner: claude-hbk-1, in progress
+## T1 — Full pool map (blocking for restores) — owner: claude-hbk-1, DONE for backups with Pool/chunk_index
+2026-10-31 (hbk-1, #152, #156, #157; docs/handovers/2026-10-31-1800-claude-hbk-1.md): the backup has its own exact table
+`Pool/chunk_index` (docs/FORMAT.md; format from woutervanranst/synology-hyperbackup-reverse-engineering, shared by Niels).
+`PoolReader.plan()` reads it, so every chunk is located exactly and no preparation is needed; the inferred map below is
+only the fallback for a backup without the table. Checked on the real backup: 1.15 M size-checked placements agree with the
+table, real files (a 70 MB one the map could not place included) restore byte-exact. Left: T2 against the real backup with
+the table (a full restore of one share, verified counts), and an answer for unused/purged ids in the table.
+The history below describes the inferred map (fallback).
 Approach changed on 2026-10-30 23:30 (see docs/handovers): the sequential mapper (`callido_restore/pool/poolmap.py`) is obsolete. The map is now built
 **anchor-first** by `callido_restore/pool/anchor.py`: (1) `scan_anchors` finds every tagged record's first chunk in the bucket indexes
 (`version_list.tag` = md5 of the first K chunk md5s + their total length, K ≤ 9; records whose leading chunks are dedup refs are
