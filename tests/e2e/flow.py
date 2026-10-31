@@ -34,7 +34,8 @@ def compare(manifest, ver, share_roots, only=None):
     return out
 
 
-def run_inprocess(work, scale=1.0, bucket_kb=256, log=print, rotate=False, rotate_copy=True):
+def run_inprocess(work, scale=1.0, bucket_kb=256, log=print, **gen):
+    """gen: hbkgen.build options (rotate, rotate_copy, chunk_index, id_base_blocks)."""
     """The whole flow against the engine (Backup + the real mapper in-process). Returns a report dict."""
     from tests.e2e import hbkgen
     from callido_restore import paths
@@ -42,7 +43,7 @@ def run_inprocess(work, scale=1.0, bucket_kb=256, log=print, rotate=False, rotat
     from callido_restore.restore.backup import Backup
     from callido_restore.sources.source import Source
     work = Path(work); hbk = work / "e2e_1.hbk"
-    t0 = time.time(); manifest = hbkgen.build(str(hbk), scale, bucket_kb * 1024, rotate=rotate, rotate_copy=rotate_copy); rep = {"gen_s": round(time.time() - t0, 2), "stats": manifest["stats"]}
+    t0 = time.time(); manifest = hbkgen.build(str(hbk), scale, bucket_kb * 1024, **gen); rep = {"gen_s": round(time.time() - t0, 2), "stats": manifest["stats"]}
     old = (paths.CONF_DIR, paths.INDEX_DIR, paths.CACHE_DIR, paths.JOBS_DIR, poolmap.DETACHED)
     paths.CONF_DIR = work / "conf"; paths.INDEX_DIR = work / "conf" / "index"; paths.CACHE_DIR = work / "conf" / "cache"; paths.JOBS_DIR = work / "conf" / "jobs"
     poolmap.DETACHED = False

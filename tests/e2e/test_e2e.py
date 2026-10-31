@@ -3,7 +3,7 @@ mapper, in-process), restore of whole runs, compared byte for byte and by mtime 
 
 Fast (~2 s) and offline: no rclone, no remote, nothing under ~/.hbk-explorer. The run through the real app process and its HTTP
 API is tests/e2e/test_app.py (HBK_E2E=1)."""
-import shutil, tempfile, unittest
+import os, shutil, tempfile, unittest
 
 from tests.e2e import flow
 
@@ -128,6 +128,43 @@ class Rotation(unittest.TestCase):
         spilling 19 -> 29 in run 101) then has its next anchor earlier than itself, gets spill-no-solution and is lost from
         every run. The copy itself restores."""
         self.check(self.run_flow(rotate_copy=True))
+
+
+
+from callido_restore.core import pool as _pool
+
+
+@unittest.skipUnless(hasattr(_pool, "ChunkIndex"), "Pool/chunk_index reader not in this build (hbk-1's #152)")
+class ChunkIndexPath(unittest.TestCase):
+    """The backup's own chunk table (Pool/chunk_index, hbk-1's #152): every chunk is located exactly, no inferred map needed.
+    Run on the layouts where the inferred map declines files, every run must restore completely, byte for byte, and every
+    pooled file must count as verified."""
+    def run_flow(self, scale, bucket_kb, **kw):
+        work = tempfile.mkdtemp(prefix="hbk-e2e-ci-")
+        try: return flow.run_inprocess(work, scale=scale, bucket_kb=bucket_kb, chunk_index=True, **kw)
+        finally: shutil.rmtree(work, ignore_errors=True)
+
+    def check(self, rep):
+        for ver, r in rep["restores"].items():
+            for k in ("missing", "wrong_bytes", "wrong_mtime", "extra"): self.assertEqual(r[k], [], f"v{ver} {k}: " + flow.summary(rep))
+            self.assertEqual(r["errors"], [], ver); self.assertEqual(r["unverified"], [], ver)
+
+    def test_layout_where_the_map_declines_a_straddling_tag_and_its_copy(self):        # E7 layout
+        self.check(self.run_flow(0.5, 512))
+
+    def test_rotation_with_reused_buckets_and_a_copy_of_a_rotated_original(self):     # E6 layout
+        self.check(self.run_flow(1, 256, rotate=True))
+
+    def test_a_record_straddling_the_8_mib_slice_boundary(self):
+        """ids start at block 127, so id 289,260 (the record at bytes 8,388,604..8,388,632 of the table) is used; at scale 10 a
+        writer reaches it in that block."""
+        rep = self.run_flow(10, 2048, id_base_blocks=127)
+        self.assertIn(289260, rep["manifest"]["truth"]["chunk_index_straddle"])
+        self.check(rep)
+
+    @unittest.skipUnless(os.environ.get("HBK_E2E_STRESS") == "1", "HBK_E2E_STRESS=1: large files over many buckets (E5 layout)")
+    def test_large_files_over_many_buckets(self):                                       # E5 layout
+        self.check(self.run_flow(20, 1024))
 
 
 if __name__ == "__main__":
