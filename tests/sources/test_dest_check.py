@@ -169,6 +169,68 @@ class DestCheckApiTests(SourceFixture):
         except HTTPError as e:
             self.assertEqual(e.code, 405)
 
+    def test_connect_drive_with_own_key_recreates_the_remote_and_clears_the_daemon_caches(self):
+        """A Google key typed for an existing connection re-creates that remote under the same name with client id and secret
+        (rclone config create replaces an existing section and runs the sign-in); the daemon's listing cache and backend cache
+        are dropped so the next call uses the new key."""
+        calls = []
+        def run(args, **kw):
+            calls.append(args)
+            if args[1] == "config": return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+            return subprocess.CompletedProcess(args, 0, stdout=json.dumps([{"Name": "Synology"}]), stderr="")
+        body = json.dumps({"kind": "drive", "name": "gdrive", "client_id": "123.apps.googleusercontent.com", "client_secret": "GOCSPX-x"}).encode()
+        base = f"http://127.0.0.1:{self.srv.server_address[1]}/api/rclone/connect"
+        from callido_restore.sources import rclone
+        with mock.patch.object(subprocess, "run", run), mock.patch.object(rclone, "forget") as forget, mock.patch.object(rclone, "fscache_clear") as clear, \
+             mock.patch.object(rclone, "authorize_drive", return_value='{"access_token":"t"}') as auth, mock.patch.object(rclone, "remotes", return_value=[("nas:", "smb")]):
+            with urlopen(Request(base, data=body, headers={"Content-Type": "application/json"})) as r: job = json.loads(r.read())
+            for _ in range(50):
+                with urlopen(f"http://127.0.0.1:{self.srv.server_address[1]}/api/job?id={job['id']}") as r: j = json.loads(r.read())
+                if j["state"] != "running": break
+                time.sleep(0.05)
+        self.assertEqual(j["state"], "done", j); self.assertEqual(j["result"], {"remote": "gdrive:", "shares": ["Synology"]})
+        create = [c for c in calls if c[1] == "config"][0]
+        self.assertEqual(create[1:5], ["config", "create", "gdrive", "drive"])
+        self.assertIn("client_id=123.apps.googleusercontent.com", create); self.assertIn("client_secret=GOCSPX-x", create)
+        self.assertIn('token={"access_token":"t"}', create); self.assertIn("--non-interactive", create)      # the token from the sign-in, no questions
+        self.assertEqual(auth.call_args[0][:2], ("123.apps.googleusercontent.com", "GOCSPX-x"))
+        self.assertTrue(str(auth.call_args[1]["template"]).endswith("static/oauth.html"))
+        forget.assert_called_once(); clear.assert_called_once()
+
+    def _connect(self, body, remotes):
+        from callido_restore.sources import rclone
+        calls = []
+        def run(args, **kw):
+            calls.append(args); return subprocess.CompletedProcess(args, 0, stdout="" if args[1] == "config" else json.dumps([{"Name": "Synology"}]), stderr="")
+        base = f"http://127.0.0.1:{self.srv.server_address[1]}/api/rclone/connect"
+        with mock.patch.object(subprocess, "run", run), mock.patch.object(rclone, "forget"), mock.patch.object(rclone, "fscache_clear"), \
+             mock.patch.object(rclone, "authorize_drive", return_value='{"access_token":"t"}'), mock.patch.object(rclone, "remotes", return_value=remotes):
+            try:
+                with urlopen(Request(base, data=json.dumps(body).encode(), headers={"Content-Type": "application/json"})) as r: job = json.loads(r.read())
+            except HTTPError as e:
+                return e.code, json.loads(e.read()), calls
+            for _ in range(50):
+                with urlopen(f"http://127.0.0.1:{self.srv.server_address[1]}/api/job?id={job['id']}") as r: j = json.loads(r.read())
+                if j["state"] != "running": break
+                time.sleep(0.05)
+        return 200, j, calls
+
+    def test_rekeying_an_existing_drive_remote_updates_it(self):
+        """A known Drive remote gets `config update` (its other options survive), not a fresh section."""
+        code, j, calls = self._connect({"kind": "drive", "name": "gdrive", "client_id": "1.apps.googleusercontent.com", "client_secret": "s"}, [("gdrive:", "drive"), ("nas:", "smb")])
+        self.assertEqual((code, j["state"]), (200, "done"), j)
+        cfg = [c for c in calls if c[1] == "config"][0]
+        self.assertEqual(cfg[1:4], ["config", "update", "gdrive"]); self.assertIn("client_id=1.apps.googleusercontent.com", cfg); self.assertIn("--non-interactive", cfg)
+
+    def test_a_non_drive_remote_is_never_turned_into_drive(self):
+        """The SMB restore target (or any other remote) under the selected name is refused before anything runs."""
+        code, j, calls = self._connect({"kind": "drive", "name": "nas", "client_id": "1.apps.googleusercontent.com", "client_secret": "s"}, [("nas:", "smb")])
+        self.assertEqual(code, 400); self.assertIn("smb connection", j["error"]); self.assertEqual(calls, [])
+
+    def test_an_smb_share_never_replaces_a_drive_remote(self):
+        code, j, calls = self._connect({"kind": "smb", "name": "gdrive", "host": "192.0.2.10", "user": "alice", "password": "pw"}, [("gdrive:", "drive")])
+        self.assertEqual(code, 400); self.assertIn("drive connection", j["error"]); self.assertEqual(calls, [])
+
 
 if __name__ == "__main__":
     unittest.main()

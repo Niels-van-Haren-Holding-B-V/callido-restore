@@ -3,8 +3,9 @@
 1. Start the app (or `python3 -m callido_restore` from a checkout). It opens its own window; the UI is served on http://127.0.0.1:8765 only on this
    machine. Closing the window stops the app (running restores are saved and can be resumed). `--browser` opens the UI in your
    browser instead; `--no-window` runs only the server.
-2. **+ Add backup** → choose where the `.hbk` lives: an rclone remote you already have, Google Drive (sign in; optionally use your own
-   OAuth client id to get your own API quota), a NAS over SMB, or a local folder → browse to the `.hbk` folder → name it.
+2. **+ Add backup** → choose where the `.hbk` lives: an rclone remote you already have, Google Drive (sign in; with or without a
+   Google key of your own, see "Google Drive: a key of your own" below), a NAS over SMB, or a local folder → browse to the `.hbk`
+   folder → name it.
 3. The overview shows the task, the shares and all backup runs. Click a run in the chart (or "Go to version"). The latest run is
    selected by default. Click the share chips to load snapshots (downloads a few MB each).
 4. Tabs: **Changes** (what that run added/changed), **File timeline**, **Browse folders**, **Search & flags** (suspicious files),
@@ -24,3 +25,25 @@
    `.hbk-restore-<job id>-…` folder inside the target and moved into place one by one; it is removed when the job ends or is resumed.
    If the app was killed mid-restore, that folder may remain; it is safe to delete.
 Encrypted (`.L0CK3D`) copies are detected and reported as unreadable.
+
+## Google Drive: a key of your own (optional, recommended)
+
+Google does not limit how fast you download, it limits how many *requests* an app may make per second. Without a key of your own
+the app signs in through the public key of rclone, which every rclone user in the world shares, so Google slows it down. A backup
+is tens of thousands of small index files, one request each: that is what turns the one-time preparation into hours. With your own
+key the limit is yours alone, and the Google sign-in screen shows your own project name instead of "rclone". Everything works
+without a key; it is only slower.
+
+Getting one is free and takes about five minutes (the same steps are in the app, under *Add backup*):
+
+1. Open console.cloud.google.com with the Google account that holds the backup and create a project (any name).
+2. *APIs & Services → Library*: enable "Google Drive API".
+3. *APIs & Services → OAuth consent screen*: user type *External*, app name "Callido Restore", your e-mail as contact; under
+   *Test users* add your own account (the app stays in testing mode, which is fine for one user).
+4. *APIs & Services → Credentials → Create credentials → OAuth client ID*, application type *Desktop app*.
+5. Copy the Client ID and the Client secret into the app: either when you connect Google Drive, or later under *Add backup →
+   a connection I already set up → Downloads slow? Give this Google Drive connection a key of your own*. The connection keeps its
+   name, so your backups and everything already downloaded stay; you sign in to Google once more.
+
+The key identifies the app towards Google and gives nobody access to your Drive. It is stored in rclone's configuration on this
+Mac together with the sign-in token.
