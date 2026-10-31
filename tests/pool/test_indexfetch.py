@@ -439,6 +439,18 @@ class BuildPoolWiringTests(unittest.TestCase):
             (share / "1234.db.5").write_bytes(b"x"); self.backup.shares = ["Documents"]; self.src._list.clear()
             self.assertEqual(self.backup.build_pool(job), {"mapped": 1, "upto": 1}); mapper.assert_called_once()
 
+    def test_a_max_bucket_test_run_is_not_a_finished_preparation(self):
+        fetch_ok = lambda *_a, **_k: {"stopped": False, "directories": 1, "directories_complete": 1, "failed": [], "mismatch_count": 0}
+        share = self.src.cache_dir / "Config" / "@Share" / "Documents"; share.mkdir(parents=True); (share / "1234.db.5").write_bytes(b"x")
+        self.backup.shares = ["Documents"]; self.src._list.clear()
+        with mock.patch("callido_restore.core.pool.build_runs", lambda *_a, **_k: None), mock.patch("callido_restore.core.pool.build_recsizes", lambda *_a, **_k: None), \
+             mock.patch("callido_restore.core.pool.build_recmeta", lambda *_a, **_k: {}), mock.patch("callido_restore.pool.indexfetch.fetch_bucket_indexes", fetch_ok), \
+             mock.patch("callido_restore.pool.poolmap.build_poolmap_detached", return_value=({1: 0}, 1)):
+            self.backup.build_pool({"cancel": False, "message": "", "progress": 0}, max_bucket=500)
+            self.assertFalse(self.backup.pool_prepared())
+            self.backup.build_pool({"cancel": False, "message": "", "progress": 0})
+            self.assertTrue(self.backup.pool_prepared())
+
     def test_stop_does_not_start_the_mapper(self):
         self.src.remotes = ["remote:hbk"]
         mapped = {}
