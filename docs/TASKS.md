@@ -32,7 +32,15 @@ Acceptance: `/api/pool` reports the map; a sample of files from every share rest
 Wired into the app by hbk-2 on 2026-10-31 (0.3.4): `Backup.build_pool` runs `poolmap.build_map` in a child process
 (`build_poolmap_detached`, app entry `--mapper`), which is `build_poolmap_anchor` = `poolmap2.build_writers` → `anchor.scan_anchors`
 → `anchor.resolve_and_place` → `anchor.export_map` (poolmap2.json); the v1 search only with `HBK_MAPPER=v1`. Until then the app
-still ran v1, which sat at bucket 3000/36132 for 15 minutes on the real backup. hbk-2 also edited anchor.py for 0.3.6 (Niels: one team, fix what is in the way): workers print `progress k` to stderr and the
+still ran v1, which sat at bucket 3000/36132 for 15 minutes on the real backup. **Measured on the real backup, 2026-10-31 11:50 (hbk-2, full pipeline from the app's data, 4 scan workers):** record meta 2 s;
+writer tables 3 s; anchor scan 454 s (277,198 of 277,493 tagged records anchored, 11,742 multi-hit); placement 545 s;
+result **13,656 of 36,132 buckets owned** (directories 5-7 of 18 almost entirely unowned: 0, 1, 6 buckets), placed 260,220
+records + 12,107 gap-filled, unplaced 9,082, gap-unfilled 41,301, free-assigned 3,519, owner-conflicts 2,440. A random
+sample of files per share plans (all chunks placed) for 78-91 % of the files but only 11-51 % of the bytes: the large
+files sit in unplaced records. `rhythm(b)` agrees with the anchored owners in directory 0 only (1539/1554) and 37 % overall;
+consecutive owned buckets of one writer are mostly adjacent (gap 1: 4,906 of 13,652), so writers write runs, not round-robin.
+This is the open core of T1: ownership of anchor-less bucket runs. Scratch map and timing log kept by hbk-2 on request.
+hbk-2 also edited anchor.py for 0.3.6 (Niels: one team, fix what is in the way): workers print `progress k` to stderr and the
 parent logs `scanned i/N` every 2 s; `resolve_and_place` logs `resolving copies: pass p/3, i/N records` and
 `placing writer w: k/N anchors` every 2 s (the job maps them to 95-100 %). The `--scan-worker` dispatch is in the app entry since 0.3.5 (`anchor._worker_command`), so the frozen app scans with
 MAX_WORKERS processes like a checkout; the one-worker fallback is gone (hbk-2, coordinated through this note).
