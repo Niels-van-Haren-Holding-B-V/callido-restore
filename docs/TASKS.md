@@ -124,6 +124,12 @@ fallback when the daemon is not running (tests, failed start). 30 s listing cach
 connection). Copies, config changes and the index fetch still run as separate rclone processes; moving them to the daemon
 (`operations/copyfile` with `_async` + `job/status` for progress) is the next step.
 
+## v0.2.0 — first-run fixes and UI responsiveness (Niels's DMG test, 2026-10-31)
+DONE: #59 (hbk-3: Google sign-in guidance, throttle-proof job waits, one-click pick of the detected backup, open-backup job with
+step progress, one listing call per click, @AppConfig labelled), #61 (hbk-3: header activity pill, toasts with Undo, always-visible
+restore selection panel, state-aware + buttons, step-3 "Not started" text), #63 (hbk-2: persistent rclone daemon with 30 s cache,
+pid file, VERSION 0.2.0, release notes). Open: auto-start of the pool preparation (Niels decides), OAuth client "Callido Restore".
+
 ## Do not
 * Do not change the on-disk layout of `~/.hbk-explorer/index/<src>/pool/*` without a migration; the full map build takes hours of downloads.
 * Do not commit anything from `~/.hbk-explorer` or user paths/remotes into the repo, and no real share/folder/host names (H18 rule in docs/HANDOVER.md).
