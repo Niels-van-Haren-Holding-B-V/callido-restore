@@ -227,6 +227,10 @@ class DestCheckApiTests(SourceFixture):
         code, j, calls = self._connect({"kind": "drive", "name": "nas", "client_id": "1.apps.googleusercontent.com", "client_secret": "s"}, [("nas:", "smb")])
         self.assertEqual(code, 400); self.assertIn("smb connection", j["error"]); self.assertEqual(calls, [])
 
+    def test_an_smb_share_never_replaces_a_drive_remote(self):
+        code, j, calls = self._connect({"kind": "smb", "name": "gdrive", "host": "192.0.2.10", "user": "alice", "password": "pw"}, [("gdrive:", "drive")])
+        self.assertEqual(code, 400); self.assertIn("drive connection", j["error"]); self.assertEqual(calls, [])
+
 
 if __name__ == "__main__":
     unittest.main()

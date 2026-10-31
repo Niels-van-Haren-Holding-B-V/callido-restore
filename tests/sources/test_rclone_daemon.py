@@ -246,11 +246,12 @@ class Authorize(unittest.TestCase):
         args = popen.call_args[0][0]
         self.assertEqual(args[:5], ["/fake/rclone", "authorize", "drive", "id.apps.googleusercontent.com", "sec"])
         self.assertIn("--auth-no-open-browser", args); self.assertEqual(args[args.index("--template") + 1], "/tpl/oauth.html")
+        self.assertEqual(args[args.index("--drive-scope") + 1], "drive.readonly")                                 # read-only consent, never auth/drive
 
     def test_without_a_key_rclone_uses_its_own(self):
         with mock.patch.object(rc, "RCLONE", "/fake/rclone"), mock.patch.object(subprocess, "Popen", return_value=_FakeAuthorize(self.LINES)) as popen:
             rc.authorize_drive()
-        self.assertEqual(popen.call_args[0][0][:4], ["/fake/rclone", "authorize", "drive", "--auth-no-open-browser"])
+        self.assertEqual(popen.call_args[0][0][:6], ["/fake/rclone", "authorize", "drive", "--drive-scope", "drive.readonly", "--auth-no-open-browser"])
 
     def test_failure_raises_with_rclone_text(self):
         lines = self.LINES[:4] + ["NOTICE: Fatal error: config failed to refresh token: Error: access_denied"]

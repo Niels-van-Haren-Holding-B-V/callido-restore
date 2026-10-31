@@ -197,16 +197,18 @@ class H(BaseHTTPRequestHandler):
             if u.path == "/api/rclone/connect":  # start an rclone config (opens the browser for Google); body carries the secrets
                 name = re.sub(r"[^A-Za-z0-9_-]", "", body.get("name") or "gdrive") or "gdrive"
                 kind = body.get("kind", "drive")
+                if kind not in ("drive", "smb"): return self._json({"error": "unknown kind"}, 400)
+                # A name that already belongs to a connection of another type is refused before anything runs: the SMB restore
+                # target must never be replaced by a Drive section, nor a Drive connection by an SMB one. A known Drive remote
+                # is updated, not re-created, so options set outside the app (root folder, shared drive, ...) survive.
+                try: existing = dict(rclone.remotes()).get(name + ":")
+                except rclone.RcloneError: existing = None
+                if existing and existing != kind:
+                    want = "Google Drive" if kind == "drive" else "an SMB share"
+                    return self._json({"error": f"“{name}” is a {existing} connection, not {want}. Pick that connection, or use a new name."}, 400)
                 if kind == "drive":
                     cid, csec = (body.get("client_id") or "").strip(), (body.get("client_secret") or "").strip()
                     args = None
-                    # An existing name is only re-keyed when it is a Google Drive remote: the SMB restore target (or any other
-                    # remote) must never be replaced by a Drive section. Known Drive remotes are updated, not re-created, so
-                    # options set outside the app (root folder, shared drive, ...) survive.
-                    try: existing = dict(rclone.remotes()).get(name + ":")
-                    except rclone.RcloneError: existing = None
-                    if existing and existing != "drive":
-                        return self._json({"error": f"“{name}” is a {existing} connection, not Google Drive. Pick the Google Drive connection, or connect Google Drive under a new name."}, 400)
                 elif kind == "smb":
                     # the password is handed to rclone over stdin ("-"), so it never appears in a process list; the obscured
                     # form that lands in rclone.conf is the only thing passed as an argument
@@ -214,7 +216,6 @@ class H(BaseHTTPRequestHandler):
                     obs = subprocess.run([RCLONE, "obscure", "-"], input=pw + "\n", capture_output=True, text=True).stdout.strip()
                     if not obs: return self._json({"error": "rclone could not prepare the password"}, 500)
                     args = [RCLONE, "config", "create", name, "smb", f"host={body.get('host', '')}", f"user={body.get('user', '')}", f"pass={obs}", "--obscure=false", "--non-interactive"]
-                else: return self._json({"error": "unknown kind"}, 400)
                 def run(job):
                     if kind == "drive":
                         # The sign-in runs through `rclone authorize` with the app's own landing page (static/oauth.html) instead of

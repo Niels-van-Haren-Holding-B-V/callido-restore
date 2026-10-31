@@ -170,14 +170,15 @@ def forget(prefix=None):
 
 AUTH_URL = re.compile(r"https?://127\.0\.0\.1:\d+/auth\?state=\S+")
 
-def authorize_drive(client_id="", client_secret="", on_url=None, template=None, timeout=600):
-    """Run the Google sign-in with ``rclone authorize`` and return the token JSON rclone prints. rclone listens on 127.0.0.1 for
+def authorize_drive(client_id="", client_secret="", on_url=None, template=None, timeout=600, scope="drive.readonly"):
+    """Run the Google sign-in with ``rclone authorize`` and return the token JSON rclone prints. The consent asks for ``scope``
+    only (read-only by default: the app never writes to the Drive). rclone listens on 127.0.0.1 for
     Google's redirect and renders ``template`` (a Go HTML template, our own page instead of rclone's plain one) when it arrives;
     the browser is not opened by rclone but by ``on_url(url)``, so the app decides how. Without a client id rclone's shared
     one is used. Raises RcloneError with rclone's last lines when the sign-in fails or the user never completes it."""
     args = [RCLONE, "authorize", "drive"]
     if client_id: args += [client_id, client_secret or ""]
-    args.append("--auth-no-open-browser")
+    args += ["--drive-scope", scope, "--auth-no-open-browser"]
     if template: args += ["--template", str(template)]
     p = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, text=True)
     lines, token, grab, opened = [], [], False, False
