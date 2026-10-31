@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Callido Restore for Windows 10 and 11 (x64): a per-machine MSI built with WiX Toolset 5 by packaging/windows/build_msi.py.
+
+  Preprocessor variables (passed by build_msi.py with -d):
+    Version     product version, x.y.z (from callido_restore/about.py)
+    AppDir      the PyInstaller one-folder output (holds "Callido Restore.exe" and _internal\)
+    IconFile    assets/AppIcon.ico
+    LicenseRtf  license + third-party notices as RTF (generated)
+    ArtDir      packaging/windows (banner.bmp, dialog.bmp)
+
+  The UpgradeCode below is fixed forever: every later MSI with the same code upgrades this one in place (MajorUpgrade).
+  User data (~/.hbk-explorer: settings, indexes, saved restore jobs) is never touched by install, upgrade or uninstall.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+  <Package Name="Callido Restore"
+           Manufacturer="Callido"
+           Version="$(var.Version)"
+           UpgradeCode="FC1126F1-1B40-48ED-9E1B-F366AA822764"
+           Scope="perMachine"
+           Compressed="yes"
+           Language="1033">
+    <SummaryInformation Description="Callido Restore: restore Synology Hyper Backup (.hbk) files" Manufacturer="Callido" />
+
+    <MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed. Uninstall it first to install this older version." />
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <!-- Programs and Features (Add/Remove Programs) entry -->
+    <Icon Id="AppIcon.ico" SourceFile="$(var.IconFile)" />
+    <Property Id="ARPPRODUCTICON" Value="AppIcon.ico" />
+    <Property Id="ARPURLINFOABOUT" Value="https://callido.nl" />
+    <Property Id="ARPHELPLINK" Value="https://github.com/Niels-van-Haren-Holding-B-V/hyperbackup-desktop" />
+    <Property Id="ARPCONTACT" Value="Callido" />
+
+    <!-- msiexec /i CallidoRestore.msi DESKTOPSHORTCUT=0 installs without the desktop shortcut -->
+    <Property Id="DESKTOPSHORTCUT" Value="1" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="CompanyFolder" Name="Callido">
+        <Directory Id="INSTALLFOLDER" Name="Callido Restore" />
+      </Directory>
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder" />
+    <StandardDirectory Id="DesktopFolder" />
+
+    <ComponentGroup Id="AppFiles" Directory="INSTALLFOLDER">
+      <Component Id="MainExecutable">
+        <File Id="MainExe" Source="$(var.AppDir)\Callido Restore.exe" KeyPath="yes">
+          <Shortcut Id="StartMenuShortcut" Directory="ProgramMenuFolder" Name="Callido Restore"
+                    Description="Restore Synology Hyper Backup (.hbk) files" WorkingDirectory="INSTALLFOLDER"
+                    Icon="AppIcon.ico" Advertise="yes" />
+        </File>
+      </Component>
+      <!-- Everything else PyInstaller produced (_internal\: Python, pywebview, rclone.exe, static UI, licenses) -->
+      <Files Include="$(var.AppDir)\**">
+        <Exclude Files="$(var.AppDir)\Callido Restore.exe" />
+      </Files>
+    </ComponentGroup>
+
+    <Component Id="DesktopShortcut" Directory="DesktopFolder" Condition="DESKTOPSHORTCUT = 1">
+      <Shortcut Id="DesktopShortcut" Name="Callido Restore" Description="Restore Synology Hyper Backup (.hbk) files"
+                Target="[#MainExe]" WorkingDirectory="INSTALLFOLDER" Icon="AppIcon.ico" />
+      <RegistryValue Root="HKLM" Key="Software\Callido\Callido Restore" Name="DesktopShortcut" Type="integer" Value="1" KeyPath="yes" />
+    </Component>
+
+    <Feature Id="Main" Title="Callido Restore" Level="1">
+      <ComponentGroupRef Id="AppFiles" />
+      <ComponentRef Id="DesktopShortcut" />
+    </Feature>
+
+    <!-- Installer look: the app's logo and brand gradient (scripts/make_windows_art.py) -->
+    <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
+    <WixVariable Id="WixUILicenseRtf" Value="$(var.LicenseRtf)" />
+    <WixVariable Id="WixUIBannerBmp" Value="$(var.ArtDir)\banner.bmp" />
+    <WixVariable Id="WixUIDialogBmp" Value="$(var.ArtDir)\dialog.bmp" />
+
+    <!-- "Open Callido Restore now" on the last page; runs as the signed-in user, not elevated -->
+    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="Open Callido Restore now" />
+    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOX" Value="1" />
+    <Property Id="WixShellExecTarget" Value="[#MainExe]" />
+    <CustomAction Id="LaunchApplication" BinaryRef="Wix4UtilCA_X64" DllEntry="WixShellExec" Impersonate="yes" />
+    <UI>
+      <Publish Dialog="ExitDialog" Control="Finish" Event="DoAction" Value="LaunchApplication"
+               Condition="WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 and NOT Installed" />
+    </UI>
+  </Package>
+</Wix>
