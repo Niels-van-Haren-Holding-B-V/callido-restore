@@ -168,10 +168,6 @@ class RealDaemon(unittest.TestCase):
         rc.stop(); self.assertFalse(rc.DAEMON.running)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class CopyFile(unittest.TestCase):
     """Downloads through the daemon: async copyfile, bytes/speed/retry note from core/stats, cancel, fallback."""
     def test_async_copy_reports_progress_and_finishes(self):
@@ -187,13 +183,14 @@ class CopyFile(unittest.TestCase):
                 if polls["n"] >= 3:
                     open(dst, "wb").write(b"x" * 30); return {"finished": True, "success": True}
                 return {"finished": False}
-            if m == "core/stats": return {"bytes": 0, "speed": 1234.5, "transferring": [{"bytes": 10 * polls["n"]}], "lastError": "googleapi: Error 403: userRateLimitExceeded" if polls["n"] == 1 else ""}
+            if m == "core/stats":                     # rclone's group "bytes" already contains the in-flight bytes of "transferring"
+                return {"bytes": 10 * polls["n"], "speed": 1234.5, "transferring": [{"bytes": 10 * polls["n"]}], "lastError": "googleapi: Error 403: userRateLimitExceeded" if polls["n"] == 1 else ""}
             if m == "core/stats-delete": return {}
             raise AssertionError(m)
         seen = []
         with mock.patch.object(rc.DAEMON, "available", return_value=True), mock.patch.object(rc.DAEMON, "rc", side_effect=fake_rc):
             rc.copyfile("gdrive:x/file", dst, progress=lambda b, s, n: seen.append((b, s, n)), poll=0)
-        self.assertEqual(seen[0], (10, 1234.5, "rate-limited, retrying")); self.assertEqual(seen[1][2], "")
+        self.assertEqual(seen[0], (10, 1234.5, "rate-limited, retrying")); self.assertEqual(seen[1], (20, 1234.5, ""))   # not 20 and 40
         self.assertEqual(seen[-1], (30, 0.0, "")); self.assertIn("core/stats-delete", calls)
 
     def test_failed_job_raises(self):
@@ -208,14 +205,15 @@ class CopyFile(unittest.TestCase):
         def fake_rc(m, timeout=None, **p):
             calls.append(m); return {"jobid": 1} if m == "operations/copyfile" else {"finished": False} if m == "job/status" else {}
         with mock.patch.object(rc.DAEMON, "available", return_value=True), mock.patch.object(rc.DAEMON, "rc", side_effect=fake_rc):
-            with self.assertRaises(rc.RcloneError) as cm: rc.copyfile("nas:x/f", "/tmp/never", cancelled=lambda: True, poll=0)
-        self.assertEqual(str(cm.exception), "cancelled"); self.assertIn("job/stop", calls)
+            with self.assertRaises(rc.Cancelled): rc.copyfile("nas:x/f", "/tmp/never", cancelled=lambda: True, poll=0)
+        self.assertIn("job/stop", calls)
 
     def test_without_daemon_runs_copyto(self):
         ok = subprocess.CompletedProcess([], 0, stdout="", stderr="")
         with mock.patch.object(rc.DAEMON, "available", return_value=False), mock.patch.object(subprocess, "run", return_value=ok) as run:
             rc.copyfile("nas:x/f", "/tmp/out")
         self.assertEqual(run.call_args[0][0][1:4], ["copyto", "nas:x/f", "/tmp/out"])
+        for flag in ("--tpslimit", "--drive-pacer-min-sleep", "--low-level-retries"): self.assertIn(flag, run.call_args[0][0])
 
     @unittest.skipUnless(rc.RCLONE and shutil.which(rc.RCLONE), "needs an rclone binary")
     def test_real_daemon_copies_a_local_file(self):
@@ -225,3 +223,25 @@ class CopyFile(unittest.TestCase):
         seen = []
         rc.copyfile(src, os.path.join(d, "out", "a.bin"), progress=lambda b, s, n: seen.append(b), poll=0.05)
         self.assertEqual(open(os.path.join(d, "out", "a.bin"), "rb").read(), b"z" * 100000); self.assertEqual(seen[-1], 100000)
+
+
+class StartFlags(unittest.TestCase):
+    """The daemon runs with the same Drive throttling as the one-process fallback: four slice downloads at a time without a
+    transactions-per-second cap hit Google's rate limit."""
+    def test_rcd_command_line_carries_the_throttle_flags(self):
+        d = tempfile.mkdtemp(); self.addCleanup(shutil.rmtree, d, True)
+        proc = mock.Mock(); proc.poll.return_value = None; proc.pid = 4242
+        daemon = rc._Daemon()
+        with mock.patch.object(rc, "RCLONE", "/fake/rclone"), mock.patch.object(rc.paths, "CONF_DIR", __import__("pathlib").Path(d)), \
+             mock.patch.object(rc, "kill_stale"), mock.patch.object(subprocess, "Popen", return_value=proc) as popen, \
+             mock.patch.object(daemon, "_call", return_value={"version": "v1.75.2"}):
+            self.assertTrue(daemon.start(timeout=1))
+        args = popen.call_args[0][0]
+        self.assertEqual(args[:2], ["/fake/rclone", "rcd"])
+        for flag, value in (("--tpslimit", "8"), ("--drive-pacer-min-sleep", "100ms"), ("--low-level-retries", "20")):
+            self.assertIn(flag, args); self.assertEqual(args[args.index(flag) + 1], value)
+        self.assertEqual(rc.THROTTLE, args[-len(rc.THROTTLE):])
+
+
+if __name__ == "__main__":
+    unittest.main()
