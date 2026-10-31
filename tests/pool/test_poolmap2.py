@@ -149,6 +149,10 @@ class ReaderMaps(unittest.TestCase):
         self.assertEqual(r.verification(120), ("unverified", "reads chunks from a record that is placed without a size check"))
         self.assertEqual(r.verification(200), ("unverified", "placed without a size check"))
         self.assertEqual(r.verification(300), ("identical_copy", ""))
+        # H32.2: a copy of 120 (clean record that reads from the guessed 200) is unverified through its source's references
+        v2["aliased"]["4"].append([340, 4, 120]); v2["placements"]["4"]["340"] = [[8, 1, 1]]; v2["ranges"]["4"].append([1300, 2, 340]); ids[340] = [1300, 1301]
+        pool.dump_json(os.path.join(self.pool, "poolmap2.json"), v2); r.load_map2(os.path.join(self.pool, "poolmap2.json"))
+        self.assertEqual(r.verification(340), ("unverified", "reads chunks from a record that is placed without a size check"))
         self.assertEqual(r.verification(310), ("unverified", "reads chunks from a record that is placed without a size check"))   # its source reads from the guessed one
         self.assertEqual(r.verification(320), ("unverified", "partial copy")); self.assertEqual(r.verification(330), ("unverified", "partial copy"))
         self.assertEqual(r.verification(-5), ("verified", "")); self.assertEqual(r.verification(999)[0], "unverified")
