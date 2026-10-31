@@ -458,7 +458,7 @@ class Backup:
         # The anchor-first mapper anchors records by the tags that only raw <ver>.db snapshots carry (recmeta_set<s>.json,
         # built above from the snapshots on this Mac): without any, the map would silently have no anchors at all.
         if not [p for p, kind in dbs if kind == "raw"]:
-            raise RuntimeError("no snapshot database is on this Mac yet: load the file list of at least one share for the chosen run (the chips above the tabs), then run the preparation again")
+            raise RuntimeError("no snapshot database is on this computer yet: load the file list of at least one share for the chosen run (the chips above the tabs), then run the preparation again")
         job["message"] = "mapping buckets to writers"; job["progress"] = 0.7
         def mlog(m):
             # The mapper's lines carry counters and stats for the log; the job shows a plain phrase (mapper_phase) and takes
