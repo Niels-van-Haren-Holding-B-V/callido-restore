@@ -400,8 +400,10 @@ class Backup:
             job["message"] = str(m)
             mm = re.search(r"mapped (\d+)/(\d+)", str(m))
             if mm: job["progress"] = 0.7 + 0.3 * int(mm.group(1)) / max(1, int(mm.group(2)))
-        res, upto = poolmap.build_poolmap(self.src, str(pool_dir), mlog, max_bucket=max_bucket)
+        # In a child process: the app stays responsive while the search runs at full CPU, and Stop ends it at once.
+        res, upto = poolmap.build_poolmap_detached(self.src, str(pool_dir), mlog, max_bucket=max_bucket, cancelled=lambda: bool(job.get("cancel")))
         self._pool = None
+        if job.get("cancel"): return stopped("mapping")
         return {"mapped": len(res), "upto": upto}
     def restore_plan(self, items, skip_meta=True):
         """items: [{share, ver, path, is_dir}] -> list of file rows (dicts) to restore."""

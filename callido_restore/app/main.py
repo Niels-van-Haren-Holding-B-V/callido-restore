@@ -69,6 +69,9 @@ def run_window(port, smoke=False):
     return result.get("title")
 
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] == "--mapper":           # child process of the pool preparation (pool/poolmap.py)
+        from callido_restore.pool import poolmap
+        return poolmap.mapper_main(sys.argv[2:])
     ap = argparse.ArgumentParser(description=f"{APP_NAME}: explore a Synology Hyper Backup and restore files from it")
     ap.add_argument("--port", type=int, default=8765)
     ap.add_argument("--no-browser", "--no-window", dest="no_window", action="store_true", help="server only (no window, no browser)")

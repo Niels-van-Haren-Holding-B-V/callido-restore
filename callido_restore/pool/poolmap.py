@@ -1,5 +1,5 @@
 """Build the bucket -> writer map for a Hyper Backup pool (see core/pool.py for the format notes)."""
-import os, json, struct, bisect, collections, time
+import os, json, struct, bisect, collections, subprocess, sys, threading, time
 from array import array
 from callido_restore.core.pool import BLOCK, WRITER_OF_SET, SET_OF_WRITER, load_runs
 
@@ -233,3 +233,54 @@ def build_poolmap(source, outdir, log=print, max_bucket=None):
            "counts": {b: mp.counts[b] for b in result}, "buckets": {b: list(v) for b, v in result.items()}, "mapped_upto": upto}
     json.dump(out, open(os.path.join(outdir, "poolmap.json"), "w"))
     return result, upto
+
+
+# ----------------------------------------------------------------------------- the mapper as a child process
+# The search is pure Python at 100 % CPU for minutes; inside the app process it holds the interpreter lock, so every API
+# request and the Stop button wait behind it. As a child process it costs the app nothing and Stop simply ends it.
+DETACHED = True
+
+def _mapper_command(source_id, outdir, max_bucket):
+    """The child's command line: the frozen app binary with --mapper, or `python -m callido_restore --mapper` from a checkout."""
+    args = ["--mapper", source_id, str(outdir), "-" if max_bucket is None else str(max_bucket)]
+    if getattr(sys, "frozen", False): return [sys.executable] + args, None
+    root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    env = dict(os.environ, PYTHONPATH=root + os.pathsep + os.environ.get("PYTHONPATH", ""))
+    return [sys.executable, "-m", "callido_restore"] + args, env
+
+def mapper_main(argv):
+    """Child entry: build the pool map of one source, every log line to stdout (the parent turns them into progress)."""
+    from callido_restore.sources.source import load_sources, SOURCES
+    load_sources()
+    sid, outdir, mb = argv[0], argv[1], argv[2]
+    src = SOURCES.get(sid)
+    if src is None: raise SystemExit(f"mapper: unknown source {sid}")
+    build_poolmap(src, outdir, log=lambda m: print(m, flush=True), max_bucket=None if mb == "-" else int(mb))
+    return 0
+
+def build_poolmap_detached(source, outdir, log=print, max_bucket=None, cancelled=None):
+    """``build_poolmap`` in a child process. Returns what ``build_poolmap`` returns (read back from poolmap.json), or
+    ({}, 0) when ``cancelled()`` turned true (the child is terminated, nothing is left running). Raises RuntimeError with the
+    child's last lines when it fails. ``DETACHED = False`` (tests) runs in-process instead."""
+    if not DETACHED: return build_poolmap(source, outdir, log, max_bucket)
+    cmd, env = _mapper_command(source.id, outdir, max_bucket)
+    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, text=True, env=env)
+    tail = collections.deque(maxlen=8)
+    def reader():
+        for line in p.stdout:
+            line = line.rstrip("\n"); tail.append(line)
+            try: log(line)
+            except Exception: pass
+    t = threading.Thread(target=reader, daemon=True, name="mapper-log"); t.start()
+    while p.poll() is None:
+        if cancelled is not None and cancelled():
+            p.terminate()
+            try: p.wait(5)
+            except subprocess.TimeoutExpired: p.kill()
+            t.join(2); return {}, 0
+        time.sleep(0.3)
+    t.join(5)
+    if p.returncode != 0:
+        raise RuntimeError("mapper failed: " + (" | ".join(l for l in tail if l.strip())[-400:] or f"exit {p.returncode}"))
+    out = json.load(open(os.path.join(outdir, "poolmap.json")))
+    return {int(b): tuple(v) for b, v in out["buckets"].items()}, out.get("mapped_upto", 0)
