@@ -222,3 +222,61 @@ def version():
             v = DAEMON.rc("core/version").get("version", ""); return f"rclone {v}" if v else ""
         except DaemonGone: pass
     return _run(["version"]).splitlines()[0].strip()
+
+
+# ----------------------------------------------------------------------------- downloads
+RATE_LIMIT_WORDS = ("rateLimitExceeded", "userRateLimitExceeded", "429", "quota", "Too Many Requests", "403")
+
+def _fallback_copy(src, dst, timeout=None):
+    """One ``rclone copyto`` process (the pre-daemon way): throttled, retried by rclone itself."""
+    _run(["copyto", src, str(dst), "--retries", "5", "--low-level-retries", "20", "--retries-sleep", "5s", "--tpslimit", "8",
+          "--drive-pacer-min-sleep", "100ms"], timeout=timeout)
+
+
+def copyfile(src, dst, progress=None, cancelled=None, poll=0.5, timeout=None):
+    """Download one remote file ``src`` ("remote:path/file") to the local path ``dst`` through the daemon when it runs
+    (``operations/copyfile`` as an async job; ``core/stats`` of its group gives bytes, speed and rclone's retry state, reported
+    through ``progress(bytes_done, speed_bytes_per_s, note)`` where note is '' or 'rate-limited, retrying'), otherwise as one
+    rclone process. ``cancelled()`` true stops the job. Raises RcloneError when rclone fails."""
+    dst = str(dst)
+    if not DAEMON.available():
+        return _fallback_copy(src, dst, timeout)
+    if ":" in src and not src.startswith("/"): fs, remote = src.split(":", 1)[0] + ":", src.split(":", 1)[1]
+    else: fs, remote = os.path.split(src)                        # a local file: its folder is the fs, the name the remote part
+    dst_dir, dst_name = os.path.split(dst)
+    group = f"job/{secrets.token_hex(4)}"
+    try:
+        started = DAEMON.rc("operations/copyfile", srcFs=fs, srcRemote=remote, dstFs=dst_dir or ".", dstRemote=dst_name, _async=True, _group=group)
+    except DaemonGone:
+        return _fallback_copy(src, dst, timeout)
+    jobid = started.get("jobid")
+    t0 = time.time(); last_note = ""
+    try:
+        while True:
+            try: st = DAEMON.rc("job/status", jobid=jobid)
+            except DaemonGone:
+                return _fallback_copy(src, dst, timeout)          # the daemon died mid-copy: finish the old way
+            if st.get("finished"):
+                if st.get("success"): break
+                raise RcloneError(st.get("error") or "copy failed")
+            if cancelled is not None and cancelled():
+                try: DAEMON.rc("job/stop", jobid=jobid)
+                except RcloneError: pass
+                raise RcloneError("cancelled")
+            if timeout and time.time() - t0 > timeout:
+                try: DAEMON.rc("job/stop", jobid=jobid)
+                except RcloneError: pass
+                raise RcloneError(f"copy of {src} timed out after {timeout:.0f} s")
+            if progress is not None:
+                try: stats = DAEMON.rc("core/stats", group=group)
+                except RcloneError: stats = {}
+                done = sum(int(t.get("bytes") or 0) for t in (stats.get("transferring") or [])) + int(stats.get("bytes") or 0)
+                speed = float(stats.get("speed") or 0.0)
+                err = str(stats.get("lastError") or "")
+                note = "rate-limited, retrying" if (stats.get("retryError") or any(w in err for w in RATE_LIMIT_WORDS)) and err else ""
+                progress(done, speed, note); last_note = note
+            time.sleep(poll)
+    finally:
+        try: DAEMON.rc("core/stats-delete", group=group)
+        except RcloneError: pass
+    if progress is not None: progress(os.path.getsize(dst) if os.path.exists(dst) else 0, 0.0, "")
