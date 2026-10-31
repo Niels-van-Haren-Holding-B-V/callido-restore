@@ -29,6 +29,8 @@ CLOCK_PERCENTILE = 0.95      # a revision's "max id" is this percentile of the i
 CLOCK_SLACK = 1.02           # ... and a record counts as too new for a bucket beyond that times this, plus CLOCK_MARGIN ids
 CLOCK_MARGIN = 1000
 PHANTOM_TRIES = 6            # untagged records of a gap tried as "stored nothing" when the gap has no exact solution
+PERIOD_WINDOW, PERIOD_MAX, PERIOD_MIN_PAIRS, PERIOD_AGREE, PERIOD_STEPS = 400, 40, 30, 0.95, 6   # owner-sequence period detection
+QUAD_CYCLES = (4, 3, 2)      # writers taking quads in turn: four, three or two of them active
 ROUNDS = 6                   # placement rounds: dedup references resolve as the records they point at get placed
 
 
@@ -291,12 +293,48 @@ def resolve_and_place_v3(writers, anchors, index, log=print, max_bucket=None):
     for w in W:
         mine = sorted(ri for (ww, ri) in anchor if ww == w)
         for a1, a2 in zip(mine, mine[1:]): nxt_anchor[(w, a1)] = a2
+    period_cache = {}
+    def local_period(b):
+        """The repeat period of the owner sequence along bucket ids near b (writers take id batches in a fixed turn while
+        they are all busy, e.g. 0000111122223333 or 0 11 2222 11 0000): the smallest P whose known owner pairs (x, x+P)
+        within PERIOD_WINDOW ids agree in PERIOD_AGREE of at least PERIOD_MIN_PAIRS cases; None when there is no such P."""
+        key = b // PERIOD_WINDOW
+        if key in period_cache: return period_cache[key]
+        lo, hi = max(0, b - PERIOD_WINDOW), b + PERIOD_WINDOW; best = None
+        for P_ in range(2, PERIOD_MAX + 1):
+            agree = n = 0
+            for x in range(lo, hi):
+                a1 = claimed.get(x); a2 = claimed.get(x + P_)
+                if isinstance(a1, int) and isinstance(a2, int) and rev.get(x) == rev.get(x + P_): n += 1; agree += a1 == a2
+            if n >= PERIOD_MIN_PAIRS and agree >= PERIOD_AGREE * n: best = P_; break
+        period_cache[key] = best; return best
+    def predicted_owner(x, P_):
+        """owner of x by the period: the nearest known owner at x +- k*P_ (same revision)"""
+        for k in range(1, PERIOD_STEPS + 1):
+            for y in (x - k * P_, x + k * P_):
+                o = claimed.get(y)
+                if isinstance(o, int) and rev.get(y) == rev.get(x): return o
+        return None
     def search(b, bB, need_c, need_b):
         cands = [(x, counts[x], index.total(x)) for x in window(b, bB)]
+        P_ = local_period(b) if bB is not None else None
+        if P_:
+            w_ = claimed.get(b)
+            sub = [c for c in cands if predicted_owner(c[0], P_) == w_]
+            if sub and (need_c or need_b):
+                us, _, nsol, over = _claim_search(sub, need_c, need_b)
+                if us is not None and nsol == 1 and not over: R["spill-by-period"] += 1; return us, 1, False
         if quad_rev.get(rev.get(b, 0)) and rev.get(bB) == rev.get(b) and bB > b:
             must, units = quad_units(b, bB); nc = need_c - sum(counts[x] for x in must); nb = need_b - sum(index.total(x) for x in must)
             if nc == 0 and nb == 0: return must, 1, False
             if nc > 0 and nb > 0:
+                # The writers take quads in turn, so a writer's quads repeat every `cyc` quads (cyc = the writers active then).
+                # Try the head's place in that cycle first: a small exhaustive search; only a unique exact count-and-bytes
+                # match is accepted. Then every free quad between (the general search, budget-bound).
+                for cyc in QUAD_CYCLES:
+                    sub = [(k, c, by) for k, (xs, c, by) in enumerate(units) if (xs[0] // 4 - b // 4) % cyc == 0]
+                    us, _, nsol, over = _claim_search(sub, nc, nb)
+                    if us is not None and nsol == 1 and not over: R[f"spill-quad-cycle-{cyc}"] += 1; return must + [x for k in us for x in units[k][0]], 1, False
                 us, _, nsol, over = _claim_search([(k, c, by) for k, (xs, c, by) in enumerate(units)], nc, nb)
                 if us is not None: return must + [x for k in us for x in units[k][0]], nsol, over
         if need_c == 0 and need_b == 0: return [], 1, False

@@ -114,6 +114,21 @@ class Placer(unittest.TestCase):
         self.assertEqual(flags["guessed"], set()); self.assertEqual(R["verified"], 3)
         pool.tmp.cleanup()
 
+    def test_spill_interior_follows_the_writers_turn(self):
+        # Two writers take bucket ids in turn (0,1,0,1,...). Writer 0's record C starts in bucket 0 and ends in bucket 6 where D
+        # starts; its interior is buckets 2 and 4. Bucket 3 (writer 1, not anchored) looks exactly like bucket 2, so count and
+        # bytes alone allow {2, 4} and {3, 4}; the turn picks {2, 4}, and the bytes must still match exactly.
+        pool = Pool({0: (2, [10, 20, 30]), 1: (2, [100, 100]), 2: (2, [100, 110]), 3: (2, [100, 110]), 4: (2, [100, 120]), 5: (2, [100, 100]), 6: (2, [5, 6])})
+        C = _rec(0, 100, 7, size=20 + 30 + 210 + 220 + 5, tag="c"); D = _rec(1, 107, 1, size=6, tag="d")
+        E = [_rec(0, 1000, 2, size=200, tag="e0"), _rec(1, 1002, 2, size=210), _rec(2, 1004, 2, size=200, tag="e2")]
+        anchors = {(0, 0): [(0, 1, 2)], (0, 1): [(6, 1, 1)], (1, 0): [(1, 0, 2)], (1, 2): [(5, 0, 2)]}
+        old = place.PERIOD_MIN_PAIRS; place.PERIOD_MIN_PAIRS = 1
+        try: owner, pl, R, flags = self.run_placer(pool, {0: [C, D], 1: E, 2: [], 3: []}, anchors)
+        finally: place.PERIOD_MIN_PAIRS = old
+        self.assertEqual(R["spill-by-period"], 1)
+        self.assertEqual(pl[0][0], [(0, 1, 2), (2, 0, 2), (4, 0, 2), (6, 0, 1)]); self.assertEqual((owner[2], owner[4]), (0, 0))
+        pool.tmp.cleanup()
+
     def test_gap_records_between_anchors_are_laid_out_and_verified(self):
         # bucket 0: A (1 chunk) then an untagged record U (2 chunks) then a record H whose head is a dedup reference to A's chunk
         # (so it has a tag but was never scanned), then B anchored; sizes: U unknown (guessed), H = own 70 + referenced 10
