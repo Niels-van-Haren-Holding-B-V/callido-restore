@@ -347,7 +347,7 @@ def resolve_and_place_v3(writers, anchors, index, log=print, max_bucket=None):
             c2 = [(x, counts[x], index.total(x)) for x in band(b, bB)]
             if len(cands) < len(c2) <= MAX_CANDIDATES: sol, _, nsol, over = _claim_search(c2, need_c, need_b)
         return sol, nsol, over
-    range_placed = set()
+    range_placed = {}                 # (w, ri) -> the interior buckets it claimed
     def place_by_count(w, ri, b, e, segs, rem):
         """A spill whose dedup references are not placed yet has no exact own-byte target. Its interior is searched by exact
         chunk count among the free buckets the writers' turn assigns to it (unique solutions only), and accepted when its bytes
@@ -378,7 +378,7 @@ def resolve_and_place_v3(writers, anchors, index, log=print, max_bucket=None):
         by = index.seg_bytes(full)
         if not (r.size - r.nd * MAX_CHUNK <= by <= r.size): return False
         for x in sol: claimed[x] = w
-        placements[w][ri] = full; flags["guessed"].add((w, ri)); range_placed.add((w, ri)); R["placed-by-count"] += 1; R["claimed"] += len(sol)
+        placements[w][ri] = full; flags["guessed"].add((w, ri)); range_placed[(w, ri)] = list(sol); R["placed-by-count"] += 1; R["claimed"] += len(sol)
         return True
     deferred = []
     def place_anchored(w, ri, b, e, final=False):
@@ -570,7 +570,14 @@ def resolve_and_place_v3(writers, anchors, index, log=print, max_bucket=None):
     for (w, ri) in sorted(range_placed):
         ob = own_bytes(w, ri)
         if ob is not None and index.seg_bytes(placements[w][ri]) == ob: flags["guessed"].discard((w, ri)); R["by-count-verified-later"] += 1
-        elif ob is not None: del placements[w][ri]; flags["guessed"].discard((w, ri)); R["by-count-rejected-later"] += 1
+        elif ob is not None:                                             # wrong layout: drop it and give its buckets back
+            del placements[w][ri]; flags["guessed"].discard((w, ri)); R["by-count-rejected-later"] += 1
+            for x in range_placed[(w, ri)]:
+                if claimed.get(x) == w: del claimed[x]
+    # ---- G. copies alias their stored record
+    for (w, ri), (w2, ri2) in alias.items():
+        if ri2 in placements[w2] and W[w][ri].size == W[w2][ri2].size and W[w][ri].n == W[w2][ri2].n: placements[w][ri] = placements[w2][ri2]; flags["aliased"][(w, ri)] = (w2, ri2); R["aliased"] += 1
+        else: R["alias-unplaced"] += 1
     # ---- G0. records without chunks of their own (a later version whose every chunk is shared with earlier ones): nothing to
     # place; the reader takes each chunk from the record that stores it. Counted as placed (an empty segment list) when every
     # referenced chunk is placed and their bytes add up to the file size exactly.
@@ -579,10 +586,6 @@ def resolve_and_place_v3(writers, anchors, index, log=print, max_bucket=None):
             if r.n or r.idx in placements[w] or r.size is None or not r.dedup: continue
             if own_bytes(w, r.idx) == 0: placements[w][r.idx] = []; R["placed-all-shared"] += 1
             else: R["all-shared-unresolved"] += 1
-    # ---- G. copies alias their stored record
-    for (w, ri), (w2, ri2) in alias.items():
-        if ri2 in placements[w2] and W[w][ri].size == W[w2][ri2].size: placements[w][ri] = placements[w2][ri2]; flags["aliased"][(w, ri)] = (w2, ri2); R["aliased"] += 1
-        else: R["alias-unplaced"] += 1
     guard("placement")
     owner_out = {b: w for b, w in claimed.items() if isinstance(w, int)}
     R["owned"] = len(owner_out); R["records"] = sum(len(W[w]) for w in W); R["placed"] = sum(len(p) for p in placements.values())
