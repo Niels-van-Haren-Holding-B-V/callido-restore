@@ -21,7 +21,7 @@ silent (asserted against the current code):
   9..10. Pointer B is not required to equal pointer A minus 12. Field 4
   (documented constant 0x64) is not checked.
 """
-import hashlib, struct, tempfile, unittest, zlib
+import json, hashlib, struct, tempfile, unittest, zlib
 from unittest import mock
 from pathlib import Path
 
@@ -247,6 +247,36 @@ class VirtualFileIndexTests(unittest.TestCase):
         self.assertEqual(entry["rec_off"], rec_off)
         self.assertEqual(entry["mtime"], 1700001111)
         self.assertEqual(bytes(struct.pack(">14I", *entry["raw"])), blob)
+
+
+class RecMetaTests(unittest.TestCase):
+    """build_recmeta: raw snapshot rows -> recmeta_set<s>.json keyed by the record offset the virtual_file entry points at."""
+    def _root(self, td):
+        root = Path(td); d = root / "Config" / "virtual_file.index"; d.mkdir(parents=True)
+        words = [0] * 14; words[12] = (4 << 16) | 0; words[13] = 0x55          # entry at off 64: set 4, rec_off 0x55
+        (d / "0.idx.1").write_bytes(b"\xee" * 64 + struct.pack(">14I", *words))
+        import sqlite3
+        db = root / "1.db.2"; con = sqlite3.connect(db)
+        con.execute("create table version_list (off_virtual_file integer, size integer, tag blob, mode integer)")
+        tag = bytes(range(16)) + struct.pack(">I", 777)
+        con.executemany("insert into version_list values (?,?,?,?)", [(64, 4096, tag, 0o100644), (64, 4096, None, 0o100644),
+                                                                        (-1, 1, tag, 0o100644), (64, 5, tag, 0o040755)])
+        con.commit(); con.close()
+        return root, db
+
+    def test_writes_size_tag_and_tail_per_set(self):
+        with tempfile.TemporaryDirectory() as td:
+            root, db = self._root(td); out = root / "pool"; out.mkdir()
+            n = cpool.build_recmeta(_LocalSource(root), [str(db)], str(out), log=lambda *a: None)
+            self.assertEqual(n, 1)
+            self.assertEqual(json.loads((out / "recmeta_set4.json").read_text()), {"85": [4096, bytes(range(16)).hex(), 777]})
+            for s in (1, 2, 3): self.assertEqual(json.loads((out / f"recmeta_set{s}.json").read_text()), {})
+
+    def test_cancel_writes_nothing(self):
+        with tempfile.TemporaryDirectory() as td:
+            root, db = self._root(td); out = root / "pool"; out.mkdir()
+            self.assertIsNone(cpool.build_recmeta(_LocalSource(root), [str(db)], str(out), log=lambda *a: None, cancelled=lambda: True))
+            self.assertEqual(list(out.iterdir()), [])
 
 
 class PoolStatusTests(unittest.TestCase):

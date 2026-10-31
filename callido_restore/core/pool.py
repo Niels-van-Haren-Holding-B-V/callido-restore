@@ -537,13 +537,23 @@ class PoolReader:
         return bs
 
 # ----------------------------------------------------------------------------- record -> (size, tag) from raw snapshots
-def build_recmeta(source, snapshot_dbs, outdir, log=print):
-    """Raw Hyper Backup <ver>.db files -> recmeta_set<s>.json: {rec_off: [size, tag16hex, tag_tail]}.
-    tag = md5(concat of the 16-byte md5 of the file's first K chunks), tail = total ulen of those K chunks (K = min(n, 9))."""
-    import sqlite3, mmap
+def build_recmeta(source, snapshot_dbs, outdir, log=print, cancelled=None):
+    """Raw Hyper Backup <ver>.db files -> recmeta_set<s>.json: {rec_off: [size, tag16hex, tag_tail]}, what the anchor-first
+    mapper (pool/poolmap2.build_writers) reads. tag = md5(concat of the 16-byte md5 of the file's first K chunks), tail = total
+    ulen of those K chunks (K = min(n, 9)). ``cancelled()`` true between databases returns None without writing; otherwise
+    the number of records."""
+    import mmap
     vf = SlicedStream(source, "Config/virtual_file.index"); names = vf.names(); maps = {}; fhs = []
-    for k in sorted(names):
-        fh = open(vf.slice_path(k), "rb"); fhs.append(fh); maps[k] = mmap.mmap(fh.fileno(), 0, access=mmap.ACCESS_READ)
+    try:
+        for k in sorted(names):
+            fh = open(vf.slice_path(k), "rb"); fhs.append(fh); maps[k] = mmap.mmap(fh.fileno(), 0, access=mmap.ACCESS_READ)
+        return _recmeta(maps, snapshot_dbs, outdir, log, cancelled)
+    finally:
+        for m in maps.values(): m.close()
+        for fh in fhs: fh.close()
+
+def _recmeta(maps, snapshot_dbs, outdir, log, cancelled):
+    import sqlite3
     def entry(off):
         k, lo = divmod(off, SLICE); m = maps.get(k)
         if m is None: return None
@@ -555,6 +565,7 @@ def build_recmeta(source, snapshot_dbs, outdir, log=print):
         f = struct.unpack(">14I", b); return f[12] >> 16, ((f[12] & 0xffff) << 32) | f[13]
     meta = {1: {}, 2: {}, 3: {}, 4: {}}; n = 0
     for path in snapshot_dbs:
+        if cancelled and cancelled(): return None
         con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
         for off, size, tag in con.execute("select off_virtual_file, size, tag from version_list where off_virtual_file>=0 and (mode & 61440)=32768"):
             e = entry(off)
@@ -567,8 +578,7 @@ def build_recmeta(source, snapshot_dbs, outdir, log=print):
                 if cur[1] is None and t16: cur[1] = t16; cur[2] = tail
             n += 1
         con.close()
-    for m in maps.values(): m.close()
-    for fh in fhs: fh.close()
     for s in meta: dump_json(os.path.join(outdir, f"recmeta_set{s}.json"), meta[s])
-    tagged = sum(1 for v in meta.values() for x in v.values() if x[1])
-    log(f"record meta: {sum(len(v) for v in meta.values()):,} records ({tagged:,} with tag) from {n:,} rows")
+    tagged = sum(1 for v in meta.values() for x in v.values() if x[1]); total = sum(len(v) for v in meta.values())
+    log(f"record meta: {total:,} records ({tagged:,} with tag) from {n:,} rows")
+    return total

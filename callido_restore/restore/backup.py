@@ -384,6 +384,10 @@ class Backup:
                 if e["local"] and re.match(r"^\d+\.db\.\d+$", n): dbs.append((str(self.src.ensure(f"Config/@Share/{sh}/{n}")), "raw"))
         pool.build_recsizes(self.src, dbs, str(pool_dir), log, cancelled=lambda: bool(job.get("cancel")))
         if job.get("cancel"): return stopped("record-sizes")
+        # The anchor-first mapper (T1) identifies records by the file tags of the raw snapshots: recmeta_set<s>.json.
+        job["message"] = "collecting file tags from loaded snapshots"; job["progress"] = 0.32
+        raw = [p for p, kind in dbs if kind == "raw"]
+        if pool.build_recmeta(self.src, raw, str(pool_dir), log, cancelled=lambda: bool(job.get("cancel"))) is None: return stopped("record-tags")
         entries = json.loads(listing.read_text())
         # New index bytes go to the app cache. Files already in the source or a mirror are only read.
         fetch = indexfetch.fetch_bucket_indexes(

@@ -441,6 +441,29 @@ class BuildPoolWiringTests(unittest.TestCase):
         self.assertNotIn("yes", mapped)
         self.assertFalse((self.src.index_dir / "pool" / "poolmap.json").exists())
 
+    def test_record_tags_come_from_the_raw_snapshots(self):
+        """The anchor-first mapper reads recmeta_set<s>.json; build_pool writes them from the local raw snapshot databases
+        (after the sizes, before the bucket-index download), and a Stop there ends the build."""
+        share = self.src.local / "Config/@Share/s"; share.mkdir(parents=True)
+        (share / "1.db.2").write_bytes(b"raw"); (share / "notes.txt").write_bytes(b"x")
+        self.backup.shares = ["s"]
+        calls = {}
+        def recmeta(source, dbs, outdir, log, cancelled=None):
+            calls["dbs"] = [Path(d).name for d in dbs]; calls["outdir"] = outdir; return 1
+        fetch = lambda *_a, **_k: {"stopped": True, "directories": 1, "directories_complete": 0, "failed": [], "mismatch_count": 0}
+        with mock.patch("callido_restore.core.pool.build_runs", lambda *_a, **_k: None), \
+             mock.patch("callido_restore.core.pool.build_recsizes", lambda *_a, **_k: None), \
+             mock.patch("callido_restore.core.pool.build_recmeta", recmeta), \
+             mock.patch("callido_restore.pool.indexfetch.fetch_bucket_indexes", fetch):
+            self.backup.build_pool({"cancel": False, "message": "", "progress": 0})
+        self.assertEqual(calls["dbs"], ["1.db.2"]); self.assertEqual(calls["outdir"], str(self.src.index_dir / "pool"))
+        with mock.patch("callido_restore.core.pool.build_runs", lambda *_a, **_k: None), \
+             mock.patch("callido_restore.core.pool.build_recsizes", lambda *_a, **_k: None), \
+             mock.patch("callido_restore.core.pool.build_recmeta", lambda *_a, **_k: None), \
+             mock.patch("callido_restore.pool.indexfetch.fetch_bucket_indexes", lambda *_a, **_k: self.fail("fetch ran")):
+            result = self.backup.build_pool({"cancel": False, "message": "", "progress": 0})
+        self.assertEqual(result, {"stopped": True, "stage": "record-tags"})
+
     def test_wrong_size_index_does_not_start_the_mapper(self):
         self.src.remotes = ["remote:hbk"]
         pool = self.src.index_dir / "pool"
