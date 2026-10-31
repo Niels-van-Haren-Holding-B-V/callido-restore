@@ -207,6 +207,17 @@ class ResumeCountsTests(_Fixture):
         res = b2.restore(saved["items"], saved["dest"], job2, start_at=saved["next_index"])
         self.assertEqual(res["errors"], 251); self.assertEqual(len(job2["errors"]), 201)
 
+    def test_failed_file_is_written_to_the_log(self):                        # app.log: Niels saw 109 errors in the UI and none in the log
+        import io
+        from contextlib import redirect_stdout
+        class Pool(FakePool):
+            def extract(self2, off, out, **kw):
+                if out.endswith("y.txt"): raise KeyError("chunk not in the pool map")
+                super().extract(off, out, **kw)
+        b2 = FakeBackup(self.src, FILES); b2.pool = Pool(); buf = io.StringIO()
+        with redirect_stdout(buf): b2.restore(self.items, "", self.job("log"))
+        self.assertIn("restore error 1: A/sub/y.txt:", buf.getvalue()); self.assertIn("chunk not in the pool map", buf.getvalue())
+
     def test_unverified_total_survives_the_capped_list(self):                # H32.1: the same for the unverified list (UNVERIFIED_MAX entries)
         from callido_restore.restore import backup as B
         job = self.job("unv"); job["cancel"] = True
