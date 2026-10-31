@@ -93,6 +93,20 @@ class CrossBucketTags(unittest.TestCase):
 
 
 
+    @unittest.expectedFailure
+    def test_a_straddling_tag_with_an_identical_copy(self):
+        """hbk-6 finding E7: at scale 0.5 with 512 KiB buckets thesis.docx starts at bucket 2 entry 41/49 with K=9, so its tag
+        straddles into bucket 7 and the anchor scan finds no position for it. Without positions the phantom pass never sees
+        that run 102's thesis-copy.docx is an identical copy (phantom-of-tagged 0); the copy keeps its chunk count, the gap
+        has no solution, and both files are missing from every run."""
+        work = tempfile.mkdtemp(prefix="hbk-e2e-x-")
+        try:
+            rep = flow.run_inprocess(work, scale=0.5, bucket_kb=512)
+            for ver, r in rep["restores"].items(): self.assertEqual(r["missing"], [], f"v{ver}: " + flow.summary(rep))
+        finally:
+            shutil.rmtree(work, ignore_errors=True)
+
+
 class Rotation(unittest.TestCase):
     """Version rotation (hbk-1's mechanism, 2026-10-31): a rotated-away run, its unneeded buckets purged, the freed bucket ids
     reused by one writer while the others get fresh ones (same revision), so (revision, id) is not fill order for those."""
