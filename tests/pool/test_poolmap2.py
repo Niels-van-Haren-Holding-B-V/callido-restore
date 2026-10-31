@@ -34,6 +34,31 @@ class NewRange(unittest.TestCase):
         self.assertIsNone(new_range(BLOCK * 3 + 1, 7, 9))       # a gap that is not block aligned is not new
 
 
+class RecDedup(unittest.TestCase):
+    def test_runs_merge_and_count(self):
+        r = poolmap2.Rec(0)
+        r.add_dedup(10, 13); r.add_dedup(13, 15); r.add_dedup(20, 21); r.add_dedup(30, 30)
+        self.assertEqual(r.dedup, [[10, 5], [20, 1]]); self.assertEqual(r.nd, 6)
+        self.assertEqual(list(r.dedup_ids()), [10, 11, 12, 13, 14, 20])
+
+    def test_build_writers_keeps_dedup_as_runs(self):
+        # set 4 = writer 0: record A stores ids 0-2; record B references 0-1 again (dedup) and stores 3-4; the other sets are empty.
+        with tempfile.TemporaryDirectory() as d:
+            for s in (1, 2, 3, 4):
+                recs, starts, lens = ([100, 200, 200], [0, 0, 3], [3, 2, 2]) if s == 4 else ([], [], [])
+                with open(os.path.join(d, f"runs_set{s}.bin"), "wb") as f:
+                    f.write(struct.pack("<Q", len(recs)))
+                    from array import array
+                    array("q", recs).tofile(f); array("q", starts).tofile(f); array("l", lens).tofile(f)
+                pool.dump_json(os.path.join(d, f"recmeta_set{s}.json"), {"200": [999, "ab" * 16, 7]} if s == 4 else {})
+            W = poolmap2.build_writers(d, log=lambda *a: None)
+        a, b = W[0]
+        self.assertEqual((a.off, a.ranges, a.n, a.dedup, a.nd, a.head_new), (100, [[0, 3]], 3, [], 0, 3))
+        self.assertEqual((b.off, b.ranges, b.n, b.dedup, b.nd, b.head_new), (200, [[3, 2]], 2, [[0, 2]], 2, 0))
+        self.assertEqual((b.size, b.tag, b.tail), (999, "ab" * 16, 7))
+        self.assertEqual([len(W[w]) for w in (1, 2, 3)], [0, 0, 0])
+
+
 class Mapper(unittest.TestCase):
     def setUp(self):
         self.a = [_entry(100, 1), _entry(200, 2)]; self.b = [_entry(50, 3)]; self.c = [_entry(70, 4), _entry(80, 5)]
@@ -56,6 +81,17 @@ class Mapper(unittest.TestCase):
         self.mp.W[0][0].size += 1
         r = self.mp.try_assign(0, 5, (0, (), None))
         self.assertIsNone(r[0]); self.assertIn("size mismatch", r[1])
+
+    def test_size_check_counts_dedup_runs(self):
+        # record 2 (bucket 6) also references record 0's two ids (100 + 200 bytes); its size must include them
+        r2 = self.mp.W[0][2]; r2.add_dedup(0, 2); r2.size += 300
+        st, ev, pl = self.mp.try_assign(0, 5, (0, (), None))          # places records 0 and 1 (marked)
+        st, ev, pl = self.mp.try_assign(0, 6, st)
+        self.assertEqual(pl, [(2, 6, 0, 2)]); self.assertEqual(self.mp.stats["verified"], 3)      # records 0, 1 and 2
+        r2.size += 1
+        self.mp.place[0].pop(2)
+        r = self.mp.try_assign(0, 6, (2, (), None))
+        self.assertIsNone(r[0]); self.assertIn("got 450 want 451", r[1])
 
     def test_probe_leaves_no_placements(self):
         r = self.mp.probe(0, 5, (0, (), None))
