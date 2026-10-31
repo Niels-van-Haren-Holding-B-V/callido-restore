@@ -54,7 +54,11 @@ are reused; time order is `(index rev, bucket id)`, and a record whose ids did n
 an untagged copy. (3) With phantoms removed the stream-offset pins are consistent (13,911 against 538) and the anchorless
 buckets, the interiors of large files, are accounted for by the pins to within a few percent. v3 of `resolve_and_place` (time
 order, phantom aliasing, pins, a byte-and-count partition of the anchorless buckets, every placed record verified by its ulen
-sum against the file size) is in progress; the prototype already owns 31 k of 36 k buckets.
+sum against the file size) is in `callido_restore/pool/place.py` (default; `HBK_PLACER=v2` for the old placer). Measured on
+the real backup: 618 k of 845 k records placed, 74.5 % of the bytes, 454 k records verified by their byte sum, 1,279 of 1,593
+files > 100 MB (the old placer: 57.6 % of bytes, 696 large files). What is left sits mostly in the initial backup, where the
+buckets are so alike that the interior search of a large file is ambiguous and is left unplaced rather than guessed; next:
+a model of the initial backup's bucket allocation (ids handed out four at a time, round-robin), then T2.
 
 ## T2 — End-to-end restore test to the NAS
 Wizard → version 1234 (the last clean run) → <a small folder> → target `<remote>:<restore-test-folder>`.

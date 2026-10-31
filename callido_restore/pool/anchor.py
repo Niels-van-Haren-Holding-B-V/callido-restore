@@ -32,10 +32,12 @@ def build_tag_index(writers):
                 idx.setdefault((K, r.tail), {}).setdefault(r.tag, []).append((w, r.idx)); ntag += 1
     return idx, ntag
 
-def _scan_entries(b, ents, keys, hits):
-    """Scan one bucket's index entries; keys: (K, tail) -> set(tags); hits: tag -> [(b, i, K)]. Returns md5 checks."""
+def _scan_entries(b, ents, keys, hits, totals=None):
+    """Scan one bucket's index entries; keys: (K, tail) -> set(tags); hits: tag -> [(b, i, K)]; totals (optional):
+    bucket -> ulen sum, what the placer's byte checks need. Returns md5 checks."""
     ps = [0]
     for e in ents: ps.append(ps[-1] + e[2])
+    if totals is not None: totals[b] = ps[-1]
     n = len(ents); checks = 0
     for i in range(n):
         base = ps[i]
@@ -55,14 +57,14 @@ def _worker_main(argv):
     import pickle
     with open(argv[0], "rb") as f: root, names, keys, bl = pickle.load(f)
     import sys
-    hits = {}; checks = 0; since = 0
+    hits = {}; checks = 0; since = 0; totals = {}
     for b in bl:
-        checks += _scan_entries(b, bucket_index_entries(names[b] if not root else os.path.join(root, f"Pool/0/{b // 2048}/{names[b]}")), keys, hits)
+        checks += _scan_entries(b, bucket_index_entries(names[b] if not root else os.path.join(root, f"Pool/0/{b // 2048}/{names[b]}")), keys, hits, totals)
         if _rss_mb() > WORKER_RSS_MB: raise MemoryError(f"scan worker RSS {_rss_mb():.0f} MB > {WORKER_RSS_MB} MB at bucket {b}")
         since += 1
         if since >= 50: print(f"progress {since}", file=sys.stderr, flush=True); since = 0      # the parent sums these into "scanned i/N"
     if since: print(f"progress {since}", file=sys.stderr, flush=True)
-    with open(argv[1], "wb") as f: pickle.dump((hits, checks), f)
+    with open(argv[1], "wb") as f: pickle.dump((hits, checks, totals), f)
 
 def _worker_command(jp, op):
     """(argv, kwargs) for one scan worker: the frozen app binary with --scan-worker (app/main.py dispatches it to _worker_main),
@@ -99,6 +101,13 @@ def _bucket_names(listing, max_bucket):
     names1 = {b: v[0] for b, v in names.items()}
     return names1, counts, sorted(b for b in counts if max_bucket is None or b <= max_bucket)
 
+def bucket_revs(listing):
+    """bucket -> revision of its newest index file: the placer's clock (bucket ids are reused, revisions only grow)."""
+    revs = {}
+    for e in listing:
+        if e.get("t") == "index" and e.get("rev", 0) > revs.get(e["b"], -1): revs[e["b"]] = e.get("rev", 0)
+    return revs
+
 def expand_hits(idx, hits):
     """tag positions -> anchors {(w, idx): positions}; all records of a tag reference the *same* sorted list."""
     anchors = {}; multi = 0
@@ -111,10 +120,16 @@ def expand_hits(idx, hits):
             for k in recs: anchors[k] = pos
     return anchors, multi
 
-def save_anchors(outdir, idx, hits):
-    """anchors.json: {"positions": {tag: [[b, i, K], ...]}, "records": {"w:ri": tag}} (linear size; see load_anchors)."""
+def save_anchors(outdir, idx, hits, totals=None):
+    """anchors.json: {"positions": {tag: [[b, i, K], ...]}, "records": {"w:ri": tag}, "ubytes": {bucket: ulen total}}
+    (linear size; see load_anchors)."""
     recs = {f"{w}:{ri}": tag for tagmap in idx.values() for tag, rl in tagmap.items() if tag in hits for (w, ri) in rl}
-    dump_json(os.path.join(outdir, "anchors.json"), {"positions": hits, "records": recs})
+    dump_json(os.path.join(outdir, "anchors.json"), {"positions": hits, "records": recs, "ubytes": {str(b): v for b, v in (totals or {}).items()}})
+
+def load_bucket_totals(outdir):
+    """bucket -> ulen total from anchors.json ({} for a scan that predates them; the placer then reads the indexes)."""
+    with open(os.path.join(outdir, "anchors.json")) as f: d = json.load(f)
+    return {int(b): v for b, v in d.get("ubytes", {}).items()}
 
 def load_anchors(outdir):
     with open(os.path.join(outdir, "anchors.json")) as f: d = json.load(f)
@@ -138,13 +153,13 @@ def scan_anchors(source, outdir, listing, writers, log=print, max_bucket=None, w
     names1 = {b: str(source.ensure(f"Pool/0/{b // 2048}/{names1[b]}")) for b in buckets}
     workers = max(1, min(workers or MAX_WORKERS, MAX_WORKERS, os.cpu_count() or 1))     # frozen too: the app binary is the worker
     log(f"anchor scan (x{workers}): {ntag:,} tagged records, {sum(len(v) for v in idx.values()):,} tags, {len(idx):,} keys, {len(buckets):,} buckets, rss {_rss_mb():.0f} MB")
-    t0 = time.time(); hits = {}; checks = 0
+    t0 = time.time(); hits = {}; checks = 0; totals = {}
     def merge(part):
         for t, v in part.items(): hits.setdefault(t, []).extend(v)
     last_t = time.time()
     if workers == 1:
         for n_done, b in enumerate(buckets):
-            checks += _scan_entries(b, bucket_index_entries(names1[b]), keys, hits)
+            checks += _scan_entries(b, bucket_index_entries(names1[b]), keys, hits, totals)
             if (n_done + 1) % 500 == 0 or time.time() - last_t >= 2: last_t = time.time(); log(f"  scanned {n_done + 1}/{len(buckets)} buckets, tags hit={len(hits):,}, md5 checks={checks:,}, {time.time() - t0:.0f}s")
             if _rss_mb() > PARENT_RSS_MB: raise MemoryError(f"anchor scan RSS {_rss_mb():.0f} MB > {PARENT_RSS_MB} MB; aborted")
     else:
@@ -161,7 +176,7 @@ def scan_anchors(source, outdir, listing, writers, log=print, max_bucket=None, w
             futs = [ex.submit(_run_worker, (root, names1, keys, c), td, n, progress) for n, c in enumerate(chunks)]
             try:
                 for done, fu in enumerate(concurrent.futures.as_completed(futs), 1):
-                    part, c = fu.result(); merge(part); checks += c
+                    part, c, tot = fu.result(); merge(part); checks += c; totals.update(tot)
                     log(f"  {done}/{len(chunks)} parts, tags hit={len(hits):,}, md5 checks={checks:,}, rss {_rss_mb():.0f} MB, {time.time() - t0:.0f}s")
                     if _rss_mb() > PARENT_RSS_MB: raise MemoryError(f"anchor scan RSS {_rss_mb():.0f} MB > {PARENT_RSS_MB} MB; aborted")
             except BaseException:
@@ -170,7 +185,7 @@ def scan_anchors(source, outdir, listing, writers, log=print, max_bucket=None, w
     anchors, multi = expand_hits(idx, hits)
     npos = sum(len(v) for v in hits.values())
     log(f"anchor scan done: {len(anchors):,} records anchored of {ntag:,} tagged ({len(hits):,} tags, {npos:,} positions); {multi:,} with multiple hits; rss {_rss_mb():.0f} MB; {time.time() - t0:.0f}s")
-    save_anchors(outdir, idx, hits)
+    save_anchors(outdir, idx, hits, totals)      # positions, records and the bucket ulen totals the placer reads back
     return anchors, counts
 
 def scan_anchors_parallel(source, outdir, listing, writers, log=print, max_bucket=None, workers=None):
@@ -361,8 +376,15 @@ def resolve_and_place(writers, anchors, counts, log=print, max_bucket=None):
     log(f"phase2: {dict(report)}; owners {len(owner):,}/{len(buckets):,}")
     return owner, placements, report
 
-def export_map(writers, owner, placements, counts, outdir, mapped_upto):
+def export_map(writers, owner, placements, counts, outdir, mapped_upto, flags=None, report=None):
+    """poolmap2.json for PoolReader: owners, entry counts, per-record placement segments and id ranges; ``guessed`` lists
+    the records placed without a byte check and ``aliased`` the copies restored from another record's entries (both
+    keyed by set -> [rec_off]); ``stats`` is the placer's report."""
     out = {"buckets": {str(b): w for b, w in owner.items()}, "counts": {str(b): counts[b] for b in owner}, "placements": {}, "ranges": {}, "mapped_upto": mapped_upto}
+    flags = flags or {}
+    for key in ("guessed", "aliased"):
+        out[key] = {str(SET_OF_WRITER[w]): sorted(writers[w][ri].off for (ww, ri) in flags.get(key, ()) if ww == w) for w in range(4)}
+    if report is not None: out["stats"] = {k: v for k, v in dict(report).items()}
     for w in range(4):
         s = SET_OF_WRITER[w]; recs = writers[w]
         out["placements"][str(s)] = {str(recs[i].off): segs for i, segs in placements[w].items()}
