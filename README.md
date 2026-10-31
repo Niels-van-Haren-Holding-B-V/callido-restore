@@ -67,8 +67,9 @@ SmartScreen shows "Windows protected your PC": click *More info* → *Run anyway
 WebView2, built into Windows 11 and current Windows 10) and is removed under Settings → Apps.
 
 Settings, caches and `app.log` live in `~/.hbk-explorer/` (on Windows `%USERPROFILE%\.hbk-explorer`); uninstalling keeps them.
-Or from source: `python3 -m venv .venv && .venv/bin/pip install -r requirements.txt && .venv/bin/python -m callido_restore` (opens the app
-window; add `--browser` to use your browser instead).
+Or from source: `python3 -m venv .venv && .venv/bin/pip install -r requirements.txt && .venv/bin/python -m callido_restore`
+(Windows: `py -m venv .venv`, `.venv\Scripts\pip install -r requirements.txt`, `.venv\Scripts\python -m callido_restore`). This
+opens the app window; add `--browser` to use your browser instead.
 `rclone` is bundled in the app (MIT; `rclone-COPYING` and `THIRD-PARTY-NOTICES.txt` are inside the app under `Contents/Resources/Licenses/` and on the disk image, on Windows under `_internal\Licenses\` in the install folder). From source, install rclone with Homebrew (macOS) or `winget install Rclone.Rclone` (Windows).
 The logo is original artwork made for this project (see `assets/README.md`); the app is not affiliated with Synology.
 
