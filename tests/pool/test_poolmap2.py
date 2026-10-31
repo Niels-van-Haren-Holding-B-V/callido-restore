@@ -1,5 +1,6 @@
 """Pool map v2: new_range, the tag-anchored mapper (try_assign / probe undo / guessed records) and PoolReader's v2 map with v1 fallback."""
 import hashlib, json, os, struct, tempfile, unittest
+from unittest import mock
 from pathlib import Path
 
 from callido_restore.pool import poolmap2
@@ -132,6 +133,15 @@ class ReaderMaps(unittest.TestCase):
         self.assertEqual(r.locate(1001), (7, 1))                 # served by v2
         self.assertEqual(r.locate(5000), (9, 5000 - 2 * BLOCK))  # not in v2, served by v1
         self.assertEqual(r.counts, {7: 2, 8: 5, 9: 1000})
+
+    def test_verification_status_per_record(self):
+        v2 = dict(self.v2); v2["guessed"] = {"4": [100]}; v2["aliased"] = {"4": [200]}; v2["placements"] = {"4": {"100": [[7, 0, 3]], "200": [[7, 0, 3]]}}
+        pool.dump_json(os.path.join(self.pool, "poolmap2.json"), v2)
+        r = pool.PoolReader(_Src(self.pool), self.pool); r.load_map2(os.path.join(self.pool, "poolmap2.json"))
+        r.vf = mock.Mock(); r.vf.entry = lambda off: {"set": 4, "rec_off": off}
+        self.assertEqual([r.verification(off) for off in (100, 200, 300, -5)], ["unverified", "identical_copy", "unverified", "verified"])
+        v2["guessed"] = {}; pool.dump_json(os.path.join(self.pool, "poolmap2.json"), v2); r.load_map2(os.path.join(self.pool, "poolmap2.json"))
+        self.assertEqual(r.verification(100), "verified")
 
     def test_dump_json_atomic(self):
         p = os.path.join(self.pool, "x.json"); pool.dump_json(p, [1]); self.assertEqual(pool.load_json(p), [1]); self.assertEqual(os.listdir(self.pool), ["x.json"])

@@ -362,7 +362,7 @@ class PoolReader:
     def __init__(self, source, pool_dir, log=None):
         self.src, self.pool_dir = source, pool_dir
         self.vf = VirtualFileIndex(source); self.recs = ChunkRecords(source)
-        self.map = None; self.idx_cache = collections.OrderedDict(); self.names = None; self.v1 = self.v2 = False; self.counts = {}
+        self.map = None; self.idx_cache = collections.OrderedDict(); self.names = None; self.v1 = self.v2 = False; self.counts = {}; self.guessed = {}; self.aliased = {}
         self.load_map()
     # --- map
     def load_map(self):
@@ -419,9 +419,21 @@ class PoolReader:
             lst = sorted(lst); self.rng2[int(s)] = ([x[0] for x in lst], [x[1] for x in lst], [x[2] for x in lst])
             rr = self.recrng[int(s)] = {}
             for a, L, ro in lst: rr.setdefault(ro, []).append((a, L))
-        self.guessed = {int(s): set(v) for s, v in d.get("guessed", {}).items()}     # records placed without tag evidence
+        self.guessed = {int(s): set(v) for s, v in d.get("guessed", {}).items()}     # records placed without a size check
+        self.aliased = {int(s): set(v) for s, v in d.get("aliased", {}).items()}     # copies restored from another record's entries
         self.map = d; self.mapped_upto = d.get("mapped_upto", 0)
         return True
+    def verification(self, off):
+        """How a pooled file's placement in the map was established (the restore reports it per file): "verified" when the
+        record's entries matched its size (and tag) when the map was built, "identical_copy" when the record stored nothing
+        and is restored from an identical copy's entries, "unverified" when it was placed without a size check or comes from
+        the v1 map. Files in the file pool are stored whole and count as verified."""
+        if off < 0: return "verified"
+        if not self.v2: return "unverified"
+        e = self.vf.entry(off); s, ro = e["set"], e["rec_off"]
+        if ro in self.aliased.get(s, ()): return "identical_copy"
+        if ro in self.guessed.get(s, ()) or ro not in self.place2.get(s, {}): return "unverified"
+        return "verified"
     def _rec_of_id(self, g):
         for s, (st, ln, ro) in self.rng2.items():
             i = bisect.bisect_right(st, g) - 1
