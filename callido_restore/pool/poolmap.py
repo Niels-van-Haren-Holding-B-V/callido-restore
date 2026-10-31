@@ -174,7 +174,7 @@ class Mapper:
         return last
     def _search(self, buckets, D, verbose, budget):
         state = {w: (0, 0, 0) for w in range(4)}; self.assigned = {w: [] for w in range(4)}; result = {}
-        stack = []; owners = []; i = 0; backtracks = 0; disc = 0; t0 = time.time(); last_log = 0
+        stack = []; owners = []; i = 0; backtracks = 0; disc = 0; t0 = time.time(); last_log = 0; last_t = time.time()
         while i < len(buckets):
             b = buckets[i]; cands = []; reasons = {}
             for w in range(4):

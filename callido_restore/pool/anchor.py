@@ -122,10 +122,11 @@ def scan_anchors(source, outdir, listing, writers, log=print, max_bucket=None, w
     t0 = time.time(); hits = {}; checks = 0
     def merge(part):
         for t, v in part.items(): hits.setdefault(t, []).extend(v)
+    last_t = time.time()
     if workers == 1:
         for n_done, b in enumerate(buckets):
             checks += _scan_entries(b, bucket_index_entries(os.path.join(root, f"Pool/0/{b // 2048}/{names1[b]}")), keys, hits)
-            if (n_done + 1) % 500 == 0: log(f"  scanned {n_done + 1}/{len(buckets)} buckets, tags hit={len(hits):,}, md5 checks={checks:,}, {time.time() - t0:.0f}s")
+            if (n_done + 1) % 500 == 0 or time.time() - last_t >= 2: last_t = time.time(); log(f"  scanned {n_done + 1}/{len(buckets)} buckets, tags hit={len(hits):,}, md5 checks={checks:,}, {time.time() - t0:.0f}s")
             if _rss_mb() > PARENT_RSS_MB: raise MemoryError(f"anchor scan RSS {_rss_mb():.0f} MB > {PARENT_RSS_MB} MB; aborted")
     else:
         import concurrent.futures, tempfile
