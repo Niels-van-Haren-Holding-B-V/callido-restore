@@ -273,10 +273,11 @@ class H(BaseHTTPRequestHandler):
                 elif kind == "smb":
                     # the password is handed to rclone over stdin ("-"), so it never appears in a process list; the obscured
                     # form that lands in rclone.conf is the only thing passed as an argument
+                    # (obscuring runs inside the job: on a clean Windows install the first rclone.exe starts take seconds, and the
+                    # UI shows nothing until the job exists)
                     pw = (body.get("password") or "").replace("\n", "")
-                    obs = subprocess.run([RCLONE, "obscure", "-"], input=pw + "\n", capture_output=True, text=True, **popen_kw()).stdout.strip()
-                    if not obs: return self._json({"error": "rclone could not prepare the password"}, 500)
-                    args = [RCLONE, "config", "create", name, "smb", f"host={body.get('host', '')}", f"user={body.get('user', '')}", f"pass={obs}", "--obscure=false", "--non-interactive"]
+                    host = rclone.smb_host(body.get("host"))
+                    if not host: return self._json({"error": "Fill in the NAS address (for example 192.168.1.10 or nas)."}, 400)
                 def run(job):
                     if kind == "drive":
                         # The sign-in runs through `rclone authorize` with the app's own landing page (static/oauth.html) instead of
@@ -296,13 +297,20 @@ class H(BaseHTTPRequestHandler):
                             else: rclone.config_create(name, "drive", params)
                         except rclone.RcloneError as e: raise RuntimeError(str(e))
                     else:
-                        job["message"] = "Connecting…"
-                        r = subprocess.run(args, capture_output=True, text=True, timeout=600, **popen_kw())
-                        if r.returncode != 0: raise RuntimeError(r.stderr.strip()[-400:] or "rclone config failed")
+                        def create():
+                            obs = subprocess.run([RCLONE, "obscure", "-"], input=pw + "\n", capture_output=True, text=True, **popen_kw()).stdout.strip()
+                            if not obs: raise RuntimeError("rclone could not prepare the password")
+                            r = subprocess.run([RCLONE, "config", "create", name, "smb", f"host={host}", f"user={body.get('user', '')}", f"pass={obs}",
+                                                "--obscure=false", "--non-interactive"], capture_output=True, text=True, timeout=600, **popen_kw())
+                            if r.returncode != 0: raise RuntimeError(r.stderr.strip()[-400:] or "rclone config failed")
+                        rclone.with_elapsed(job, f"Saving the connection to {host}…", create)
                     rclone.forget(); rclone.fscache_clear()                     # new or changed connection: cached listings and backends are stale
-                    job["message"] = "Listing your Drive…" if kind == "drive" else "Listing the shares…"     # the root listing can take a while
-                    try: shares = [e["Name"] for e in rclone.ls(f"{name}:", dirs_only=True, timeout=60)]
-                    except rclone.RcloneError as e: raise RuntimeError("remote created but listing failed: " + str(e)[-300:])
+                    what = "Listing your Drive…" if kind == "drive" else f"Listing the shares on {host}…"     # the root listing can take a while
+                    try: shares = rclone.with_elapsed(job, what, lambda: [e["Name"] for e in rclone.ls(f"{name}:", dirs_only=True, timeout=60)])
+                    except rclone.RcloneError as e:
+                        err = str(e)[-300:]
+                        if kind == "smb": err = f"connection saved, but {host} did not answer with its shares: {err} (check the address, the user and password, and that SMB is on in DSM)"
+                        raise RuntimeError(err)
                     return {"remote": name + ":", "shares": shares}
                 return self._json(start_job(run, f"connect {kind}"))
 
