@@ -196,6 +196,8 @@ build_bundle() {
     --hidden-import webview.platforms.cocoa \
     --collect-submodules webview \
     "$ROOT/callido_restore/__main__.py"
+  # Finder "Get Info" and About show this; same holder as LICENSE. The bundle is (re)signed after this in sign_bundle.
+  plutil -replace NSHumanReadableCopyright -string "Copyright (c) 2026 Callido B.V." "$APP/Contents/Info.plist"
   bundle_file "static/index.html" || die "static/index.html missing from the app bundle"
   [ -f "$APP/Contents/Resources/AppIcon.icns" ] || die "AppIcon.icns missing from the app bundle"
   bundle_file "Licenses/rclone-COPYING" || die "rclone license missing from the app bundle"
