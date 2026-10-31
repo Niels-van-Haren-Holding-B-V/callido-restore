@@ -94,6 +94,34 @@ DONE (hbk-2): #51 (docs, handovers, `tests/test_hbk_pool.py`, `scripts/check_pri
 the tests, `hbk_explorer.py` and `static/index.html` in #49/#52. Open for the owner: add the `PRIVATE_DENYLIST` repository secret
 (one extended regex per line); until then CI runs only the built-in patterns. Run `scripts/check_private.sh` locally before pushing.
 
+## H8 — Per-folder destination mapping (owner, 2026-10-30 23:29)
+DONE (hbk-3): #49. Target step is a table "Folder from backup → Restore to", one row per shared folder, defaulting to the NAS share
+with the same name; subfolders keep their relative path under it (H13 rule), no version or source folder in between. Each item carries
+its `dest` (persisted in the job, kept across pause/resume); every local root gets its own `.hbk-restore-<job>` staging folder and
+`place_file`. `file_target()` / `restore_roots()` in `hbk_explorer.py`; tests in `tests/test_restore_mapping.py`.
+
+## H13 — Folder tree selection (owner, 2026-10-31 00:01)
+DONE (hbk-3): #52. Step 2 of the restore wizard is a tree with checkboxes (children on demand via `/api/children`, partial parents
+indeterminate, the basket stays an inclusion list), "Selected: N files · size" counted live in SQL (`/api/restore_count`).
+
+## H17 — Exact folder prefix instead of SQL LIKE; resume validates roots (reviewer, 2026-10-31 00:34)
+IN REVIEW (hbk-3): #53. `LIKE 'dir/%'` is case-insensitive and treats `_`/`%` as wildcards, so selecting `Foto_2024` also restored
+`FotoX2024/...`; `restore_plan` and `restore_count` use an exact prefix, with tests for `_`, `%` and case. Resume validates the roots
+and re-runs the source check before consuming the job file.
+
+## H19 — Search prefix filter also uses LIKE (reviewer, 2026-10-31 00:59) — low priority, after #53
+The search prefix filter in `hbk_explorer.py` (around the `/api/search` handler) still uses `path LIKE '<dir>/%'`; switch to the
+same exact prefix as H17, plus a test. Wait for #53 so the helper is shared; no code PRs in parallel with H16 (see below).
+
+## H16 — Restructure into packages (owner, 2026-10-31 01:01; see docs/handovers/2026-10-31-0101-nas-triage-H16-now.md) — TOP PRIORITY
+IN PROGRESS (hbk-2): starts right after #53 and #54 merge; nobody else opens code PRs meanwhile. Target package `callido_restore/`
+with `core/` (hbk format, index db, chunk/pool readers), `pool/` (pool map v1/v2), `restore/` (plan, per-root destinations,
+no-overwrite writer, resume), `sources/` (local, Google Drive read-only, rclone), `server/` (HTTP API), `app/` (pywebview entry
+point, static UI); `tests/` mirrors the packages; the root keeps README, LICENSE, pyproject.toml, docs/, scripts/, .github/.
+Pure moves first (`git mv`, imports fixed, zero behaviour change), one layer per PR, at most ~5 small PRs, each branched from fresh
+origin/main and green on unit + both DMG builds; build_app.sh / PyInstaller spec, README and docs/ARCHITECTURE.md updated as the
+layers move. Step 1: core (`hbk_pool.py` format parsing) + its tests.
+
 ## Do not
 * Do not change the on-disk layout of `~/.hbk-explorer/index/<src>/pool/*` without a migration; the full map build takes hours of downloads.
 * Do not commit anything from `~/.hbk-explorer` or user paths/remotes into the repo, and no real share/folder/host names (H18 rule in docs/HANDOVER.md).
