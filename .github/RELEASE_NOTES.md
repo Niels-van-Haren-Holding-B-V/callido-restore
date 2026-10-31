@@ -2,6 +2,7 @@
 
 ## What's new in 0.3.4
 
+- The pool-map phase reports its position every two seconds, also while it backtracks (it used to go silent for minutes between two reports a thousand buckets apart).
 - Once the preparation has every index file on disk and is computing the pool map, the bar says "5.7 GB downloaded" and the time left follows the mapping progress, instead of showing 0 B/s as if a download had stalled.
 
 ## What's new in 0.3.3

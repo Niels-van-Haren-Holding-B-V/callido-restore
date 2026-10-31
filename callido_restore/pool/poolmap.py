@@ -203,6 +203,8 @@ class Mapper:
                     for w in range(4): del self.assigned[w][saved_len[w]:]
                     for bb in buckets[bi:i]: result.pop(bb, None)
                     del owners[saved_own:]; i = bi; backtracks += 1
+                    # Backtracking can keep the search below the last logged index for minutes: report on time, not on count.
+                    if time.time() - last_t >= 2: last_t = time.time(); self.log(f"  D={D}: mapped {i}/{len(buckets)} buckets, backtracks={backtracks}, {time.time()-t0:.0f}s (searching)")
                     if alts and fdisc + 1 <= D:
                         w, ns = alts.pop(0); disc = fdisc + 1
                         if alts: stack.append((bi, alts, saved_state, saved_len, saved_own, fdisc))
@@ -215,7 +217,7 @@ class Mapper:
             w, ns = cands[0]; alts = cands[1:]
             if alts and disc < D: stack.append((i, alts, dict(state), {ww: len(self.assigned[ww]) for ww in range(4)}, len(owners), disc))
             self._apply(w, b, ns, state, result); owners.append(w); i += 1
-            if i - last_log >= 1000: last_log = i; self.log(f"  D={D}: mapped {i}/{len(buckets)} buckets, backtracks={backtracks}, {time.time()-t0:.0f}s")
+            if i - last_log >= 1000 or time.time() - last_t >= 2: last_log = i; last_t = time.time(); self.log(f"  D={D}: mapped {i}/{len(buckets)} buckets, backtracks={backtracks}, {time.time()-t0:.0f}s")
         return result, i, True
     def _apply(self, w, b, ns, state, result):
         s0 = self.models[w].stored_start[state[w][0]] + state[w][1] if state[w][0] < len(self.models[w].length) else self.models[w].total
