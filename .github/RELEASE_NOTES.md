@@ -1,5 +1,11 @@
 **Callido Restore** restores files from a Synology Hyper Backup (`.hbk`) without Hyper Backup or a working NAS. It reads the backup's own metadata, shows every backup run on a timeline, and restores the folders you pick to a NAS share or a local folder. Files already at the destination are never overwritten or deleted, and the backup source is only read.
 
+## What's new in 0.4.0
+
+- **Windows 10 and 11.** Callido Restore now comes as a Windows installer, `CallidoRestore-x64.msi`, next to the two Mac disk images. It installs to Program Files with a Start menu and desktop shortcut, opens in its own window (Microsoft Edge WebView2, built into Windows 11 and current Windows 10), and can be removed under Settings → Apps. Your settings and downloaded backup data are kept on uninstall (#108).
+- **The installer is not code-signed yet.** Windows SmartScreen shows "Windows protected your PC": click **More info → Run anyway**. Check the download against `CallidoRestore-x64.msi.sha256` first.
+- Windows paths (`C:\Restore`, `Z:\`, `\\nas\share`) work as restore destinations and backup folders; rclone runs without console windows, and Stop ends the preparation on Windows too (#112).
+
 ## What's new in 0.3.9
 
 - **The preparation starts by itself.** It is not optional, so the app runs it in the background as soon as a backup is open and a share's file list is loaded, and resumes it after a restart. Pause keeps it paused until you resume; the header shows what it is doing. A preparation made by an older version of the app is redone automatically.

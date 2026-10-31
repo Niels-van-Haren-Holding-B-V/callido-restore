@@ -1,9 +1,18 @@
 name: build-windows
 # Windows 10/11 x64 MSI (packaging/windows). Separate from build-macos on purpose: a Windows failure never blocks the DMG
-# release. The MSI is uploaded as a workflow artifact; attaching it to GitHub Releases is a later step.
+# release. Every run uploads the MSI as a workflow artifact; on a v* tag the attach job adds it to the GitHub Release that
+# build-macos's publish job creates (it waits for that release; it never creates or edits one itself).
 on:
   push: { branches: [main], tags: ['v*'] }
   pull_request:
+    paths:                       # docs-only PRs do not wait on the Windows build; the unit tests run in tests.yml (windows leg)
+      - 'callido_restore/**'
+      - 'static/**'
+      - 'assets/**'
+      - 'packaging/**'
+      - 'requirements.txt'
+      - 'pyproject.toml'
+      - '.github/workflows/build-windows.yml'
   workflow_dispatch:
 
 permissions:
@@ -29,9 +38,6 @@ jobs:
           & "$env:USERPROFILE\.dotnet\tools\wix.exe" extension add -g "WixToolset.UI.wixext/$env:WIX_VERSION" "WixToolset.Util.wixext/$env:WIX_VERSION"
       - name: Python dependencies
         run: python -m pip install -r requirements.txt "pyinstaller>=6.0"
-      - name: Unit tests (Windows)
-        run: python -m unittest discover -s tests -t . -v
-        continue-on-error: true   # the portability fixes land in a separate PR; until then this shows what still fails on Windows
       - name: Build app and MSI
         shell: pwsh
         run: |
@@ -45,3 +51,31 @@ jobs:
           path: |
             dist/CallidoRestore-x64.msi
             dist/CallidoRestore-x64.msi.sha256
+
+  # On a v* tag: add the MSI to the release. Only this job can write.
+  attach:
+    needs: msi
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: CallidoRestore-windows-x64
+          path: release
+      - name: Wait for the release, then attach the MSI
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          (cd release && sha256sum -c CallidoRestore-x64.msi.sha256)
+          for i in $(seq 1 80); do
+            if gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              gh release upload "$TAG" release/CallidoRestore-x64.msi release/CallidoRestore-x64.msi.sha256 -R "$GITHUB_REPOSITORY" --clobber
+              exit 0
+            fi
+            echo "release $TAG not there yet (build-macos publishes it); waiting"; sleep 30
+          done
+          echo "release $TAG never appeared"; exit 1

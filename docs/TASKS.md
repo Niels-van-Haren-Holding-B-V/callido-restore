@@ -176,7 +176,7 @@ PR B (packaging): `packaging/windows/` (WiX 5 MSI with Callido branding, `build_
 PR A (code portability, after #104/#105/#106 land): Windows drive paths are not rclone remotes, process liveness/stop without
 POSIX signals, `_rss_mb` without `resource`, mapper Stop via `taskkill /T`, no console windows for rclone, folder picker roots.
 Follow-up: orphan cleanup on Windows (`kill_orphans`, `kill_orphan_helpers`, `kill_stale` are no-ops there; port to
-CIM `Win32_Process` with parent liveness instead of ppid 1). Attach the MSI to Releases on a `v*` tag; code signing.
+CIM `Win32_Process` with parent liveness instead of ppid 1). Code signing (Azure Artifact Signing, see docs/WINDOWS.md).
 Acceptance: the MSI installs on Windows 10 and 11 without admin tricks, the app opens in its own window (WebView2), the full
 restore flow works with a local folder and a Drive source, uninstall leaves `~/.hbk-explorer` alone.
 

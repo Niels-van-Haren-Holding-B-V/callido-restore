@@ -51,5 +51,6 @@ Found by reading the code; each is a small, guarded change that leaves macOS unc
 * **Code signing.** The MSI and exe are unsigned, so SmartScreen shows "Windows protected your PC" (More info → Run anyway).
   A code-signing certificate (OV/EV, or Azure Trusted Signing) is needed to remove that; `signtool` hooks into `build_msi.py`
   after PyInstaller and after `wix build`.
-* **Releases.** CI uploads the MSI as a workflow artifact; adding it to the GitHub Release on a `v*` tag is a follow-up.
+* **Releases.** On a `v*` tag, `build-windows` attaches `CallidoRestore-x64.msi` and its `.sha256` to the release that
+  `build-macos` publishes (from 0.4.0 on). Unsigned until there is a certificate.
 * **Real-machine test** on Windows 10 and 11 with a real backup (Drive source, local NAS share as `\\nas\share` or `Z:\`).
