@@ -270,6 +270,13 @@ const CHECKED_HELP='Checked = the file’s place in the backup was confirmed by 
 const REASONS={'placed without a size check':'Its location in the backup couldn’t be confirmed','partial copy':'Restored from a matching copy; not fully checked',
   'reads chunks from a record that is placed without a size check':'Part of it comes from data whose location couldn’t be confirmed','located through the v1 map':'Found with the older, less precise map',
   'the pool map gives no status':'The map has no check result for it','reads a chunk that no record stores':'Part of it is missing from the backup’s map'};
+// Restore errors come from the pool reader; the user gets plain words (the original text stays in the tooltip).
+function plainError(err){const s=String(err||'');const cov=PREP.pool&&PREP.pool.bytes_pct!=null?` (the preparation covers ${Math.round(PREP.pool.bytes_pct)} % of the data)`:'';
+  if(/not placed yet|map covers up to bucket|not in the pool map|KeyError|no record stores|unplaced/i.test(s))return `This file’s data could not be located in the backup${cov}.`;
+  if(/upload failed/i.test(s))return 'Copying the file to the target failed: '+s.replace(/^upload failed:\s*/i,'');
+  if(/No space left/i.test(s))return 'The target disk is full.';
+  if(/Permission denied|EACCES/i.test(s))return 'The target folder refused the write (permissions).';
+  return s}
 const plainReason=r=>{if(!r)return 'Its location in the backup couldn’t be confirmed';if(REASONS[r])return REASONS[r];if(r.startsWith('status check failed:'))return 'The check itself failed: '+r.slice('status check failed:'.length).trim();return r};
 function verifyText(r){
   if(!r)return '';
@@ -323,6 +330,7 @@ const sinceText=s=>{const d=Math.max(0,Math.round(Date.now()/1000-(s||Date.now()
 const STALE={};function staleInfo(job){if(job.state!=='running')return null;const key=`${job.progress||0}|${job.done_bytes||0}`;const now=Date.now();const s=STALE[job.id]||(STALE[job.id]={key,t:now});
   if(s.key!==key){s.key=key;s.t=now;return null}return now-s.t>=3000?Math.round((now-s.t)/1000):null}
 function progressHtml(job,rich,extra){const pct=Math.round((job.progress||0)*100);const running=job.state==='running';
+  if(job.label&&String(job.label).startsWith('build pool map'))job={...job,message:plainPhase(job.message)};
   // Once every byte is on disk the job is computing (the pool map): no speed slot, and the time left follows the progress, not the bytes.
   const dlDone=!!job.total_bytes&&(job.done_bytes||0)>=job.total_bytes;
   const eta=running?etaText(job.id,job.progress||0,dlDone?undefined:job.done_bytes,dlDone?undefined:job.total_bytes):'';const stale=staleInfo(job);
@@ -536,8 +544,13 @@ function renderTree(){const el=$('#rsTree');if(!el||!S.info)return;const showFil
   const node=(share,path,name,is_dir,extra,depth)=>{const k=tkey(share,path);const open=is_dir&&TREE.open.has(k);const st=selState(share,path);const kids=(TREE.kids[k]||[]).filter(c=>c.is_dir||showFiles);
     return `<div class="tn" style="padding-left:${depth*18}px"><span class="tog ${is_dir?'':'leaf'}" data-k="${esc(k)}">${is_dir?(open?'▾':'▸'):''}</span><input type="checkbox" class="tc" data-share="${esc(share)}" data-path="${esc(path)}" data-dir="${is_dir?1:0}" ${st==='on'?'checked':''} ${st==='partial'?'data-partial="1"':''}><span class="${is_dir?'':'muted'}">${esc(name)}</span><span class="muted" style="font-size:11.5px">${extra}</span></div>`+
       (open?(kids.map(c=>node(share,c.path,c.name,c.is_dir,c.is_dir?`${(c.n||0).toLocaleString()} items`:human(c.size),depth+1)).join('')||`<div class="tn muted" style="padding-left:${(depth+1)*18+22}px">${(TREE.kids[k]||[]).length?'(only files; tick "show single files" under Advanced)':'(empty)'}</div>`):'')};
-  el.innerHTML=S.info.shares.filter(s=>s.name!=='@AppConfig').map(s=>{const m=(S.snaps&&S.snaps[s.name]&&S.snaps[s.name].meta)||{};return node(s.name,'',s.name,1,m.files?`${m.files.toLocaleString()} files${m.bytes?' · '+human(m.bytes):''}`:'',0)}).join('');
-  $$('#rsTree .tc').forEach(c=>{c.indeterminate=!!c.dataset.partial;c.onchange=async()=>{c.disabled=true;await treeToggleSel(c.dataset.share,c.dataset.path,+c.dataset.dir);tabRestore()}});
+  el.innerHTML=S.info.shares.filter(s=>s.name!=='@AppConfig').map(s=>{const i=(S.snaps&&S.snaps[s.name])||{};const m=i.meta||{};
+    const extra=i.indexed?(m.files?`${m.files.toLocaleString()} files${m.bytes?' · '+human(m.bytes):''}`:''):i.locked?'encrypted, cannot be restored':i.available===false?'no file list in this run':'file list not loaded yet · loads when ticked';
+    return node(s.name,'',s.name,1,extra,0)}).join('');
+  $$('#rsTree .tc').forEach(c=>{c.indeterminate=!!c.dataset.partial;const i=S.snaps&&S.snaps[c.dataset.share];if(c.dataset.path===''&&i&&(i.locked||i.available===false))c.disabled=true;
+    c.onchange=async()=>{c.disabled=true;await treeToggleSel(c.dataset.share,c.dataset.path,+c.dataset.dir);
+      const j=S.snaps&&S.snaps[c.dataset.share];if(c.checked&&j&&!j.indexed&&j.available&&!j.locked){toast(`Loading the file list of ${c.dataset.share}…`);runIndex(c.dataset.share);return}   // the index job ends with a re-render
+      tabRestore()}});
   $$('#rsTree .tog:not(.leaf)').forEach(tg=>tg.onclick=async()=>{const k=tg.dataset.k;if(TREE.open.has(k))TREE.open.delete(k);else{const i=k.indexOf('|');tg.textContent='…';await treeKids(k.slice(0,i),k.slice(i+1));TREE.open.add(k)}renderTree()})}
 let sumTimer=null;function treeSummary(){const el=$('#rsSelSum');if(!el)return;if(!S.basket.length){el.textContent='Nothing selected yet.';return}el.textContent='counting…';clearTimeout(sumTimer);
   sumTimer=setTimeout(async()=>{try{const r=await api('/api/restore_count',{src:S.src,items:JSON.stringify(S.basket),skip_meta:$('#rsMeta')&&$('#rsMeta').checked?1:0});el.textContent=`Selected: ${r.files.toLocaleString()} files · ${human(r.bytes)}`}catch(e){el.textContent='Selected: '+S.basket.length+' item(s)'}},300)}
@@ -562,13 +575,22 @@ async function prepResume(){try{await post('/api/pool/resume',{src:S.src})}catch
 function coverageText(pool){if(!pool)return '';const parts=[];                     // bytes_pct is a percentage, 0-100 (agreed with hbk-1)
   if(pool.bytes_pct!=null)parts.push(`${Math.round(pool.bytes_pct)} % of the data can be restored`);if(pool.records_placed!=null&&pool.records_total)parts.push(`${pool.records_placed.toLocaleString()} of ${pool.records_total.toLocaleString()} files located`);
   return parts.join(' · ')}
+// The mapper's progress messages are log lines ("scanned 54/54 buckets, tags hit=17", a stats dict); the user gets the phase.
+function plainPhase(msg){const s=String(msg||'');let m;
+  if((m=/^scanned (\d+)\/(\d+) buckets/.exec(s)))return `reading the index (${(+m[1]).toLocaleString()} of ${(+m[2]).toLocaleString()})`;
+  if(/^mapped \d+\/\d+ buckets|^placing|^placer/i.test(s))return 'building the map';
+  if(/^parsing chunk records/i.test(s))return 'reading the file records';
+  if(/^listing pool directories/i.test(s))return 'listing the backup folders';
+  if(/^downloading index set (\d+)\/(\d+)/.exec(s))return s.replace(/^downloading index set (\d+)\/(\d+).*$/,'downloading index files (set $1 of $2)');
+  if(/[{}]|tags hit|anchor|phantom/i.test(s))return 'building the map';
+  return s}
 function prepPillRender(st){const pill=$('#prepPill');if(!pill)return;if(!st||st.error||st.complete||(!st.running&&!st.paused)){pill.style.display='none';return}
   pill.style.display='inline-flex';$('#prepSpin').style.display=st.running?'':'none';const b=$('#prepBtn');
   if(st.running){const j=st.job||{};const bytes=j.total_bytes?` · ${human(j.done_bytes||0)} of ${human(j.total_bytes)}${j.state==='running'?' · '+speedText(j.id):''}`:'';
-    $('#prepText').textContent=`Preparing the backup · ${j.message||'starting…'}${bytes}`;b.textContent='Pause';b.onclick=async()=>{b.disabled=true;b.textContent='Pausing…';await prepPause()}}
+    $('#prepText').textContent=`Preparing the backup · ${plainPhase(j.message)||'starting…'}${bytes}`;b.textContent='Pause';b.onclick=async()=>{b.disabled=true;b.textContent='Pausing…';await prepPause()}}
   else{$('#prepText').textContent='Preparation paused · the restore waits for it';$('#prepPill').title='Resume continues the download where it stopped; the map itself is computed again.';b.textContent='Resume';b.disabled=false;b.onclick=async()=>{b.disabled=true;b.textContent='Resuming…';await prepResume()}}}
 async function prepWatch(){if(PREP.src===S.src&&PREP.timer)return;PREP.src=S.src;if(PREP.timer){clearTimeout(PREP.timer);PREP.timer=null}
-  const tick=async()=>{if(PREP.src!==S.src)return;const st=await prepState();const was=PREP.jobId;PREP.jobId=st.running||null;if(st.job){etaText(st.job.id,st.job.progress||0,st.job.done_bytes,st.job.total_bytes)}prepPillRender(st);
+  const tick=async()=>{if(PREP.src!==S.src)return;const st=await prepState();PREP.pool=st.pool||PREP.pool;const was=PREP.jobId;PREP.jobId=st.running||null;if(st.job){etaText(st.job.id,st.job.progress||0,st.job.done_bytes,st.job.total_bytes)}prepPillRender(st);
     if(was&&!PREP.jobId&&S.tab==='restore')tabRestore();                       // the preparation ended: the Start button may be ready now
     PREP.timer=setTimeout(tick,st.running?2000:5000)};tick()}
 function shareRows(){const rows=[];S.basket.forEach(b=>{let r=rows.find(x=>x.share===b.share);if(!r){r={share:b.share,paths:[]};rows.push(r)}r.paths.push(b.path)});return rows}
@@ -606,6 +628,8 @@ async function tabRestore(){const el=$('#tab-restore');
   const v=S.info.versions.find(x=>x.id===S.ver);const latest=S.info.versions[S.info.versions.length-1];
   const basketV=S.basket.length?S.basket[0].ver:S.ver;
   const idxFiles=pool.index_files||0, idxLocal=pool.indexes_local||0;
+  // Shares in the selection whose file list for this run is not loaded yet: the restore cannot plan them, so Start waits for the lists.
+  const notLoaded=[...new Set(S.basket.map(b=>b.share))].filter(sh=>S.snaps&&S.snaps[sh]&&!S.snaps[sh].indexed);
   const doneSteps=[true,S.basket.length>0];let firstOpen=doneSteps.indexOf(false)+1||3;
   const step=(n,title,body,done)=>`<div class="step ${done?'done':''} ${n===firstOpen?'on':''}"><span class="n">${n}</span><h2>${title}</h2><div class="body">${body}</div></div>`;
   el.innerHTML=
@@ -632,7 +656,8 @@ async function tabRestore(){const el=$('#tab-restore');
      </details>
      <details class="adv"><summary>Advanced: everything under one folder</summary><div class="row"><label><input type="checkbox" id="wzOne"> put all selected folders under one folder, as <code>&lt;folder&gt;/&lt;share&gt;/&lt;path&gt;</code></label><input id="wzOnePath" placeholder="nas:Restore/restore-${S.ver} or ${LOCAL_EG}/Restore/restore-${S.ver}" style="width:380px"></div></details>
      <details class="adv"><summary>How the data flows</summary><p class="help">Google Drive → this computer (decompress and verify) → NAS. The Drive download speed is the limit; data blocks are fetched 4 in parallel ahead of the writer and deleted from this computer after use (cache ≤ 20 GB).</p></details>`,false)+
-  step(4,'Check and start',`<div class="row"><button class="small" id="rsPlan">Count files and size</button><button class="${S.basket.length&&mapOk&&!restoreRun?'primary':''}" id="rsGo" ${S.basket.length&&mapOk&&!restoreRun?'':'disabled'}>${restoreRun?'Restoring…':mapOk?'Start restore':poolRun?'Waiting for the preparation…':prep.paused?'Preparation paused':'Waiting for the preparation'}</button><span class="help">counting needs no preparation, only the restore does · nothing at the target is ever overwritten or deleted: files already there are skipped, so an interrupted restore can simply be started again</span></div>
+  step(4,'Check and start',`<div class="row"><button class="small" id="rsPlan">Count files and size</button><button class="${S.basket.length&&mapOk&&!restoreRun&&!notLoaded.length?'primary':''}" id="rsGo" ${S.basket.length&&mapOk&&!restoreRun&&!notLoaded.length?'':'disabled'}>${restoreRun?'Restoring…':notLoaded.length?'Load the file lists first':mapOk?'Start restore':poolRun?'Waiting for the preparation…':prep.paused?'Preparation paused':'Waiting for the preparation'}</button><span class="help">counting needs no preparation, only the restore does · nothing at the target is ever overwritten or deleted: files already there are skipped, so an interrupted restore can simply be started again</span></div>
+     ${notLoaded.length?`<p class="help" style="margin:4px 0;color:var(--warn)">The file list${notLoaded.length>1?'s':''} of ${notLoaded.map(esc).join(', ')} for this run ${notLoaded.length>1?'are':'is'} not loaded yet, so the restore cannot be planned. <button class="small primary" id="rsLoadLists">Load ${notLoaded.length>1?'them':'it'} now</button></p>`:''}
      ${mapOk&&!poolRun?`<div class="row" style="margin:4px 0"><div class="prog"><i style="width:100%"></i></div><span class="help">Prepared${coverageText(pool)?' · '+coverageText(pool):''}</span><button class="small ghost" id="prepAgain" title="The downloaded index files are kept; the map is computed again, which takes a while.">Run the preparation again</button></div>
      <p class="help" style="margin:0 0 4px">Files the map could not locate are reported as errors when restored. Loading the file lists of more shares or runs (step 1) gives the map more to work with; the preparation then runs again by itself.</p>`:''}
      ${mapOk?'':`<div id="prepBox" style="margin:6px 0"><p class="help" style="margin:0 0 4px">Before it can restore, the app learns where every piece of every file is stored: it downloads the backup's index files (a few GB, no file data) and builds a map. This starts by itself${poolRun?'':prep.paused?' once you resume it':(idxLocal||total)?'':' as soon as a share\'s file list is loaded for this run (step 1)'}, continues after a pause or a restart (the downloaded index files are kept; the map itself is computed again), and is kept for later restores.${keyLine(S.info.source.remote,true)?` ${keyLine(S.info.source.remote,true)}`:''}</p>
@@ -679,7 +704,8 @@ async function tabRestore(){const el=$('#tab-restore');
     $('#wzRem').onchange=()=>{MAP._rem=rem();saveMap();loadShares()};await loadShares()}catch(e){$('#wzRem').innerHTML='<option value="">a mounted share / local path</option>';fillRows()}
   const setCls=(el,c)=>{el.classList.remove('bad','ok');if(c)el.classList.add(c)};
   const showCheck=(st,r)=>{st.textContent=r.inside_source?`✗ ${r.conflict||r.dest} is the backup itself, a folder inside it, or the folder around it`:r.error?'? '+r.error:!r.exists?'✓ new folder, it will be created':r.empty?'✓ empty folder':`! already has ${r.files} entries: files already there are skipped, nothing is deleted`;setCls(st,r.inside_source||r.error?'bad':'ok');return!(r.inside_source||r.error)};
-  const checkAll=async()=>{const out=$('#wzCheckOut');if(out.dataset.busy)return{bad:true,nonEmpty:0};out.dataset.busy='1';$('#wzCheck').disabled=true;out.innerHTML='<span class="spin"></span> Checking the targets…';setCls(out,'');let bad=false,nonEmpty=0;
+  let reason='';
+  const checkAll=async()=>{reason='';const out=$('#wzCheckOut');if(out.dataset.busy)return{bad:true,nonEmpty:0};out.dataset.busy='1';$('#wzCheck').disabled=true;out.innerHTML='<span class="spin"></span> Checking the targets…';setCls(out,'');let bad=false,nonEmpty=0;
     try{return await checkAllInner(out,bad,nonEmpty)}finally{delete out.dataset.busy;$('#wzCheck').disabled=false}};
   const checkAllInner=async(out,bad,nonEmpty)=>{
     if(oneMode()){const d=oneDest();if(!d){out.textContent='Enter the folder under Advanced, or untick it.';setCls(out,'bad');return{bad:true,nonEmpty}}
@@ -690,8 +716,8 @@ async function tabRestore(){const el=$('#tab-restore');
       p.mappings.forEach((m,i)=>{const el=$(`.mapTo[data-i="${i}"]`);if(el)el.innerHTML=m.sample_from?`${esc(m.sample_from)} → <b>${esc(m.sample_to)}</b> · ${m.files.toLocaleString()} files · ${human(m.bytes)}`:'(no files in this folder)'});
       if(!oneMode()){out.textContent=bad?'Fix the marked rows.':`${p.files.toLocaleString()} files · ${human(p.bytes)}`;setCls(out,bad?'bad':'ok')}
       $('#rsPlanOut').innerHTML=`<b>${p.files.toLocaleString()} files · ${human(p.bytes)}</b><br>${p.mappings.map(m=>`<span class="mono">${esc(m.share)} → ${esc(m.dest||'?')}${m.sample_to?`<br>&nbsp;&nbsp;e.g. ${esc(m.sample_from)} → ${esc(m.sample_to)}`:''}</span>`).join('<br>')}`}
-    catch(e){out.textContent='? '+e.message;setCls(out,'bad');bad=true}
-    return{bad,nonEmpty}};
+    catch(e){const m=/(.+?) v(\d+) not indexed/.exec(e.message);const why=m?`The file list of ${m[1]} for run ${m[2]} is not loaded yet: load it in the run row above (or tick "Load all shares for this run").`:e.message;out.textContent='? '+why;setCls(out,'bad');bad=true;reason=why}
+    return{bad,nonEmpty,reason}};
   $('#wzCheck').onclick=checkAll;
   $('#wdConnect').onclick=async()=>{const q={kind:'smb',name:$('#wdName').value.trim()||'nas',host:$('#wdHost').value.trim(),user:$('#wdUser').value.trim(),password:$('#wdPass').value};
     if(!q.host||!q.user){$('#wdConn').textContent='Fill in the NAS address and the user.';return}
@@ -707,10 +733,11 @@ async function tabRestore(){const el=$('#tab-restore');
     $$('.jr').forEach(b=>b.onclick=async()=>{b.disabled=true;b.textContent='Resuming…';try{const j=await post('/api/restore/resume',{id:b.dataset.i});pollJob(j.id,$('#rsProg'),()=>tabRestore(),true)}catch(e){toastError(e);b.disabled=false;b.textContent='Continue'}tabRestore()});
     $$('.jc').forEach(b=>b.onclick=async()=>{await api('/api/job/cancel',{id:b.dataset.i});setTimeout(showSaved,1500)})}catch(e){}};
   showSaved();
+  const ll=$('#rsLoadLists');if(ll)ll.onclick=()=>{ll.disabled=true;ll.textContent='Loading…';runIndex(notLoaded.length>1?'*':notLoaded[0])};
   $('#rsPlan').onclick=async()=>{$('#rsPlanOut').textContent='counting…';await checkAll()};
   $('#rsGo').onclick=async()=>{const its=items();const dest=oneMode()?oneDest():'';
     if(!oneMode()&&its.some(x=>!x.dest)){toast('Choose a target for every shared folder in step 4.',{kind:'warn'});return}
-    const chk=await checkAll();if(chk.bad){toast('Fix the marked targets in step 4 first.',{kind:'warn'});return}
+    const chk=await checkAll();if(chk.bad){toast(chk.reason||'Fix the marked targets in step 3 first.',{kind:'warn',ms:8000});return}
     if(chk.nonEmpty&&!confirm(`${chk.nonEmpty} target folder${chk.nonEmpty>1?'s':''} already ${chk.nonEmpty>1?'have':'has'} files. Files already there are skipped and nothing is deleted. Continue?`))return;
     $('#rsGo').disabled=true;$('#rsGo').textContent='Starting…';pendingBar($('#rsProg'),'Starting the restore…');
     try{const j=await post('/api/restore',{src:S.src,dest,items:its,skip_meta:$('#rsMeta').checked});
@@ -718,7 +745,7 @@ async function tabRestore(){const el=$('#tab-restore');
       pollJob(j.id,$('#rsProg'),job=>{$('#rsGo').disabled=false;$('#rsGo').textContent='Start restore';showSaved();$('#rsProg').innerHTML+=`<p><b>${job.result&&job.result.paused?'Paused':'Done'}:</b> ${job.result?`${job.result.restored} restored · ${job.result.skipped} skipped · ${job.result.errors} errors · ${human(job.result.bytes)}${verifyText(job.result)}`:esc(job.error||'')}</p>`;
         // Files whose place in the backup could not be confirmed are listed (the job carries the capped list) so the user can check them by hand.
         const unv=job.unverified||[];if(unv.length)$('#rsUnverified').innerHTML=`<h4 style="font-size:12px;color:var(--warn)">Couldn’t be verified: check these ${unv.length}${(job.result&&job.result.unverified)>unv.length?' of '+job.result.unverified.toLocaleString():''} files before you rely on them</h4><p class="help" style="margin:0 0 4px">${esc(CHECKED_HELP)}</p><div class="tablewrap"><table>${unv.slice(0,500).map(e=>`<tr><td class="mono">${esc(e.path)}</td><td>${esc(plainReason(e.reason))}</td></tr>`).join('')}</table></div>`;
-        if(job.errors&&job.errors.length)$('#rsErrors').innerHTML=`<h4 style="font-size:12px;color:var(--muted)">Errors (${(job.errors_total??job.errors.length).toLocaleString()})</h4><div class="tablewrap"><table>${job.errors.slice(0,500).map(e=>`<tr><td class="mono">${esc(e.path)}</td><td>${esc(e.error)}</td></tr>`).join('')}</table></div>`},true)}
+        if(job.errors&&job.errors.length)$('#rsErrors').innerHTML=`<h4 style="font-size:12px;color:var(--muted)">Errors (${(job.errors_total??job.errors.length).toLocaleString()})</h4><div class="tablewrap"><table>${job.errors.slice(0,500).map(e=>`<tr><td class="mono">${esc(e.path)}</td><td title="${esc(e.error)}">${esc(plainError(e.error))}</td></tr>`).join('')}</table></div>`},true)}
     catch(e){$('#rsProg').innerHTML='';$('#rsGo').disabled=false;$('#rsGo').textContent='Start restore';toastError(e)}};}
 // Sleep that also ends when the window becomes visible or focused again: while the user is in the browser (Google sign-in) the
 // embedded WebKit view throttles timers, so a plain setTimeout chain may not resume for a long time.
