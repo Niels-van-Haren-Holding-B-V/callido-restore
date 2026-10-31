@@ -174,9 +174,19 @@ class ViaDaemon(unittest.TestCase):
             out = rc.ls("gdrive:Synology", files_only=True, max_depth=1)
         self.assertEqual(out[0]["Name"], "x")
         m, p = calls[0]
-        # the listed folder is the fs and remote is "", so Path is relative to the folder like rclone lsjson (list_destination relies on it)
-        self.assertEqual(m, "operations/list"); self.assertEqual((p["fs"], p["remote"]), ("gdrive:Synology", ""))
+        # one backend per connection: the remote root is the fs, the folder the remote part (SMB sessions and Drive's directory
+        # cache are reused across folders); Paths are stripped to the listed folder like rclone lsjson (list_destination relies on it)
+        self.assertEqual(m, "operations/list"); self.assertEqual((p["fs"], p["remote"]), ("gdrive:", "Synology"))
         self.assertTrue(p["opt"]["filesOnly"]); self.assertEqual(p["_config"], {"MaxDepth": 1})
+
+    def test_ls_strips_the_folder_prefix_from_paths(self):
+        def fake_rc(method, timeout=None, **params):
+            return {"list": [{"Path": "Backups/x.hbk/Config", "Name": "Config", "IsDir": True, "Size": -1}, {"Path": "Backups/x.hbk/notes.txt", "Name": "notes.txt", "IsDir": False, "Size": 3}]}
+        with mock.patch.object(type(rc.DAEMON), "running", new_callable=mock.PropertyMock, return_value=True), mock.patch.object(rc.DAEMON, "rc", side_effect=fake_rc):
+            out = rc.ls("nas:Backups/x.hbk")
+        self.assertEqual([e["Path"] for e in out], ["Config", "notes.txt"])
+        self.assertEqual(rc._split("nas:Backups/x.hbk/"), ("nas:", "Backups/x.hbk")); self.assertEqual(rc._split("gdrive:"), ("gdrive:", ""))
+        self.assertEqual(rc._split("/Volumes/backup/backup_1.hbk"), ("/Volumes/backup/backup_1.hbk", ""))
 
     def test_remotes_and_version_via_rc(self):
         types = {"nas": {"type": "smb"}, "gdrive": {"type": "drive"}}

@@ -289,6 +289,13 @@ def _run(args, timeout=None, **kw):
     return r.stdout
 
 
+def _split(path):
+    """("remote:", "folder/inside") for an rclone path, (path, "") for a local one."""
+    m = re.match(r"^([A-Za-z0-9_-]+):(.*)$", path)
+    if not m or path.startswith("/"): return path, ""
+    return m.group(1) + ":", m.group(2).strip("/")
+
+
 def ls(path, dirs_only=False, files_only=False, recurse=False, max_depth=None, no_modtime=False, timeout=None, cache=False):
     """Entries of ``path`` as ``rclone lsjson`` returns them (dicts with Path, Name, Size, IsDir, ModTime). Raises RcloneError.
     ``cache=True`` serves a repeat of the same listing within CACHE_TTL seconds without asking rclone (UI renders only)."""
@@ -296,12 +303,22 @@ def ls(path, dirs_only=False, files_only=False, recurse=False, max_depth=None, n
         key = ("ls", path, dirs_only, files_only, recurse, max_depth, no_modtime)
         return _cached(key, lambda: ls(path, dirs_only, files_only, recurse, max_depth, no_modtime, timeout))
     if DAEMON.available():
-        # The listed folder itself is the "fs" and remote is "", so every Path comes back relative to that folder exactly like
-        # ``rclone lsjson <path>`` (with fs="nas:" remote="x" rclone would return "x/..." and list_destination's skip check would miss).
+        # One backend per connection: fs is the remote root ("nas:") and the folder is the remote part, so the daemon reuses
+        # its SMB session and Drive's directory cache for every folder (fs = full path opened a new backend, and on SMB a new
+        # session, per listed folder: minutes for a few share listings). Paths come back relative to the root, so the folder
+        # prefix is stripped: every Path is relative to the listed folder exactly like ``rclone lsjson <path>``, which
+        # list_destination's skip check relies on. A local path has no remote root and stays the fs itself.
+        fs, rel = _split(path)
         opt = {"noMimeType": True, "dirsOnly": bool(dirs_only), "filesOnly": bool(files_only), "recurse": bool(recurse), "noModTime": bool(no_modtime)}
-        params = {"fs": path, "remote": "", "opt": opt}
+        params = {"fs": fs, "remote": rel, "opt": opt}
         if max_depth is not None: params["_config"] = {"MaxDepth": int(max_depth)}
-        try: return DAEMON.rc("operations/list", timeout=timeout, **params).get("list") or []
+        try:
+            out = DAEMON.rc("operations/list", timeout=timeout, **params).get("list") or []
+            if rel:
+                pre = rel + "/"
+                for e in out:
+                    if e.get("Path", "").startswith(pre): e["Path"] = e["Path"][len(pre):]
+            return out
         except DaemonGone: pass                                 # killed or crashed daemon: plain rclone below
     args = ["lsjson", "--no-mimetype"]
     if no_modtime: args.append("--no-modtime")
