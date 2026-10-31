@@ -298,7 +298,10 @@ class CancelDuringParse(unittest.TestCase):
             reports = []
             cpool.build_runs(_LocalSource(root), str(Path(td) / "pool"), log=lambda *a: None, report=lambda m, d, t: reports.append((m, d, t)))
             per_set = [r for r in reports if r[0].startswith("downloading index set 1/4")]
-            self.assertEqual([(d, t) for _, d, t in per_set], [(0, 150), (100, 150), (150, 150)])
+            done = [d for _, d, _ in per_set]
+            # Slices finish in any order with several workers (transfer.profile("index_slices")): the finished-bytes
+            # reports start at 0, end at the set's size, and only ever grow.
+            self.assertEqual((done[0], done[-1]), (0, 150)); self.assertEqual(done, sorted(done)); self.assertTrue(all(t == 150 for _, _, t in per_set))
             self.assertIn("parsing index set 1/4", [r[0] for r in reports])
 
     def test_build_runs_stops_before_the_first_set(self):
