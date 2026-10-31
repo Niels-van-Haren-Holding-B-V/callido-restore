@@ -172,15 +172,17 @@ class Pool:
     def chunk_index(self, rev):
         """Pool/chunk_index/<k>.idx.<rev> (hbk-1, after woutervanranst/synology-hyperbackup-reverse-engineering §2): 64-byte header,
         then one 29-byte record per chunk id g at 64 + 29*g: [0x00][u32 bucket][u32 64 + 32*entry in that bucket's .index][15 zero]
-        [u8 refcount][u32 fingerprint], sliced at 8 MiB. ASSUMED: header bytes after the magic are zeros; a phantom id points at the
-        entry of the stored chunk it copies; ids that store nothing (unused ids of a block, purged chunks) are all zeros;
-        refcount = references from records, capped at 255; fingerprint = crc32 of the chunk md5 (the reader checks neither)."""
+        [u8 refcount][u32 fingerprint], sliced at 8 MiB. A copy's id (a phantom: fresh ids, nothing stored) is a kind-1 record,
+        measured by hbk-1 on the real backup: [0x01][u64 byte offset of the stored chunk's record, 64 + 29*g][15 zero][u8 refcount]
+        [u32 fingerprint]. ASSUMED: header bytes after the magic are zeros; ids that store nothing (unused ids of a block, purged
+        chunks) are all zeros; refcount = references from records, capped at 255; fingerprint = crc32 of the chunk md5."""
         n = self.next_block * BLOCK; tab = bytearray(64 + 29 * n); tab[:4] = bytes.fromhex("7053a86e")
         for g in range(n):
             src = self.alias.get(g, g); loc = self.where.get(src)
             if loc is None: continue
-            b, e = loc; p = 64 + 29 * g
-            tab[p:p + 29] = b"\0" + struct.pack(">II", b, 64 + 32 * e) + bytes(15) + bytes([min(255, self.refs[g] or 1)]) + struct.pack(">I", zlib.crc32(self.md5.get(src, b"")))
+            p = 64 + 29 * g; tail = bytes([min(255, self.refs[g] or 1)]) + struct.pack(">I", zlib.crc32(self.md5.get(src, b"")))
+            if src != g: tab[p:p + 29] = b"\x01" + struct.pack(">Q", 64 + 29 * src) + bytes(15) + tail          # a copy: kind 1
+            else: b, e = loc; tab[p:p + 29] = b"\0" + struct.pack(">II", b, 64 + 32 * e) + bytes(15) + tail
         self.straddle = [g for g in range(n) if (64 + 29 * g) // SLICE != (64 + 29 * g + 28) // SLICE and self.alias.get(g, g) in self.where]
         d = os.path.join(self.root, "Pool", "chunk_index"); os.makedirs(d, exist_ok=True)
         for k in range(0, len(tab), SLICE):
@@ -296,7 +298,8 @@ def build(root, scale=1.0, bucket_cap=256 * 1024, versions=(101, 102, 103), rota
     _write_config(root, shares, versions, ts, snaps, last)
     truth = {"buckets": {str(b): list(v) for b, v in sorted(pool.bucket_writer.items())}, "reused": {str(b): w for b, w in sorted(pool.reused.items())}, "rotated_run": (v1 - 1) if rotate else None,
              "chunk_index": chunk_index, "id_range": [id_base_blocks * BLOCK, pool.next_block * BLOCK],
-             "chunk_index_straddle": getattr(pool, "straddle", [])}       # used ids whose 29-byte record crosses an 8 MiB slice boundary
+             "chunk_index_straddle": getattr(pool, "straddle", []),
+             "copies": sorted([g, g0] for g, g0 in pool.alias.items())}       # phantom id -> the stored id it copies       # used ids whose 29-byte record crosses an 8 MiB slice boundary
     manifest = {"format": "hbkgen-1", "truth": truth, "root": root, "last_clean": v2, "incident": v3, "bucket_cap": bucket_cap, "stats": pool.stats,
                 "versions": {str(v): {sh: {p: {"sha256": hashlib.sha256(e["data"]).hexdigest(), "size": len(e["data"]), "mtime": e["mtime"],
                                                "kind": e["info"]["kind"], "status": e["status"], "writer": e["info"].get("writer"),

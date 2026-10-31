@@ -162,6 +162,24 @@ class ChunkIndexPath(unittest.TestCase):
         self.assertIn(289260, rep["manifest"]["truth"]["chunk_index_straddle"])
         self.check(rep)
 
+    def test_copies_are_kind_1_records_that_resolve_to_their_source(self):
+        """hbk-1, measured on the real backup: a copy's ids hold kind-1 records ([0x01][u64 offset of the stored chunk's record]),
+        never their own (bucket, entry). The reader must resolve them through the table, not through the map."""
+        from tests.e2e import hbkgen
+        from callido_restore.sources.source import Source
+        work = tempfile.mkdtemp(prefix="hbk-e2e-ci-")
+        try:
+            m = hbkgen.build(os.path.join(work, "e2e_1.hbk"), 1, 256 * 1024, rotate=True, chunk_index=True)
+            copies = m["truth"]["copies"]; self.assertGreater(len(copies), 20)                 # thesis-copy and contract-copy
+            ci = _pool.ChunkIndex(Source("ci", "ci", os.path.join(work, "e2e_1.hbk")))
+            raw = ci._slice(0)
+            for g, g0 in copies:
+                rec = raw[64 + 29 * g: 64 + 29 * g + 29]
+                self.assertEqual(rec[0], 1, g); self.assertEqual(int.from_bytes(rec[1:9], "big"), 64 + 29 * g0, g)
+                self.assertEqual(ci.loc(g), ci.loc(g0), g)
+        finally:
+            shutil.rmtree(work, ignore_errors=True)
+
     @unittest.skipUnless(os.environ.get("HBK_E2E_STRESS") == "1", "HBK_E2E_STRESS=1: large files over many buckets (E5 layout)")
     def test_large_files_over_many_buckets(self):                                       # E5 layout
         self.check(self.run_flow(20, 1024))
