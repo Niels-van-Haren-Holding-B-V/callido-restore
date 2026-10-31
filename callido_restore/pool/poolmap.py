@@ -248,6 +248,36 @@ def _mapper_command(source_id, outdir, max_bucket):
     env = dict(os.environ, PYTHONPATH=root + os.pathsep + os.environ.get("PYTHONPATH", ""))
     return [sys.executable, "-m", "callido_restore"] + args, env
 
+def build_poolmap_anchor(source, outdir, log=print, max_bucket=None):
+    """The anchor-first map (T1, pool/anchor.py): tagged records located in the bucket indexes, owners and placements derived
+    from them, exported as poolmap2.json which PoolReader prefers. Returns ({bucket: owner}, mapped_upto)."""
+    from callido_restore.pool import anchor, poolmap2
+    from callido_restore.core.pool import load_json
+    listing = load_json(os.path.join(outdir, "listing.json"))
+    writers = poolmap2.build_writers(outdir, log)
+    anchors, counts = anchor.scan_anchors(source, outdir, listing, writers, log=log, max_bucket=max_bucket)
+    owner, placements, report = anchor.resolve_and_place(writers, anchors, counts, log=log, max_bucket=max_bucket)
+    buckets = sorted(b for b in counts if max_bucket is None or b <= max_bucket)
+    upto = len(buckets) if len(owner) >= len(buckets) else len(owner)        # partial when not every bucket got an owner
+    anchor.export_map(writers, owner, placements, counts, outdir, mapped_upto=upto)
+    log(f"mapped {len(owner)}/{len(buckets)} buckets (anchor-first); {dict(report)}")
+    return dict(owner), upto
+
+def build_map(source, outdir, log=print, max_bucket=None):
+    """The app's mapper: anchor-first (TASKS.md T1: the sequential search below is obsolete), the v1 search only on request
+    (HBK_MAPPER=v1) for comparisons."""
+    if os.environ.get("HBK_MAPPER", "anchor") == "v1": return build_poolmap(source, outdir, log, max_bucket)
+    return build_poolmap_anchor(source, outdir, log, max_bucket)
+
+def read_map(outdir):
+    """({bucket: ...}, mapped_upto) of the map a mapper left in outdir: poolmap2.json (anchor-first) first, else poolmap.json."""
+    for name in ("poolmap2.json", "poolmap.json"):
+        p = os.path.join(outdir, name)
+        if os.path.isfile(p):
+            out = json.load(open(p))
+            return {int(b): (tuple(v) if isinstance(v, list) else v) for b, v in out["buckets"].items()}, out.get("mapped_upto", 0)
+    raise RuntimeError("the mapper left no map file")
+
 def mapper_main(argv):
     """Child entry: build the pool map of one source, every log line to stdout (the parent turns them into progress)."""
     from callido_restore.sources.source import load_sources, SOURCES
@@ -255,14 +285,14 @@ def mapper_main(argv):
     sid, outdir, mb = argv[0], argv[1], argv[2]
     src = SOURCES.get(sid)
     if src is None: raise SystemExit(f"mapper: unknown source {sid}")
-    build_poolmap(src, outdir, log=lambda m: print(m, flush=True), max_bucket=None if mb == "-" else int(mb))
+    build_map(src, outdir, log=lambda m: print(m, flush=True), max_bucket=None if mb == "-" else int(mb))
     return 0
 
 def build_poolmap_detached(source, outdir, log=print, max_bucket=None, cancelled=None):
     """``build_poolmap`` in a child process. Returns what ``build_poolmap`` returns (read back from poolmap.json), or
     ({}, 0) when ``cancelled()`` turned true (the child is terminated, nothing is left running). Raises RuntimeError with the
     child's last lines when it fails. ``DETACHED = False`` (tests) runs in-process instead."""
-    if not DETACHED: return build_poolmap(source, outdir, log, max_bucket)
+    if not DETACHED: return build_map(source, outdir, log, max_bucket)
     cmd, env = _mapper_command(source.id, outdir, max_bucket)
     p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, text=True, env=env)
     tail = collections.deque(maxlen=8)
@@ -282,5 +312,4 @@ def build_poolmap_detached(source, outdir, log=print, max_bucket=None, cancelled
     t.join(5)
     if p.returncode != 0:
         raise RuntimeError("mapper failed: " + (" | ".join(l for l in tail if l.strip())[-400:] or f"exit {p.returncode}"))
-    out = json.load(open(os.path.join(outdir, "poolmap.json")))
-    return {int(b): tuple(v) for b, v in out["buckets"].items()}, out.get("mapped_upto", 0)
+    return read_map(outdir)

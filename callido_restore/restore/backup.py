@@ -398,7 +398,10 @@ class Backup:
         job["message"] = "mapping buckets to writers"; job["progress"] = 0.7
         def mlog(m):
             job["message"] = str(m)
-            mm = re.search(r"mapped (\d+)/(\d+)", str(m))
+            mm = re.search(r"scanned (\d+)/(\d+)", str(m))                 # anchor scan: 70-95 % of the job
+            if mm: job["progress"] = 0.7 + 0.25 * int(mm.group(1)) / max(1, int(mm.group(2))); return
+            if str(m).startswith(("owners from anchors", "placement", "phase2")): job["progress"] = 0.96; return
+            mm = re.search(r"mapped (\d+)/(\d+)", str(m))                  # v1 search, or the anchor-first summary line
             if mm: job["progress"] = 0.7 + 0.3 * int(mm.group(1)) / max(1, int(mm.group(2)))
         # In a child process: the app stays responsive while the search runs at full CPU, and Stop ends it at once.
         res, upto = poolmap.build_poolmap_detached(self.src, str(pool_dir), mlog, max_bucket=max_bucket, cancelled=lambda: bool(job.get("cancel")))
