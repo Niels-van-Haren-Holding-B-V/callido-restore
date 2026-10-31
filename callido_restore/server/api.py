@@ -61,10 +61,11 @@ def maybe_autoprepare(sid):
     """Start the preparation when it can run and has not finished; None when nothing was started (and why is not an error)."""
     if not AUTOPREPARE or sid not in BACKUPS: return None
     b = BACKUPS[sid]
-    with POOL_LOCK:
-        try:
-            if pool_job(sid) or b.pool_paused() or b.pool_status().get("complete") or not b.raw_snapshots(): return None
-        except Exception: return None
+    try:                                                   # the slow checks (a share listing may go to the remote) run outside the lock
+        if pool_job(sid) or b.pool_paused() or b.pool_status().get("complete") or not b.raw_snapshots(): return None
+    except Exception: return None
+    with POOL_LOCK:                                        # the cheap checks again, atomically with the start
+        if pool_job(sid) or b.pool_paused(): return None
         b.set_pool_paused(False)
         return start_job(lambda job: b.build_pool(job, None), "build pool map", src=sid)
 
