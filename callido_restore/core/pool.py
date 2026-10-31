@@ -76,10 +76,10 @@ class SlicedStream:
                     k = int(m.group(1))
                     if k not in self._names or int(m.group(2)) > rev_sort_key(self._names[k]): self._names[k] = n
         return self._names
-    def slice_path(self, k, job=None):
+    def slice_path(self, k, job=None, progress=None, cancelled=None):
         n = self.names().get(k)
         if n is None: raise FileNotFoundError(f"{self.reldir}: slice {k} missing")
-        return self.src.ensure(f"{self.reldir}/{n}", job)
+        return self.src.ensure(f"{self.reldir}/{n}", job, progress=progress, cancelled=cancelled)
     def read(self, off, n, job=None):
         out = b""
         while n > 0:
@@ -226,6 +226,40 @@ def file_pool_chunks(path):
     return out
 
 # ----------------------------------------------------------------------------- offline analysis: record runs
+SLICE_WORKERS = 4
+
+def _fetch_slices(st, keys, sizes, total, s, report, cancelled):
+    """Fetch a record set's slices SLICE_WORKERS at a time (the daemon keeps one connection, so parallel slices give several
+    times the rate of one process per slice) and report finished + in-flight bytes and rclone's rate-limit note as they move.
+    Slices already in the cache cost nothing. Raises Cancelled when ``cancelled()`` turns true."""
+    import concurrent.futures, threading
+    lock = threading.Lock(); finished = 0; inflight = {}; notes = {}; paths = {}
+    def emit():
+        if report is None: return
+        with lock:
+            done = min(total, finished + sum(inflight.values())); note = next((n for n in notes.values() if n), "")
+        report(f"downloading index set {s}/4 · {done / 1048576:,.0f} of {total / 1048576:,.0f} MB" + (f" · {note}" if note else ""), done, total)
+    def fetch(k):
+        nonlocal finished
+        def prog(b, speed, note):
+            with lock: inflight[k] = b; notes[k] = note
+            emit()
+        p = st.slice_path(k, progress=prog if report else None, cancelled=cancelled)
+        with lock:
+            finished += sizes.get(st.names()[k], 0); inflight.pop(k, None); notes.pop(k, None); paths[k] = p
+        emit(); return p
+    with concurrent.futures.ThreadPoolExecutor(max_workers=SLICE_WORKERS) as ex:
+        futs = [ex.submit(fetch, k) for k in keys]
+        for f in futs:
+            while True:
+                try: f.result(timeout=0.5); break
+                except concurrent.futures.TimeoutError:
+                    if cancelled is not None and cancelled():
+                        for g in futs: g.cancel()
+                        raise Cancelled()
+    return [paths[k] for k in keys]
+
+
 def build_runs(source, outdir, log=print, cancelled=None, progress=None, report=None):
     """Parse all 4 record streams. Writes <outdir>/runs_set<s>.bin (rec_off,u64 g_start,u32 len triples) and
     blocks.json (block -> owning writer, by longest consecutive runs). ``cancelled()`` true (Stop) returns None before
@@ -242,15 +276,11 @@ def build_runs(source, outdir, log=print, cancelled=None, progress=None, report=
         st = SlicedStream(source, f"Config/file_chunk{s}.index")
         names = st.names(); paths = []
         sizes = {n: (e.get("size") or 0) for n, e in source.listdir(st.reldir).items()} if report else {}
-        total = sum(sizes.get(names[k], 0) for k in names); done = 0
+        total = sum(sizes.get(names[k], 0) for k in names)
         if report: report(f"downloading index set {s}/4 · 0 of {total / 1048576:,.0f} MB", 0, total)
-        for k in sorted(names):                                  # each slice may be a download: Stop between them
-            if cancelled is not None and cancelled(): return None
-            paths.append(st.slice_path(k))
-            if report:
-                done += sizes.get(names[k], 0)
-                report(f"downloading index set {s}/4 · {done / 1048576:,.0f} of {total / 1048576:,.0f} MB", done, total)
-        if report: report(f"parsing index set {s}/4", done, total)
+        try: paths = _fetch_slices(st, sorted(names), sizes, total, s, report, cancelled)
+        except Cancelled: return None
+        if report: report(f"parsing index set {s}/4", total, total)
         rec_off = array("q"); g0 = array("q"); ln = array("l"); nrec = 0; nrefs = 0
         def on_record(off, ids):
             nonlocal nrec, nrefs
