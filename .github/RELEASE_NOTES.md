@@ -1,5 +1,11 @@
 **Callido Restore** restores files from a Synology Hyper Backup (`.hbk`) without Hyper Backup or a working NAS. It reads the backup's own metadata, shows every backup run on a timeline, and restores the folders you pick to a NAS share or a local folder. Files already at the destination are never overwritten or deleted, and the backup source is only read.
 
+## What's new in 0.3.7
+
+- **The pool-map scan reads the index files from where they are.** For a backup kept on Google Drive it looked for them under a local folder that does not exist; it now resolves every file through the app cache. Without this the mapper could not run on a Drive-backed backup at all.
+- The preparation builds the record tags the mapper needs from the loaded snapshots (hbk-1, #96), with smaller writer tables (#95), and refuses to map when no snapshot has been loaded yet instead of producing an anchor-less map.
+- Measured on a real backup: the whole mapping takes about 17 minutes with four scan workers; the map it produces is partial (see the task list), so some files, mostly large ones, cannot be restored yet.
+
 ## What's new in 0.3.6
 
 - **Stop ends the pool-map scan at once**, workers included: the mapper runs in its own process group and Stop and Quit kill the group. Helpers left behind by a crashed app are ended at the next start.

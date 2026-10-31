@@ -37,6 +37,16 @@ parent logs `scanned i/N` every 2 s; `resolve_and_place` logs `resolving copies:
 `placing writer w: k/N anchors` every 2 s (the job maps them to 95-100 %). The `--scan-worker` dispatch is in the app entry since 0.3.5 (`anchor._worker_command`), so the frozen app scans with
 MAX_WORKERS processes like a checkout; the one-worker fallback is gone (hbk-2, coordinated through this note).
 
+**Measured on the real backup, 2026-10-31 11:50 (hbk-2, full pipeline from the app's data, 4 scan workers):** record meta 2 s;
+writer tables 3 s; anchor scan 454 s (277,198 of 277,493 tagged records anchored, 11,742 multi-hit); placement 545 s;
+result **13,656 of 36,132 buckets owned** (directories 5-7 of 18 almost entirely unowned: 0, 1, 6 buckets), placed 260,220
+records + 12,107 gap-filled, unplaced 9,082, gap-unfilled 41,301, free-assigned 3,519, owner-conflicts 2,440. A random
+sample of files per share plans (all chunks placed) for 78-91 % of the files but only 11-51 % of the bytes: the large
+files sit in unplaced records. Two mid-sized files per share restored through that map byte-exact (every chunk md5
+verified). `rhythm(b)` agrees with the anchored owners in directory 0 only (1539/1554) and 37 % overall; consecutive owned
+buckets of one writer are mostly adjacent (gap 1: 4,906 of 13,652), so writers write runs, not round-robin. This is the
+open core of T1: ownership of anchor-less bucket runs. hbk-2 keeps the scratch map and timing log on request.
+
 ## T2 — End-to-end restore test to the NAS
 Wizard → version 1234 (the last clean run) → <a small folder> → target `<remote>:<restore-test-folder>`.
 Acceptance: files present with correct sizes and mtimes; pause/resume works; errors list empty. Then restore everything.
