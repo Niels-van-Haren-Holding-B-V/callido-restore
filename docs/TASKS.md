@@ -47,6 +47,15 @@ verified). `rhythm(b)` agrees with the anchored owners in directory 0 only (1539
 buckets of one writer are mostly adjacent (gap 1: 4,906 of 13,652), so writers write runs, not round-robin. This is the
 open core of T1: ownership of anchor-less bucket runs. hbk-2 keeps the scratch map and timing log on request.
 
+2026-10-31 13:05 (hbk-1, docs/handovers/2026-10-31-1305-claude-hbk-1.md): the placer's assumptions were wrong in three ways, measured on
+the real backup. (1) Content dedup: a file of two or more chunks backed up again gets new chunk ids but stores nothing; 145 k
+tagged records (63 M chunks of the 240 M listed) are such phantoms, which shifted every stream offset after them. (2) Bucket ids
+are reused; time order is `(index rev, bucket id)`, and a record whose ids did not exist at its bucket's revision is a phantom of
+an untagged copy. (3) With phantoms removed the stream-offset pins are consistent (13,911 against 538) and the anchorless
+buckets, the interiors of large files, are accounted for by the pins to within a few percent. v3 of `resolve_and_place` (time
+order, phantom aliasing, pins, a byte-and-count partition of the anchorless buckets, every placed record verified by its ulen
+sum against the file size) is in progress; the prototype already owns 31 k of 36 k buckets.
+
 ## T2 — End-to-end restore test to the NAS
 Wizard → version 1234 (the last clean run) → <a small folder> → target `<remote>:<restore-test-folder>`.
 Acceptance: files present with correct sizes and mtimes; pause/resume works; errors list empty. Then restore everything.
