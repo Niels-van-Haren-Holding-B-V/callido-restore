@@ -140,8 +140,9 @@ Only the first start needs this. Settings, caches and `app.log` live in `~/.hbk-
 
 ## Install and first start on Windows
 
-1. Run `CallidoRestore-x64.msi`. The installer is not signed yet, so Windows SmartScreen shows "Windows protected your PC": click **More info**, then **Run anyway**.
-2. Follow the installer; it installs into `C:\Program Files\Callido\Callido Restore`, adds a Start-menu and a desktop shortcut, and can open the app on its last page.
+1. Save the `.msi` on the PC's own disk first: Windows Installer cannot open it from a network or virtual-machine shared folder ("This installation package could not be opened").
+2. Run `CallidoRestore-x64.msi`. The installer is not signed yet, so Windows SmartScreen shows "Windows protected your PC": click **More info**, then **Run anyway**.
+3. Follow the installer; it installs into `C:\Program Files\Callido\Callido Restore`, adds a Start-menu and a desktop shortcut, and can open the app on its last page. The app opens in its own window (Microsoft Edge WebView2, built into Windows 11 and current Windows 10).
 
 Installing a newer version replaces the old one; uninstalling (Settings → Apps) never touches your settings, caches and `app.log` in `%USERPROFILE%\.hbk-explorer`. rclone is bundled.
 
