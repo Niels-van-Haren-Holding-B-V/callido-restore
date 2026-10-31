@@ -576,14 +576,20 @@ async function prepResume(){try{await post('/api/pool/resume',{src:S.src})}catch
 function coverageText(pool){if(!pool)return '';const parts=[];                     // bytes_pct is a percentage, 0-100 (agreed with hbk-1)
   if(pool.bytes_pct!=null)parts.push(`${Math.round(pool.bytes_pct)} % of the data can be restored`);if(pool.records_placed!=null&&pool.records_total)parts.push(`${pool.records_placed.toLocaleString()} of ${pool.records_total.toLocaleString()} files located`);
   return parts.join(' · ')}
+// Step 4 shows the preparation as one labelled line (the header pill's content), never as the restore's bar.
+function prepLineText(j){const pct=Math.round((j.progress||0)*100);
+  return `Preparing the backup · ${j.message?j.message+' · ':''}${pct} %${PREP.eta?' · '+PREP.eta:''}`}
+function prepLineRender(st){const el=$('#prepLineText');if(!el||!st||!st.running)return;el.textContent=prepLineText(st.job||{})}
 function prepPillRender(st){const pill=$('#prepPill');if(!pill)return;if(!st||st.error||st.complete||(!st.running&&!st.paused)){pill.style.display='none';return}
   pill.style.display='inline-flex';$('#prepSpin').style.display=st.running?'':'none';const b=$('#prepBtn');
   if(st.running){const j=st.job||{};const dl=j.total_bytes&&(j.done_bytes||0)<j.total_bytes;const bytes=dl?` · ${human(j.done_bytes||0)} of ${human(j.total_bytes)}${j.state==='running'?' · '+speedText(j.id):''}`:'';
     $('#prepText').textContent=`Preparing the backup · ${j.message||'starting…'}${bytes}`;b.textContent='Pause';b.onclick=async()=>{b.disabled=true;b.textContent='Pausing…';await prepPause()}}
   else{$('#prepText').textContent='Preparation paused · the restore waits for it';$('#prepPill').title='Resume continues the download where it stopped; the map itself is computed again.';b.textContent='Resume';b.disabled=false;b.onclick=async()=>{b.disabled=true;b.textContent='Resuming…';await prepResume()}}}
 async function prepWatch(){if(PREP.src===S.src&&PREP.timer)return;PREP.src=S.src;if(PREP.timer){clearTimeout(PREP.timer);PREP.timer=null}
-  const tick=async()=>{if(PREP.src!==S.src)return;const st=await prepState();PREP.pool=st.pool||PREP.pool;const was=PREP.jobId;PREP.jobId=st.running||null;if(st.job){etaText(st.job.id,st.job.progress||0,st.job.done_bytes,st.job.total_bytes)}prepPillRender(st);
-    if(was&&!PREP.jobId&&S.tab==='restore')tabRestore();                       // the preparation ended: the Start button may be ready now
+  const tick=async()=>{if(PREP.src!==S.src)return;const st=await prepState();PREP.pool=st.pool||PREP.pool;const was=PREP.jobId;PREP.jobId=st.running||null;PREP.eta=st.job?etaText(st.job.id,st.job.progress||0,st.job.done_bytes,st.job.total_bytes):'';prepPillRender(st);prepLineRender(st);
+    // the preparation ended, or the backup became prepared between two polls (a short run): Start, or a queued restore, may go now
+    const ready=!!st.complete,became=PREP.complete===false&&ready;PREP.complete=ready;
+    if(((was&&!PREP.jobId)||became)&&S.tab==='restore')tabRestore();
     PREP.timer=setTimeout(tick,st.running?2000:5000)};tick()}
 function shareRows(){const rows=[];S.basket.forEach(b=>{let r=rows.find(x=>x.share===b.share);if(!r){r={share:b.share,paths:[]};rows.push(r)}r.paths.push(b.path)});return rows}
 const itemLabel=it=>`${it.share}/${it.path||''}`;
@@ -623,6 +629,10 @@ async function tabRestore(){const el=$('#tab-restore');
   // Shares in the selection whose file list for this run is not loaded yet: the restore cannot plan them, so Start waits for the lists.
   const notLoaded=[...new Set(S.basket.map(b=>b.share))].filter(sh=>S.snaps&&S.snaps[sh]&&!S.snaps[sh].indexed);
   const loading=notLoaded.filter(sh=>S.indexing[sh]);   // their file lists are on their way: Start waits, no need to ask
+  // A restore queued with "Start when the backup is prepared" belongs to this source and this selection; a changed selection drops it.
+  const selKey=JSON.stringify(S.basket);
+  if(S.queued&&(S.queued.src!==S.src||S.queued.sel!==selKey)){S.queued=null;toast('The selection changed, so the queued restore was cancelled. Press Start again.',{kind:'warn'})}
+  const queued=!!S.queued;const goOk=S.basket.length&&!restoreRun&&!notLoaded.length;
   const doneSteps=[true,S.basket.length>0];let firstOpen=doneSteps.indexOf(false)+1||3;
   const step=(n,title,body,done)=>`<div class="step ${done?'done':''} ${n===firstOpen?'on':''}"><span class="n">${n}</span><h2>${title}</h2><div class="body">${body}</div></div>`;
   el.innerHTML=
@@ -649,13 +659,15 @@ async function tabRestore(){const el=$('#tab-restore');
      </details>
      <details class="adv"><summary>Advanced: everything under one folder</summary><div class="row"><label><input type="checkbox" id="wzOne"> put all selected folders under one folder, as <code>&lt;folder&gt;/&lt;share&gt;/&lt;path&gt;</code></label><input id="wzOnePath" placeholder="nas:Restore/restore-${S.ver} or ${LOCAL_EG}/Restore/restore-${S.ver}" style="width:380px"></div></details>
      <details class="adv"><summary>How the data flows</summary><p class="help">Google Drive → this computer (decompress and verify) → NAS. The Drive download speed is the limit; data blocks are fetched 4 in parallel ahead of the writer and deleted from this computer after use (cache ≤ 20 GB).</p></details>`,false)+
-  step(4,'Check and start',`<div class="row"><button class="small" id="rsPlan">Count files and size</button><button class="${S.basket.length&&mapOk&&!restoreRun&&!notLoaded.length?'primary':''}" id="rsGo" ${S.basket.length&&mapOk&&!restoreRun&&!notLoaded.length?'':'disabled'}>${restoreRun?'Restoring…':loading.length?'Loading the file lists…':notLoaded.length?'Load the file lists first':mapOk?'Start restore':poolRun?'Waiting for the preparation…':prep.paused?'Preparation paused':'Waiting for the preparation'}</button><span class="help">counting needs no preparation, only the restore does · nothing at the target is ever overwritten or deleted: files already there are skipped, so an interrupted restore can simply be started again</span></div>
+  step(4,'Check and start',`<div class="row"><button class="small" id="rsPlan">Count files and size</button><button class="${goOk&&!queued?'primary':''}" id="rsGo" ${goOk?'':'disabled'} title="${!mapOk&&goOk&&!queued?'The restore starts by itself as soon as the backup is prepared.':''}">${restoreRun?'Restoring…':loading.length?'Loading the file lists…':notLoaded.length?'Load the file lists first':queued?'Queued · cancel':mapOk?'Start restore':'Start when the backup is prepared'}</button><span class="help">counting needs no preparation, only the restore does · nothing at the target is ever overwritten or deleted: files already there are skipped, so an interrupted restore can simply be started again</span></div>
      ${notLoaded.length?`<p class="help" style="margin:4px 0;color:var(--warn)">The file list${notLoaded.length>1?'s':''} of ${notLoaded.map(esc).join(', ')} for this run ${notLoaded.length>1?'are':'is'} not loaded yet, so the restore cannot be planned. ${loading.length===notLoaded.length?'<span class="spin"></span> Loading…':`<button class="small primary" id="rsLoadLists">Load ${notLoaded.length>1?'them':'it'} now</button>`}</p>`:''}
-     ${mapOk&&!poolRun?`<div class="row" style="margin:4px 0"><div class="prog"><i style="width:100%"></i></div><span class="help">Prepared${coverageText(pool)?' · '+coverageText(pool):''}</span><button class="small ghost" id="prepAgain" title="The downloaded index files are kept; the map is computed again, which takes a while.">Run the preparation again</button></div>
+     ${queued&&!mapOk?`<p class="help" style="margin:4px 0"><b>Queued:</b> the restore starts by itself when the backup is prepared. Keep the app open.</p>`:''}
+     ${poolRun?`<div class="row" id="prepLine" style="margin:4px 0"><span class="spin"></span><span id="prepLineText">${esc(prepLineText(prep.job||{}))}</span><button class="small" id="prepLinePause">Pause</button></div>`:''}
+     ${mapOk&&!poolRun?`<div class="row" style="margin:4px 0"><span class="help">✓ The backup is prepared${coverageText(pool)?' · '+coverageText(pool):''}</span><button class="small ghost" id="prepAgain" title="The downloaded index files are kept; the map is computed again, which takes a while.">Run the preparation again</button></div>
      <p class="help" style="margin:0 0 4px">Files the map could not locate are reported as errors when restored. Loading the file lists of more shares or runs (step 1) gives the map more to work with; the preparation then runs again by itself.</p>`:''}
      ${mapOk?'':`<div id="prepBox" style="margin:6px 0"><p class="help" style="margin:0 0 4px">Before it can restore, the app learns where every piece of every file is stored: it downloads the backup's index files (a few GB, no file data) and builds a map. This starts by itself${poolRun?'':prep.paused?' once you resume it':(idxLocal||total)?'':' as soon as a share\'s file list is loaded for this run (step 1)'}, continues after a pause or a restart (the downloaded index files are kept; the map itself is computed again), and is kept for later restores.${keyLine(S.info.source.remote,true)?` ${keyLine(S.info.source.remote,true)}`:''}</p>
-       ${poolRun?`<div class="row" style="align-items:flex-start"><div id="poolJob" style="flex:1"></div></div>`:
-       `<div class="row"><div class="prog"><i style="width:${pct}%"></i></div><span>${prep.paused?'Paused':total?'Not finished':'Not started'} · ${pool.index_bytes?`${human(pool.index_bytes_local||0)} of ${human(pool.index_bytes)} of index files downloaded`:(idxFiles?`${idxLocal.toLocaleString()} of ${idxFiles.toLocaleString()} index files on disk`:'a few GB of index files to download')}</span><button class="small ${prep.paused?'primary':''}" id="poolBuild">${prep.paused?'Resume':'Start now'}</button></div><div id="poolJob"></div>`}</div>`}
+       ${poolRun?'':
+       `<div class="row"><span>${prep.paused?'Preparation paused':total?'Preparation not finished':'Preparation not started'} · ${pool.index_bytes?`${human(pool.index_bytes_local||0)} of ${human(pool.index_bytes)} of index files downloaded (${pct} %)`:(idxFiles?`${idxLocal.toLocaleString()} of ${idxFiles.toLocaleString()} index files on disk`:'a few GB of index files to download')}</span><button class="small ${prep.paused?'primary':''}" id="poolBuild">${prep.paused?'Resume':'Start now'}</button></div><div id="poolJob"></div>`}</div>`}
      <div id="rsPlanOut" class="muted" style="margin:6px 0"></div><div id="rsProg"></div><div id="rsUnverified"></div><div id="rsErrors"></div><div id="rsSaved" style="margin-top:8px"></div>`,false);
   // wiring
   const wl=$('#wzLatest');if(wl)wl.onclick=()=>selectVersion(latest.id);
@@ -665,7 +677,8 @@ async function tabRestore(){const el=$('#tab-restore');
   renderTree();treeSummary();
   // One bar: while the pool job runs, its progress (phase, %, bytes, time left, Stop) is the status line and the button is disabled.
   // The preparation's progress is shown under the Start button while it runs (Pause there and in the header pill); when it ends the tab re-renders.
-  if(poolRun&&$('#poolJob'))pollJob(poolRun.id,$('#poolJob'),()=>tabRestore(),false,'Pause');
+  prepWatch();   // paints the preparation line every 2 s and re-renders this tab when the preparation ends
+  const plp=$('#prepLinePause');if(plp)plp.onclick=async()=>{plp.disabled=true;plp.textContent='Pausing…';await prepPause();tabRestore()};
   const pa=$('#prepAgain');if(pa)pa.onclick=async()=>{pa.disabled=true;pa.textContent='Starting…';await prepRunAgain()};
   const pb=$('#poolBuild');if(pb)pb.onclick=async()=>{pb.disabled=true;pb.textContent='Starting…';pendingBar($('#poolJob'),'Starting the preparation…');await prepResume();tabRestore()};
   // H8: one target per shared folder in the selection. MAP (localStorage) remembers the choice per share, plus the connection and the one-folder option.
@@ -723,23 +736,29 @@ async function tabRestore(){const el=$('#tab-restore');
   const showSaved=async()=>{try{const js=await api('/api/jobs/saved');const un=js.filter(j=>j.state!=='done');if(!un.length){$('#rsSaved').innerHTML='';return}
     $('#rsSaved').innerHTML=`<h4 style="font-size:12.5px;color:var(--muted);margin:6px 0">Earlier restores you can continue</h4><table>${un.map(j=>`<tr><td>${esc(j.state)}</td><td class="mono">${esc((j.roots&&j.roots.length?j.roots:[j.dest]).join(', '))}</td><td class="num">${(j.done_files||0).toLocaleString()} / ${(j.total_files||0).toLocaleString()} files · ${human(j.done_bytes||0)} of ${human(j.total_bytes||0)}${j.errors?` · ${j.errors} errors`:''}${j.unverified?` · <b style="color:var(--warn)">needs checking: ${j.unverified.toLocaleString()} file${j.unverified===1?'':'s'}</b>`:''}${j.identical_copy?` · ${j.identical_copy.toLocaleString()} from an identical copy`:''}</td><td>${new Date((j.updated||j.started)*1000).toLocaleString()}</td><td>${j.state==='running'?`<button class="small jc" data-i="${esc(j.id)}">Pause</button>`:`<button class="small jr" data-i="${esc(j.id)}">Continue</button>`}</td></tr>`).join('')}</table>`;
     if(S.jobs&&S.jobs.some(j=>j.label.startsWith('restore')))$$('.jr').forEach(b=>{b.disabled=true;b.title='A restore is already running'});
-    $$('.jr').forEach(b=>b.onclick=async()=>{b.disabled=true;b.textContent='Resuming…';try{const j=await post('/api/restore/resume',{id:b.dataset.i});pollJob(j.id,$('#rsProg'),()=>tabRestore(),true)}catch(e){toastError(e);b.disabled=false;b.textContent='Continue'}tabRestore()});
+    $$('.jr').forEach(b=>b.onclick=async()=>{b.disabled=true;b.textContent='Resuming…';try{const j=await post('/api/restore/resume',{id:b.dataset.i});}catch(e){toastError(e);b.disabled=false;b.textContent='Continue'}tabRestore()});
     $$('.jc').forEach(b=>b.onclick=async()=>{await api('/api/job/cancel',{id:b.dataset.i});setTimeout(showSaved,1500)})}catch(e){}};
   showSaved();
   const ll=$('#rsLoadLists');if(ll)ll.onclick=()=>{ll.disabled=true;ll.textContent='Loading…';const todo=notLoaded.filter(sh=>!S.indexing[sh]);runIndex(todo.length>1?todo:todo[0])};   // only the selected shares, not every share of the run
   $('#rsPlan').onclick=async()=>{$('#rsPlanOut').textContent='counting…';await checkAll()};
-  $('#rsGo').onclick=async()=>{const its=items();const dest=oneMode()?oneDest():'';
-    if(!oneMode()&&its.some(x=>!x.dest)){toast('Choose a target for every shared folder in step 4.',{kind:'warn'});return}
+  const startRestore=async(its,dest,skip)=>{const g=$('#rsGo');if(g){g.disabled=true;g.textContent='Starting…'}pendingBar($('#rsProg'),'Starting the restore…');
+    try{const j=await post('/api/restore',{src:S.src,dest,items:its,skip_meta:skip});if(g)g.textContent='Restoring…';showSaved();watchRestore(j.id)}
+    catch(e){$('#rsProg').innerHTML='';if(g){g.disabled=false;g.textContent='Start restore'}toastError(e)}};
+  const watchRestore=id=>{$('#rsProg').innerHTML='<h4 style="font-size:12.5px;margin:6px 0 2px">Restoring</h4><div id="rsBar"></div>';
+    pollJob(id,$('#rsBar'),job=>{const g=$('#rsGo');if(g){g.disabled=false;g.textContent='Start restore'}showSaved();$('#rsProg').querySelector('h4').textContent=job.result&&job.result.paused?'Restore paused':job.state==='error'?'Restore failed':'Restore finished';$('#rsProg').innerHTML+=`<p><b>${job.result&&job.result.paused?'Paused':'Done'}:</b> ${job.result?`${job.result.restored} restored · ${job.result.skipped} skipped · ${job.result.errors} errors · ${human(job.result.bytes)}${verifyText(job.result)}`:esc(job.error||'')}</p>`;
+      // Files whose place in the backup could not be confirmed are listed (the job carries the capped list) so the user can check them by hand.
+      const unv=job.unverified||[];if(unv.length)$('#rsUnverified').innerHTML=`<h4 style="font-size:12px;color:var(--warn)">Couldn’t be verified: check these ${unv.length}${(job.result&&job.result.unverified)>unv.length?' of '+job.result.unverified.toLocaleString():''} files before you rely on them</h4><p class="help" style="margin:0 0 4px">${esc(CHECKED_HELP)}</p><div class="tablewrap"><table>${unv.slice(0,500).map(e=>`<tr><td class="mono">${esc(e.path)}</td><td>${esc(plainReason(e.reason))}</td></tr>`).join('')}</table></div>`;
+      if(job.errors&&job.errors.length)$('#rsErrors').innerHTML=`<h4 style="font-size:12px;color:var(--muted)">Errors (${(job.errors_total??job.errors.length).toLocaleString()})</h4><div class="tablewrap"><table>${job.errors.slice(0,500).map(e=>`<tr><td class="mono">${esc(e.path)}</td><td title="${esc(e.error)}">${esc(plainError(e.error))}</td></tr>`).join('')}</table></div>`},true)};
+  if(restoreRun)watchRestore(restoreRun.id);                                 // a restore that runs already keeps its bar after a re-render
+  else if(S.queued&&mapOk){const q=S.queued;S.queued=null;toast('The backup is prepared: the queued restore starts now.');startRestore(q.its,q.dest,q.skip)}
+  $('#rsGo').onclick=async()=>{if(S.queued){S.queued=null;toast('The queued restore was cancelled.');tabRestore();return}
+    const its=items();const dest=oneMode()?oneDest():'';
+    if(!oneMode()&&its.some(x=>!x.dest)){toast('Choose a target for every shared folder in step 3.',{kind:'warn'});return}
     const chk=await checkAll();if(chk.bad){toast(chk.reason||'Fix the marked targets in step 3 first.',{kind:'warn',ms:8000});return}
     if(chk.nonEmpty&&!confirm(`${chk.nonEmpty} target folder${chk.nonEmpty>1?'s':''} already ${chk.nonEmpty>1?'have':'has'} files. Files already there are skipped and nothing is deleted. Continue?`))return;
-    $('#rsGo').disabled=true;$('#rsGo').textContent='Starting…';pendingBar($('#rsProg'),'Starting the restore…');
-    try{const j=await post('/api/restore',{src:S.src,dest,items:its,skip_meta:$('#rsMeta').checked});
-      $('#rsGo').textContent='Restoring…';showSaved();
-      pollJob(j.id,$('#rsProg'),job=>{$('#rsGo').disabled=false;$('#rsGo').textContent='Start restore';showSaved();$('#rsProg').innerHTML+=`<p><b>${job.result&&job.result.paused?'Paused':'Done'}:</b> ${job.result?`${job.result.restored} restored · ${job.result.skipped} skipped · ${job.result.errors} errors · ${human(job.result.bytes)}${verifyText(job.result)}`:esc(job.error||'')}</p>`;
-        // Files whose place in the backup could not be confirmed are listed (the job carries the capped list) so the user can check them by hand.
-        const unv=job.unverified||[];if(unv.length)$('#rsUnverified').innerHTML=`<h4 style="font-size:12px;color:var(--warn)">Couldn’t be verified: check these ${unv.length}${(job.result&&job.result.unverified)>unv.length?' of '+job.result.unverified.toLocaleString():''} files before you rely on them</h4><p class="help" style="margin:0 0 4px">${esc(CHECKED_HELP)}</p><div class="tablewrap"><table>${unv.slice(0,500).map(e=>`<tr><td class="mono">${esc(e.path)}</td><td>${esc(plainReason(e.reason))}</td></tr>`).join('')}</table></div>`;
-        if(job.errors&&job.errors.length)$('#rsErrors').innerHTML=`<h4 style="font-size:12px;color:var(--muted)">Errors (${(job.errors_total??job.errors.length).toLocaleString()})</h4><div class="tablewrap"><table>${job.errors.slice(0,500).map(e=>`<tr><td class="mono">${esc(e.path)}</td><td title="${esc(e.error)}">${esc(plainError(e.error))}</td></tr>`).join('')}</table></div>`},true)}
-    catch(e){$('#rsProg').innerHTML='';$('#rsGo').disabled=false;$('#rsGo').textContent='Start restore';toastError(e)}};}
+    const skip=$('#rsMeta').checked;
+    if(!prep.complete&&!(await prepState()).complete){S.queued={src:S.src,sel:JSON.stringify(S.basket),its,dest,skip};toast('Queued: the restore starts by itself when the backup is prepared.');tabRestore();return}
+    startRestore(its,dest,skip)};}
 // Sleep that also ends when the window becomes visible or focused again: while the user is in the browser (Google sign-in) the
 // embedded WebKit view throttles timers, so a plain setTimeout chain may not resume for a long time.
 const sleepOrWake=ms=>new Promise(res=>{let t=null;const done=()=>{clearTimeout(t);document.removeEventListener('visibilitychange',done);window.removeEventListener('focus',done);res()};t=setTimeout(done,ms);document.addEventListener('visibilitychange',done);window.addEventListener('focus',done)});
@@ -747,7 +766,7 @@ const sleepOrWake=ms=>new Promise(res=>{let t=null;const done=()=>{clearTimeout(
 // an unknown job id ends the wait with an error result.
 async function waitJob(id,onMsg,ms=1000,onJob){for(let miss=0;;){let x=null;try{x=await api('/api/job',{id});miss=0}catch(e){if(/no such job/i.test(e.message)||++miss>60)return{state:'error',error:e.message}}
   if(x&&onJob)onJob(x);if(x&&x.state!=='running')return x;if(x&&onMsg)onMsg(x.message||'');await sleepOrWake(ms)}}
-function pollJob(id,el,done,rich,stopLabel){let stopping=false;const t=async()=>{let job;try{job=await api('/api/job',{id})}catch(e){if(/no such job/i.test(e.message)){el.innerHTML+=`<p style="color:var(--bad)">${esc(e.message)}</p>`;return}await sleepOrWake(2000);return t()}
+function pollJob(id,el,done,rich,stopLabel){let stopping=false;const t=async()=>{if(!el.isConnected)return;let job;try{job=await api('/api/job',{id})}catch(e){if(/no such job/i.test(e.message)){el.innerHTML+=`<p style="color:var(--bad)">${esc(e.message)}</p>`;return}await sleepOrWake(2000);return t()}
   const stop=stopLabel&&job.state==='running'?`<button class="small" id="jobStop" ${stopping?'disabled':''}>${stopping?'Stopping…':stopLabel}</button>`:'';
   el.innerHTML=progressHtml(job,rich,stop);
   const b=$('#jobStop');if(b)b.onclick=async()=>{stopping=true;b.disabled=true;b.textContent=stopLabel==='Pause'?'Pausing…':'Stopping…';if(stopLabel==='Pause')await prepPause(id);else await api('/api/job/cancel',{id})};
