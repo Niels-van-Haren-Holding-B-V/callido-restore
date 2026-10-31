@@ -47,7 +47,7 @@ class Placer(unittest.TestCase):
         self.assertEqual(owner, {0: 0})
         self.assertEqual(pl[0][0], [(0, 0, 3)]); self.assertEqual(pl[0][1], [(0, 3, 1)]); self.assertEqual(pl[0][2], [(0, 0, 3)])
         self.assertNotIn(3, pl[0]); self.assertEqual(R["size-mismatch"], 1)
-        self.assertEqual(flags["aliased"], {(0, 2)}); self.assertEqual(flags["guessed"], set()); self.assertEqual(R["phantom-of-tagged"], 1)
+        self.assertEqual(flags["aliased"], {(0, 2): (0, 0)}); self.assertEqual(flags["guessed"], set()); self.assertEqual(R["phantom-of-tagged"], 1)
         self.assertEqual(R["verified"], 2)
         pool.tmp.cleanup()
 
@@ -89,7 +89,7 @@ class Placer(unittest.TestCase):
         X = _rec(20, 9000, 2, size=90, tag="x"); Y = _rec(21, 9002, 1, size=8, tag="y")
         anchors = {(0, i): [(0, i, 1)] for i in range(20)}; anchors[(0, 20)] = [(0, 20, 2)]; anchors[(0, 21)] = [(1, 0, 1)]
         owner, pl, R, flags = self.run_placer(pool, {0: small + [X, Y], 1: [], 2: [], 3: []}, anchors)
-        self.assertEqual(R["phantom-of-untagged"], 1); self.assertEqual(pl[0][20], [(0, 20, 2)]); self.assertIn((0, 20), flags["aliased"])
+        self.assertEqual(R["phantom-of-untagged"], 1); self.assertEqual(pl[0][20], [(0, 20, 2)]); self.assertEqual(flags["aliased"].get((0, 20), 1), None)      # copy of an untagged original: no source record
         self.assertEqual(pl[0][21], [(1, 0, 1)]); self.assertEqual(R["verified"], 21)
         pool.tmp.cleanup()
 
@@ -112,9 +112,11 @@ class Export(unittest.TestCase):
         out = tempfile.mkdtemp(); A = _rec(0, 100, 1, size=10, tag="a"); B = _rec(1, 101, 1, size=10, tag="a")
         writers = {0: [A, B], 1: [], 2: [], 3: []}
         m = anchor.export_map(writers, {0: 0}, {0: {0: [(0, 0, 1)], 1: [(0, 0, 1)]}, 1: {}, 2: {}, 3: {}}, {0: 1}, out, mapped_upto=1,
-                              flags={"guessed": {(0, 0)}, "aliased": {(0, 1)}}, report={"placed": 2})
+                              flags={"guessed": {(0, 0)}, "aliased": {(0, 1): (0, 0)}}, report={"placed": 2})
         d = json.load(open(os.path.join(out, "poolmap2.json")))
-        self.assertEqual(d["guessed"], {"4": [0], "3": [], "1": [], "2": []}); self.assertEqual(d["aliased"]["4"], [1000]); self.assertEqual(d["stats"], {"placed": 2})
+        self.assertEqual(d["guessed"], {"4": [0], "3": [], "1": [], "2": []}); self.assertEqual(d["aliased"]["4"], [[1000, 4, 0]]); self.assertEqual(d["stats"], {"placed": 2})
+        m = anchor.export_map(writers, {0: 0}, {0: {1: [(0, 0, 1)]}, 1: {}, 2: {}, 3: {}}, {0: 1}, out, mapped_upto=1, flags={"guessed": set(), "aliased": {(0, 1): None}})
+        self.assertEqual(json.load(open(os.path.join(out, "poolmap2.json")))["aliased"]["4"], [[1000, None, None]])
 
     def test_scan_keeps_bucket_totals(self):
         from tests.pool.test_anchor import Scan

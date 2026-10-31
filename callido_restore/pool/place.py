@@ -110,7 +110,7 @@ def resolve_and_place_v3(writers, anchors, index, log=print, max_bucket=None):
         if _rss_mb() > PARENT_RSS_MB: raise MemoryError(f"placer RSS {_rss_mb():.0f} MB > {PARENT_RSS_MB} MB after {phase}; aborted")
     buckets = sorted(b for b in counts if max_bucket is None or b <= max_bucket); bset = set(buckets)
     torder = sorted(buckets, key=lambda b: (rev.get(b, 0), b)); tpos = {b: i for i, b in enumerate(torder)}
-    flags = {"guessed": set(), "aliased": set()}
+    flags = {"guessed": set(), "aliased": {}}        # aliased: (w, ri) -> the stored record it copies, None for a copy of an untagged original
     def first_id(w, ri): r = W[w][ri]; return r.ranges[0][0] if r.ranges else -1
     # ---- A. phantoms. Copies of a tag are ordered by first chunk id; the first len(positions) copies are the stored ones.
     groups = []
@@ -365,7 +365,7 @@ def resolve_and_place_v3(writers, anchors, index, log=print, max_bucket=None):
         if ob is None: R["found-unsized"] += 1; continue
         head = min(n, counts[b] - e); segs = [(b, e, head)]; rem = n - head
         if rem == 0:
-            if index.seg_bytes(segs) == ob: placements[w][ri] = segs; flags["aliased"].add((w, ri)); R["placed-older-copy"] += 1
+            if index.seg_bytes(segs) == ob: placements[w][ri] = segs; flags["aliased"][(w, ri)] = None; R["placed-older-copy"] += 1
             else: R["found-size-mismatch"] += 1
             continue
         ow = claimed.get(b)
@@ -373,7 +373,7 @@ def resolve_and_place_v3(writers, anchors, index, log=print, max_bucket=None):
             i = spos[ow].get(b); m = rem
             while m > 0 and i is not None and i + 1 < len(seqs[ow]):
                 i += 1; cb = seqs[ow][i]; tk = min(m, counts[cb]); segs.append((cb, 0, tk)); m -= tk
-            if m == 0 and index.seg_bytes(segs) == ob: placements[w][ri] = segs; flags["aliased"].add((w, ri)); R["placed-older-copy"] += 1
+            if m == 0 and index.seg_bytes(segs) == ob: placements[w][ri] = segs; flags["aliased"][(w, ri)] = None; R["placed-older-copy"] += 1
             else: R["found-size-mismatch"] += 1
             continue
         cands = [(x, counts[x], index.total(x)) for x in window(b, None) if rev.get(x, 0) <= rev.get(b, 0) + 2][:MAX_CANDIDATES // 2]
@@ -383,7 +383,7 @@ def resolve_and_place_v3(writers, anchors, index, log=print, max_bucket=None):
         for x in sol: claimed[x] = ("?", b)          # someone's buckets, not reusable
         for k, x in enumerate(sorted(sol, key=tpos.get)):
             segs.append((x, 0, tail_e if (k == len(sol) - 1 and tail_e is not None) else counts[x]))
-        placements[w][ri] = segs; flags["aliased"].add((w, ri)); R["placed-older-copy"] += 1
+        placements[w][ri] = segs; flags["aliased"][(w, ri)] = None; R["placed-older-copy"] += 1
     # ---- F. small records with several candidate positions: any position whose bytes match (identical content when n <= TAGK)
     for (w, ri), pl in cand.items():
         if ri in placements[w] or len(pl) < 2 or len(pl) > MULTI_MAX: continue
@@ -395,7 +395,7 @@ def resolve_and_place_v3(writers, anchors, index, log=print, max_bucket=None):
         else: R["multi-unplaced"] += 1
     # ---- G. copies alias their stored record
     for (w, ri), (w2, ri2) in alias.items():
-        if ri2 in placements[w2] and W[w][ri].size == W[w2][ri2].size: placements[w][ri] = placements[w2][ri2]; flags["aliased"].add((w, ri)); R["aliased"] += 1
+        if ri2 in placements[w2] and W[w][ri].size == W[w2][ri2].size: placements[w][ri] = placements[w2][ri2]; flags["aliased"][(w, ri)] = (w2, ri2); R["aliased"] += 1
         else: R["alias-unplaced"] += 1
     guard("placement")
     owner_out = {b: w for b, w in claimed.items() if isinstance(w, int)}

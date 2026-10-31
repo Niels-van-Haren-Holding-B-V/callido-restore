@@ -497,16 +497,18 @@ class Backup:
         job["verified"] = 0; job["identical_copy"] = 0; job["unverified"] = []      # per restored file: how its placement was established
         pool = self.pool; fh_cache = {}
         def restored(f):
-            """count the file as restored; verified only when its placement in the map was checked against its size (file-pool
-            files are stored whole); copies of an identical record and unchecked placements are reported (hbk-3's UI)"""
+            """count the file as restored by how the map established its placement (PoolReader.verification): "verified" = the
+            placement of every record the file reads from matched the file sizes when the map was built and each chunk's md5 was
+            checked on read (not a file-level checksum); "identical_copy" = restored from an identical record's entries;
+            "unverified" = listed with the reason"""
             job["done_files"] += 1
-            st = "verified" if f["off"] is not None and f["off"] < 0 else "unverified"
+            st, why = ("verified", "") if f["off"] is not None and f["off"] < 0 else ("unverified", "the pool map gives no status")
             if f["off"] is not None and f["off"] >= 0 and hasattr(pool, "verification"):
-                try: st = pool.verification(f["off"])
-                except Exception: st = "unverified"
+                try: st, why = pool.verification(f["off"])
+                except Exception as e: st, why = "unverified", f"status check failed: {e}"
             if st == "verified": job["verified"] += 1
             elif st == "identical_copy": job["identical_copy"] += 1
-            elif len(job["unverified"]) < UNVERIFIED_MAX: job["unverified"].append({"path": f"{f['share']}/{f['path']}", "reason": "placed without a size check"})
+            elif len(job["unverified"]) < UNVERIFIED_MAX: job["unverified"].append({"path": f"{f['share']}/{f['path']}", "reason": why})
         def result(**extra):
             return {**extra, "restored": job["done_files"], "skipped": job["skipped"], "errors": len(job["errors"]), "verified": job["verified"],
                     "identical_copy": job["identical_copy"], "unverified": len(job["unverified"])}
