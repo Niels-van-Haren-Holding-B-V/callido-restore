@@ -5,6 +5,7 @@
 - **Stop ends the pool-map scan at once**, workers included: the mapper runs in its own process group and Stop and Quit kill the group. Helpers left behind by a crashed app are ended at the next start.
 - **The parallel scan shows its position** ("scanned 12,400 of 36,132 buckets") every two seconds; it used to sit at 70 % until a whole part finished.
 - No more "less than a minute left" when nothing has moved for ten seconds; the estimate waits for real movement.
+- The placement step reports too: "resolving copies: pass 1/3, 120,000 of 400,000 records" and "placing writer 2: 8,000 of 30,000 anchors", every two seconds.
 
 ## What's new in 0.3.5
 

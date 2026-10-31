@@ -260,12 +260,17 @@ def resolve_and_place(writers, anchors, counts, log=print, max_bucket=None):
         for (w, ri), (b, e, K) in fixed.items(): votes[b][w] += 1
         return {b: c.most_common(1)[0][0] for b, c in votes.items()}, sum(1 for c in votes.values() if len(c) > 1)
     owner, conf = owners_from(fixed); report["owner-conflicts"] = conf
+    # Progress every 2 s through the two long loops below (the UI shows the line; the job maps it to 95-100 %).
+    tick_t = [time.time()]
+    def tick(msg):
+        if time.time() - tick_t[0] >= 2: tick_t[0] = time.time(); log(msg)
     # --- resolve multi-hit records by neighbours (iterate)
     for it in range(3):
         per_w = {w: sorted((ri, h[0]) for (ww, ri), h in fixed.items() if ww == w) for w in range(4)}
         idxs = {w: [x[0] for x in per_w[w]] for w in range(4)}; bks = {w: [x[1] for x in per_w[w]] for w in range(4)}
         newly = 0
-        for (w, ri), hl in hits.items():
+        for n_rec, ((w, ri), hl) in enumerate(hits.items()):
+            tick(f"  resolving copies: pass {it + 1}/3, {n_rec:,}/{len(hits):,} records, {newly:,} resolved")
             if (w, ri) in fixed or len(hl) < 2: continue
             k = bisect.bisect_left(idxs[w], ri)
             lo = bks[w][k - 1] if k > 0 else buckets[0]; hi = bks[w][k] if k < len(bks[w]) else buckets[-1]
@@ -284,6 +289,7 @@ def resolve_and_place(writers, anchors, counts, log=print, max_bucket=None):
         unt_idx = [r.idx for r in untagged]
         used = set()
         for k in range(len(seq)):
+            tick(f"  placing writer {w}: {k:,}/{len(seq):,} anchors, placed={report['placed']:,}")
             bA, eA, ri = seq[k]; r = recs[ri]
             bB, eB, riB = seq[k + 1] if k + 1 < len(seq) else (None, None, None)
             mids = buckets[bpos[bA] + 1: bpos[bB]] if bB is not None else []

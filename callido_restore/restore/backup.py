@@ -400,7 +400,9 @@ class Backup:
             job["message"] = str(m)
             mm = re.search(r"scanned (\d+)/(\d+)", str(m))                 # anchor scan: 70-95 % of the job
             if mm: job["progress"] = 0.7 + 0.25 * int(mm.group(1)) / max(1, int(mm.group(2))); return
-            if str(m).startswith(("owners from anchors", "placement", "phase2")): job["progress"] = 0.96; return
+            mm = re.search(r"placing writer (\d): ([\d,]+)/([\d,]+)", str(m))      # placement: 96-100 %, four writers in turn
+            if mm: job["progress"] = 0.96 + 0.04 * (int(mm.group(1)) + int(mm.group(2).replace(",", "")) / max(1, int(mm.group(3).replace(",", "")))) / 4; return
+            if str(m).startswith(("owners from anchors", "placement", "phase2", "  resolving copies")): job["progress"] = 0.955; return
             mm = re.search(r"mapped (\d+)/(\d+)", str(m))                  # v1 search, or the anchor-first summary line
             if mm: job["progress"] = 0.7 + 0.3 * int(mm.group(1)) / max(1, int(mm.group(2)))
         # In a child process: the app stays responsive while the search runs at full CPU, and Stop ends it at once.
