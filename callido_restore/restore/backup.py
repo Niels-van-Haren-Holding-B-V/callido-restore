@@ -507,7 +507,7 @@ class Backup:
         def persist(state="running"):
             jf.write_text(json.dumps({"id": job["id"], "src": self.src.id, "items": items, "dest": dest, "roots": roots, "skip_meta": skip_meta,
                                       "next_index": job.get("next_index", 0), "done_files": job.get("done_files", 0), "skipped": job.get("skipped", 0),
-                                      "errors": job.get("errors", [])[-200:], "total_files": job.get("total_files"), "total_bytes": job.get("total_bytes"),
+                                      "errors": job.get("errors", [])[-200:], "errors_total": job.get("errors_total", len(job.get("errors", []))), "total_files": job.get("total_files"), "total_bytes": job.get("total_bytes"),
                                       "verified": job.get("verified", 0), "identical_copy": job.get("identical_copy", 0), "unverified": job.get("unverified", [])[:UNVERIFIED_MAX],
                                       "done_bytes": job.get("done_bytes", 0), "state": state, "label": job["label"], "started": job["started"], "updated": time.time()}))
         roots = restore_roots(items, dest)                       # every folder written into, local paths or rclone remotes
@@ -524,6 +524,7 @@ class Backup:
         # A resumed job (start_at > 0) keeps the counts and the error list seeded from its saved file; a fresh one starts at zero.
         for k, zero in (("done_files", 0), ("errors", []), ("skipped", 0), ("verified", 0), ("identical_copy", 0), ("unverified", [])):
             if not start_at or k not in job: job[k] = zero if not isinstance(zero, list) else list(zero)
+        if not start_at or "errors_total" not in job: job["errors_total"] = len(job["errors"])        # a seed without the counter: the list is all we know
         # verified / identical_copy / unverified: per restored file, how its placement was established
         pool = self.pool; fh_cache = {}
         def restored(f):
@@ -540,7 +541,7 @@ class Backup:
             elif st == "identical_copy": job["identical_copy"] += 1
             elif len(job["unverified"]) < UNVERIFIED_MAX: job["unverified"].append({"path": f"{f['share']}/{f['path']}", "reason": why})
         def result(**extra):
-            return {**extra, "restored": job["done_files"] - job["skipped"], "skipped": job["skipped"], "errors": len(job["errors"]), "verified": job["verified"],
+            return {**extra, "restored": job["done_files"] - job["skipped"], "skipped": job["skipped"], "errors": job["errors_total"], "verified": job["verified"],
                     "identical_copy": job["identical_copy"], "unverified": len(job["unverified"])}
         # --- bucket prefetch (parallel downloads ahead of the extractor) + LRU eviction of downloaded bucket data
         import concurrent.futures, threading
@@ -635,8 +636,8 @@ class Backup:
                   except Exception as e:
                     if attempt < 2 and not isinstance(e, KeyError):      # KeyError = chunk not in pool map: retrying will not help
                         job["message"] = f"{f['share']}/{f['path']}: {e} — retrying"; time.sleep([2, 10][attempt]); continue
-                    job["errors"].append({"path": f"{f['share']}/{f['path']}", "error": str(e)})
-                    if len(job["errors"]) > 2000: raise RuntimeError("too many errors, aborting")
+                    job["errors"].append({"path": f"{f['share']}/{f['path']}", "error": str(e)}); job["errors_total"] += 1   # the list is capped in the saved file, the total is not
+                    if job["errors_total"] > 2000: raise RuntimeError("too many errors, aborting")
                     break                                              # recorded once; without this a non-retried error was logged on every attempt
                 done_bytes += f["size"]; job["done_bytes"] = done_bytes
                 if len(fh_cache) > 64:

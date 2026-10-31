@@ -193,6 +193,20 @@ class ResumeCountsTests(_Fixture):
         self.assertEqual((res2["restored"], res2["skipped"], res2["errors"]), (3, 0, 1))
         self.assertEqual([e["path"] for e in job2["errors"]], ["A/sub/y.txt"])
 
+    def test_error_total_survives_the_capped_list(self):                     # the saved file keeps the last 200 errors; the total must not restart from 200
+        job = self.job("cap"); job["cancel"] = True
+        self.b.restore(self.items, "", job)
+        saved = json.loads((paths.JOBS_DIR / f"{job['id']}.json").read_text())
+        saved["errors"] = [{"path": f"A/old{i}", "error": "x"} for i in range(200)]; saved["errors_total"] = 250; saved["next_index"] = 1   # a real pause mid-way
+        job2 = self.job("re2"); job2.update({k: saved[k] for k in ("done_files", "skipped", "errors", "errors_total", "verified", "identical_copy", "unverified")})
+        class Pool(FakePool):
+            def extract(self2, off, out, **kw):
+                if out.endswith("y.txt"): raise KeyError("chunk not in the pool map")
+                super().extract(off, out, **kw)
+        b2 = FakeBackup(self.src, FILES); b2.pool = Pool()
+        res = b2.restore(saved["items"], saved["dest"], job2, start_at=saved["next_index"])
+        self.assertEqual(res["errors"], 251); self.assertEqual(len(job2["errors"]), 201)
+
 
 class RestoreApiTests(_Fixture):
     def setUp(self):
