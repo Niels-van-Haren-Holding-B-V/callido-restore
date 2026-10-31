@@ -2,8 +2,8 @@
 
 ## Product goal
 
-A macOS app anyone can use to restore a Synology Hyper Backup (`.hbk`) without Hyper Backup.
-Google Drive is the first source; other sources come later. Windows support is a later goal, with macOS first.
+A macOS and Windows app anyone can use to restore a Synology Hyper Backup (`.hbk`) without Hyper Backup.
+Google Drive is the first source; other sources come later. macOS (Apple silicon and Intel) and Windows 10/11 (x64) are built from the same code.
 
 1. A wizard sets up access to the source: rclone Google Drive auth, including your own Google client id and secret (rclone's shared client id is being retired).
 2. Pick the backup, then browse a timeline per folder. The latest run (highest version id, regardless of status) is selected by default; pick the last clean run before an incident.
