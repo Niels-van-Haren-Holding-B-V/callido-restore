@@ -104,6 +104,7 @@ dl{display:grid;grid-template-columns:110px 1fr;gap:4px 12px;margin:10px 0}dt{co
 .progress{display:grid;gap:6px;padding:10px 12px;background:var(--panel2);border:1px solid var(--line);border-radius:10px}
 .progress .prog{width:100%}.progress .meta{display:flex;justify-content:space-between;gap:12px;font-size:12.5px}
 .prog.indet{position:relative}.prog.indet i{width:38%;position:absolute;left:0;top:0;animation:slide 1.4s ease-in-out infinite;transition:none}
+.progress .note{font-size:11.5px}
 .prog.stale{position:relative}.prog.stale::after{content:"";position:absolute;inset:0;width:30%;background:linear-gradient(90deg,transparent,rgba(255,255,255,.65),transparent);animation:slide 1.6s ease-in-out infinite}
 @keyframes slide{0%{transform:translateX(-100%)}100%{transform:translateX(280%)}}.progress .eta{color:var(--muted);white-space:nowrap}
 /* dialogs */
@@ -287,13 +288,13 @@ function progressHtml(job,rich,extra){const pct=Math.round((job.progress||0)*100
   // Fixed slots that never disappear once the job runs: phase | done of total | speed | time left | elapsed. The "still working"
   // note has its own small line under the bar, so the main line keeps its shape from poll to poll.
   const slots=[];
-  if(job.total_bytes)slots.push(`${human(job.done_bytes||0)} of ${human(job.total_bytes)}`);else slots.push(`${pct}%`);
+  if(job.total_bytes)slots.push(`${human(job.done_bytes||0)} of ${human(job.total_bytes)} (${pct}%)`);else slots.push(`${pct}%`);
   if(running&&job.total_bytes)slots.push(speedText(job.id));
   if(running)slots.push(eta||'time left: estimating…');
   if(running)slots.push(`${sinceText(job.started)} elapsed`);
-  if(job.total_bytes&&!(job.progress>0)&&!(job.done_bytes>0)&&running||running&&!job.total_bytes&&!(job.progress>0))
+  if(running&&!(job.progress>0)&&!(job.done_bytes>0))
     return `<div class="progress"><div class="meta"><span>${esc(job.message||'Starting…')}</span><span class="eta">${esc(sinceText(job.started))} elapsed${extra?' ':''}${extra||''}</span></div><div class="prog indet"><i></i></div></div>`;
-  return `<div class="progress"><div class="meta"><span>${esc(job.message||'')}</span><span class="eta">${slots.map(esc).join(' · ')}${extra?' ':''}${extra||''}</span></div><div class="prog${stale!=null?' stale':''}"><i style="width:${pct}%"></i></div>${stale!=null?`<div class="meta muted" style="font-size:11.5px"><span>still working · last update ${stale<60?stale+' s':Math.floor(stale/60)+' min'} ago</span><span></span></div>`:''}${rich&&job.total_files!=null?`<div class="meta muted"><span>${(job.done_files||0).toLocaleString()} / ${(job.total_files||0).toLocaleString()} files</span><span>${job.errors&&job.errors.length?`<b style="color:var(--bad)">${job.errors.length} errors</b>`:''}</span></div>`:''}</div>`}
+  return `<div class="progress"><div class="meta"><span>${esc(job.message||'')}</span><span class="eta">${slots.map(esc).join(' · ')}${extra?' ':''}${extra||''}</span></div><div class="prog${stale!=null?' stale':''}"><i style="width:${pct}%"></i></div>${stale!=null?`<div class="meta muted note"><span>still working · last update ${stale<60?stale+' s':Math.floor(stale/60)+' min'} ago</span><span></span></div>`:''}${rich&&job.total_files!=null?`<div class="meta muted"><span>${(job.done_files||0).toLocaleString()} / ${(job.total_files||0).toLocaleString()} files</span><span>${job.errors&&job.errors.length?`<b style="color:var(--bad)">${job.errors.length} errors</b>`:''}</span></div>`:''}</div>`}
 const octal=m=>m==null?'':(m&0o7777).toString(8).padStart(4,'0');
 const tip=$('#tip');
 function showTip(e,html){tip.innerHTML=html;tip.style.display='block';tip.style.left=Math.min(e.clientX+14,innerWidth-380)+'px';tip.style.top=(e.clientY+14)+'px'}
