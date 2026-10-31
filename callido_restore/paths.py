@@ -17,7 +17,7 @@ def is_remote_path(p, windows=None):
     return ":" in p and not is_local_abs(p, windows)
 
 def ui_path(p):
-    """A local path as the UI shows and joins it: forward slashes on Windows too ("C:/Users/x"), which Windows accepts."""
+    """A local path as the UI shows and joins it: forward slashes on Windows too ("D:/Restore/x"), which Windows accepts."""
     return Path(p).as_posix() if WINDOWS else str(p)
 
 def _resource_roots():
