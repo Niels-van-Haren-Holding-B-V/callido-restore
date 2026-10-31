@@ -88,6 +88,11 @@ def main():
         except OSError as e: _log(f"warning: cannot write {paths.CONF_DIR / 'app.log'} ({e}); logging to the console instead")
     _verify_frozen()
     load_sources()
+    try:
+        from callido_restore.pool import poolmap
+        n = poolmap.kill_orphan_helpers()                          # mapper / scan workers left by a crashed app
+        if n: _log(f"ended {n} orphaned helper process(es) of a previous run")
+    except Exception: pass
     rclone.start_in_background()                               # one rclone daemon for all listings (fast wizard, fast scans)
     import signal
     for sig in (signal.SIGTERM, signal.SIGINT):                 # a kill from outside still stops the rclone daemon with the app

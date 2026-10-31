@@ -53,10 +53,14 @@ def _worker_main(argv):
     `writers` table (GBs) in every worker last time."""
     import pickle
     with open(argv[0], "rb") as f: root, names, keys, bl = pickle.load(f)
-    hits = {}; checks = 0
+    import sys
+    hits = {}; checks = 0; since = 0
     for b in bl:
         checks += _scan_entries(b, bucket_index_entries(os.path.join(root, f"Pool/0/{b // 2048}/{names[b]}")), keys, hits)
         if _rss_mb() > WORKER_RSS_MB: raise MemoryError(f"scan worker RSS {_rss_mb():.0f} MB > {WORKER_RSS_MB} MB at bucket {b}")
+        since += 1
+        if since >= 50: print(f"progress {since}", file=sys.stderr, flush=True); since = 0      # the parent sums these into "scanned i/N"
+    if since: print(f"progress {since}", file=sys.stderr, flush=True)
     with open(argv[1], "wb") as f: pickle.dump((hits, checks), f)
 
 def _worker_command(jp, op):
@@ -68,13 +72,23 @@ def _worker_command(jp, op):
     env = dict(os.environ, PYTHONPATH=root + os.pathsep + os.environ.get("PYTHONPATH", ""))
     return [sys.executable, "-m", "callido_restore.pool.anchor", "--worker", jp, op], {"env": env}
 
-def _run_worker(job, tmpdir, n):
-    import pickle, subprocess, sys
+def _run_worker(job, tmpdir, n, progress=None):
+    """Run one scan worker; ``progress(k)`` is called for every "progress k" line it prints (buckets scanned since the last one)."""
+    import pickle, subprocess
     jp = os.path.join(tmpdir, f"job{n}.pkl"); op = os.path.join(tmpdir, f"out{n}.pkl")
     with open(jp, "wb") as f: pickle.dump(job, f)
     argv, kw = _worker_command(jp, op)
-    p = subprocess.run(argv, capture_output=True, text=True, **kw)
-    if p.returncode: raise MemoryError(f"scan worker {n} failed: {p.stderr.strip().splitlines()[-1] if p.stderr.strip() else p.returncode}")
+    p = subprocess.Popen(argv, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL, text=True, **kw)
+    tail = ""
+    for line in p.stderr:
+        line = line.rstrip("\n")
+        if line.startswith("progress "):
+            if progress:
+                try: progress(int(line.split()[1]))
+                except (ValueError, IndexError): pass
+        elif line.strip(): tail = line
+    p.wait()
+    if p.returncode: raise MemoryError(f"scan worker {n} failed: {tail or p.returncode}")
     with open(op, "rb") as f: return pickle.load(f)
 
 def _bucket_names(listing, max_bucket):
@@ -134,8 +148,15 @@ def scan_anchors(source, outdir, listing, writers, log=print, max_bucket=None, w
     else:
         import concurrent.futures, tempfile
         chunks = [c for c in (buckets[i::workers * 4] for i in range(workers * 4)) if c]      # interleaved so progress is even
+        import threading
+        done_n = [0]; lock = threading.Lock(); last = [time.time()]
+        def progress(k):                               # from the worker reader threads: one "scanned i/N" line every 2 s
+            with lock:
+                done_n[0] += k
+                if time.time() - last[0] >= 2 or done_n[0] >= len(buckets):
+                    last[0] = time.time(); log(f"  scanned {done_n[0]}/{len(buckets)} buckets, tags hit={len(hits):,}, {time.time() - t0:.0f}s")
         with tempfile.TemporaryDirectory(prefix="hbk-scan-") as td, concurrent.futures.ThreadPoolExecutor(workers) as ex:
-            futs = [ex.submit(_run_worker, (root, names1, keys, c), td, n) for n, c in enumerate(chunks)]
+            futs = [ex.submit(_run_worker, (root, names1, keys, c), td, n, progress) for n, c in enumerate(chunks)]
             try:
                 for done, fu in enumerate(concurrent.futures.as_completed(futs), 1):
                     part, c = fu.result(); merge(part); checks += c
@@ -239,12 +260,17 @@ def resolve_and_place(writers, anchors, counts, log=print, max_bucket=None):
         for (w, ri), (b, e, K) in fixed.items(): votes[b][w] += 1
         return {b: c.most_common(1)[0][0] for b, c in votes.items()}, sum(1 for c in votes.values() if len(c) > 1)
     owner, conf = owners_from(fixed); report["owner-conflicts"] = conf
+    # Progress every 2 s through the two long loops below (the UI shows the line; the job maps it to 95-100 %).
+    tick_t = [time.time()]
+    def tick(msg):
+        if time.time() - tick_t[0] >= 2: tick_t[0] = time.time(); log(msg)
     # --- resolve multi-hit records by neighbours (iterate)
     for it in range(3):
         per_w = {w: sorted((ri, h[0]) for (ww, ri), h in fixed.items() if ww == w) for w in range(4)}
         idxs = {w: [x[0] for x in per_w[w]] for w in range(4)}; bks = {w: [x[1] for x in per_w[w]] for w in range(4)}
         newly = 0
-        for (w, ri), hl in hits.items():
+        for n_rec, ((w, ri), hl) in enumerate(hits.items()):
+            tick(f"  resolving copies: pass {it + 1}/3, {n_rec:,}/{len(hits):,} records, {newly:,} resolved")
             if (w, ri) in fixed or len(hl) < 2: continue
             k = bisect.bisect_left(idxs[w], ri)
             lo = bks[w][k - 1] if k > 0 else buckets[0]; hi = bks[w][k] if k < len(bks[w]) else buckets[-1]
@@ -263,6 +289,7 @@ def resolve_and_place(writers, anchors, counts, log=print, max_bucket=None):
         unt_idx = [r.idx for r in untagged]
         used = set()
         for k in range(len(seq)):
+            tick(f"  placing writer {w}: {k:,}/{len(seq):,} anchors, placed={report['placed']:,}")
             bA, eA, ri = seq[k]; r = recs[ri]
             bB, eB, riB = seq[k + 1] if k + 1 < len(seq) else (None, None, None)
             mids = buckets[bpos[bA] + 1: bpos[bB]] if bB is not None else []

@@ -32,7 +32,9 @@ Acceptance: `/api/pool` reports the map; a sample of files from every share rest
 Wired into the app by hbk-2 on 2026-10-31 (0.3.4): `Backup.build_pool` runs `poolmap.build_map` in a child process
 (`build_poolmap_detached`, app entry `--mapper`), which is `build_poolmap_anchor` = `poolmap2.build_writers` → `anchor.scan_anchors`
 → `anchor.resolve_and_place` → `anchor.export_map` (poolmap2.json); the v1 search only with `HBK_MAPPER=v1`. Until then the app
-still ran v1, which sat at bucket 3000/36132 for 15 minutes on the real backup. The `--scan-worker` dispatch is in the app entry since 0.3.5 (`anchor._worker_command`), so the frozen app scans with
+still ran v1, which sat at bucket 3000/36132 for 15 minutes on the real backup. hbk-2 also edited anchor.py for 0.3.6 (Niels: one team, fix what is in the way): workers print `progress k` to stderr and the
+parent logs `scanned i/N` every 2 s; `resolve_and_place` logs `resolving copies: pass p/3, i/N records` and
+`placing writer w: k/N anchors` every 2 s (the job maps them to 95-100 %). The `--scan-worker` dispatch is in the app entry since 0.3.5 (`anchor._worker_command`), so the frozen app scans with
 MAX_WORKERS processes like a checkout; the one-worker fallback is gone (hbk-2, coordinated through this note).
 
 ## T2 — End-to-end restore test to the NAS

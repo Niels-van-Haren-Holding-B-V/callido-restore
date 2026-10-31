@@ -288,6 +288,9 @@ const emptyState=(title,text,btn)=>`<div class="empty"><img src="${LOGO}" alt=""
 const ETA={};
 function etaText(id,frac,doneBytes,totalBytes){const now=Date.now();const e=ETA[id]||(ETA[id]={t0:now,s:[]});e.s.push([now,frac,doneBytes||0]);if(e.s.length>40)e.s.shift();
   const [t1,f1,b1]=e.s[0],[t2,f2,b2]=e.s[e.s.length-1];if(t2-t1<4000)return '';let left=null;
+  // A jump long ago followed by nothing (a cached phase, then a slow one) must not read as "less than a minute left".
+  let moved=t2;for(let i=e.s.length-1;i>0;i--){if(e.s[i][1]!==e.s[i-1][1]||e.s[i][2]!==e.s[i-1][2]){moved=e.s[i][0];break}if(i===1)moved=t1}
+  if(now-moved>10000)return '';
   if(totalBytes&&b2>b1)left=(totalBytes-b2)/((b2-b1)/((t2-t1)/1000));else if(f2>f1)left=(1-f2)/((f2-f1)/((t2-t1)/1000));
   if(left==null||!isFinite(left)||left<0)return '';if(left<60)return 'less than a minute left';if(left<3600)return `about ${Math.round(left/60)} min left`;return `about ${(left/3600).toFixed(1)} h left`}
 // Transfer speed over a sliding 30 s window of the done_bytes samples (steady with 8 MB slices every 2-3 s). The last computed value

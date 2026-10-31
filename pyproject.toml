@@ -1,6 +1,6 @@
 [project]
 name = "callido-restore"
-version = "0.3.5"
+version = "0.3.6"
 description = "Browse a Synology Hyper Backup (.hbk) on a timeline and restore files from it without Hyper Backup"
 readme = "README.md"
 requires-python = ">=3.12"
