@@ -26,11 +26,11 @@ def _exit_app(code=0):
     if os.name != "nt": subprocess.run(["pkill", "-P", str(os.getpid())], capture_output=True)
     os._exit(code)
 
-JOB_ID = re.compile(r"^[0-9a-f-]{8,64}$")          # job ids are uuid4 hex (10 chars); the id names a file under paths.JOBS_DIR, so nothing else may pass
+JOB_ID = re.compile(r"[0-9a-f]{8,64}")             # job ids are uuid4 hex (10 chars); the id names a file under paths.JOBS_DIR, so nothing else may pass
 
 def job_file(jid):
     """Path of a persisted restore job, or None when the id is not a job id (never a path)."""
-    return paths.JOBS_DIR / f"{jid}.json" if isinstance(jid, str) and JOB_ID.match(jid) else None
+    return paths.JOBS_DIR / f"{jid}.json" if isinstance(jid, str) and JOB_ID.fullmatch(jid) else None
 
 BACKUPS = {}
 
@@ -194,22 +194,22 @@ class H(BaseHTTPRequestHandler):
             if u.path == "/api/sources":
                 s = add_source(body["name"], body["local"], body.get("remote"), body.get("extra")); return self._json(s.to_json())
             if u.path == "/api/rclone/connect":  # start an rclone config (opens the browser for Google); body carries the secrets
-                q = body
-                name = re.sub(r"[^A-Za-z0-9_-]", "", q.get("name") or "gdrive") or "gdrive"
-                kind = q.get("kind", "drive")
+                name = re.sub(r"[^A-Za-z0-9_-]", "", body.get("name") or "gdrive") or "gdrive"
+                kind = body.get("kind", "drive")
                 if kind == "drive":
                     args = [RCLONE, "config", "create", name, "drive", "scope=drive.readonly"]
-                    if q.get("client_id"): args += [f"client_id={q['client_id']}", f"client_secret={q.get('client_secret', '')}"]
+                    if body.get("client_id"): args += [f"client_id={body['client_id']}", f"client_secret={body.get('client_secret', '')}"]
                 elif kind == "smb":
                     # the password is handed to rclone over stdin ("-"), so it never appears in a process list; the obscured
                     # form that lands in rclone.conf is the only thing passed as an argument
-                    pw = (q.get("password") or "").replace("\n", "")
+                    pw = (body.get("password") or "").replace("\n", "")
                     obs = subprocess.run([RCLONE, "obscure", "-"], input=pw + "\n", capture_output=True, text=True).stdout.strip()
                     if not obs: return self._json({"error": "rclone could not prepare the password"}, 500)
-                    args = [RCLONE, "config", "create", name, "smb", f"host={q.get('host', '')}", f"user={q.get('user', '')}", f"pass={obs}", "--obscure=false", "--non-interactive"]
+                    args = [RCLONE, "config", "create", name, "smb", f"host={body.get('host', '')}", f"user={body.get('user', '')}", f"pass={obs}", "--obscure=false", "--non-interactive"]
                 else: return self._json({"error": "unknown kind"}, 400)
                 def run(job):
-                    job["message"] = "waiting for Google sign-in in your browser…" if kind == "drive" else "creating remote"
+                    job["message"] = ("Waiting for the Google sign-in in your browser. When the page says “Success! All done”, close it and come back to this window…"
+                                      if kind == "drive" else "creating the connection…")
                     r = subprocess.run(args, capture_output=True, text=True, timeout=600)
                     if r.returncode != 0: raise RuntimeError(r.stderr.strip()[-400:] or "rclone config failed")
                     t = subprocess.run([RCLONE, "lsjson", "--no-mimetype", "--dirs-only", f"{name}:"], capture_output=True, text=True, timeout=60)

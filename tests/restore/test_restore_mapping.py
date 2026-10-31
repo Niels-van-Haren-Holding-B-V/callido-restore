@@ -240,7 +240,7 @@ class RestoreApiTests(_Fixture):
 
     def test_resume_id_is_validated(self):                                  # H20: the id names a file under JOBS_DIR, never a path
         outside = paths.JOBS_DIR.parent / "outside.json"; paths.JOBS_DIR.mkdir(parents=True, exist_ok=True); outside.write_text("{}")
-        for bad in ("../outside", "../outside.json", "/etc/passwd", "a/b", "", "x" * 70, "JKEE1234"):
+        for bad in ("../outside", "../outside.json", "/etc/passwd", "a/b", "", "x" * 70, "JKEE1234", "0123456789\n", "0123-4567"):
             code, out = self.post("/api/restore/resume", {"id": bad})
             self.assertEqual(code, 400, bad); self.assertEqual(out["error"], "not a job id")
         code, out = self.post("/api/restore/resume", {})

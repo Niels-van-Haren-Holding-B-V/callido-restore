@@ -181,8 +181,8 @@ footer.madeBy img{width:18px;height:18px;border-radius:5px;vertical-align:middle
     <p>Where is the Hyper Backup (<code>.hbk</code>) folder?</p>
     <div class="row" style="flex-direction:column;align-items:flex-start;gap:6px">
       <label><input type="radio" name="wsk" value="existing" checked> a connection I already set up: <select id="wsRem"></select></label>
-      <label><input type="radio" name="wsk" value="drive"> Google Drive — connect now (opens Google sign-in in your browser)</label>
-      <div id="wsDrive" style="display:none;margin-left:22px"><p class="help">Only read access to your Drive is requested.</p>
+      <label><input type="radio" name="wsk" value="drive"> Google Drive — connect now (a browser window opens for the Google sign-in)</label>
+      <div id="wsDrive" style="display:none;margin-left:22px"><p class="help">Only read access to your Drive is requested. A browser window opens for the Google sign-in; when it shows “Success! All done”, close it and come back to this window: the app continues by itself.</p>
         <details class="adv"><summary>Advanced</summary><label class="f">connection name <input id="wsDName" value="gdrive"></label>
         <label class="f">your own Google OAuth client id (optional, recommended: avoids the shared rate limit) <input id="wsCid" placeholder="xxxxx.apps.googleusercontent.com"></label>
         <label class="f">client secret <input id="wsCsec" type="password"></label>
@@ -553,24 +553,33 @@ function wsShow(){$('#wzS').textContent=`step ${WS.step} of 3`;[1,2,3].forEach(i
 $('#addSrc').onclick=async()=>{WS.step=1;wsShow();$('#dlgSrc').showModal();try{const r=await api('/api/remotes');$('#wsRem').innerHTML=r.remotes.map(x=>`<option>${esc(x)}</option>`).join('')||'<option value="">(none configured)</option>'}catch(e){}};
 $$('input[name=wsk]').forEach(r=>r.onchange=()=>{WS.kind=r.value;$('#wsDrive').style.display=WS.kind==='drive'?'':'none';$('#wsSmb').style.display=WS.kind==='smb'?'':'none'});
 $('#nCancel').onclick=()=>$('#dlgSrc').close();$('#wsBack').onclick=()=>{WS.step--;wsShow()};
+const wsInto=d=>(WS.remote?(WS.path?WS.path.replace(/\/$/,'')+'/':''):(WS.path.replace(/\/$/,'')+'/'))+d;   // child folder d of the current path
 async function wsList(){const r=await api('/api/rclone/ls',{remote:WS.remote,path:WS.path});if(r.error){$('#wsList').innerHTML=`<p style="color:var(--bad)">${esc(r.error)}</p>`;return}
   WS.path=r.path;$('#wsPath').value=WS.path;$('#wsPathShow').textContent=(WS.remote||'')+WS.path;
-  $('#wsList').innerHTML=`<table>${r.dirs.map(d=>`<tr class="f wsd" data-d="${esc(d)}"><td>📁 ${esc(d)}${d.endsWith('.hbk')?' <span class="flag">backup</span>':''}</td></tr>`).join('')||'<tr><td class="muted">no sub-folders</td></tr>'}</table>`;
-  $$('.wsd').forEach(tr=>tr.onclick=()=>{WS.path=(WS.remote?(WS.path?WS.path.replace(/\/$/,'')+'/':''):(WS.path.replace(/\/$/,'')+'/'))+tr.dataset.d;wsList()});
-  $('#wsHint').innerHTML=r.looks_like_hbk?'<b style="color:var(--ok)">This folder looks like a Hyper Backup (has Config and Pool). Click Next.</b>':(r.hbk_dirs.length?`Open the <b>${esc(r.hbk_dirs[0])}</b> folder, then click Next.`:'Navigate into the folder that ends with <code>.hbk</code>.')}
+  // Backups found in this folder get a one-click pick; the folder list below stays for navigating elsewhere.
+  const found=r.looks_like_hbk?'':(r.hbk_dirs.length?`<div class="row" style="margin:0 0 8px;flex-wrap:wrap"><b>Backups found here:</b>${r.hbk_dirs.map(d=>`<button class="small primary wsPick" data-d="${esc(d)}">Use ${esc(d)}</button>`).join('')}</div>`:'');
+  $('#wsList').innerHTML=found+`<table>${r.dirs.map(d=>`<tr class="f wsd" data-d="${esc(d)}"><td>📁 ${esc(d)}${d.endsWith('.hbk')?' <span class="flag">backup</span>':''}</td></tr>`).join('')||'<tr><td class="muted">no sub-folders</td></tr>'}</table>`;
+  $$('.wsd').forEach(tr=>tr.onclick=()=>{WS.path=wsInto(tr.dataset.d);if(tr.dataset.d.endsWith('.hbk'))$('#wsNext').click();else wsList()});   // a backup row selects it and goes on
+  $$('.wsPick').forEach(b=>b.onclick=()=>{WS.path=wsInto(b.dataset.d);$('#wsNext').click()});
+  $('#wsHint').innerHTML=r.looks_like_hbk?'<b style="color:var(--ok)">This folder is a Hyper Backup (it has Config and Pool). Click Next.</b>':(r.hbk_dirs.length?'Click a backup above, or open a folder to look elsewhere.':'No Hyper Backup here: open the folder whose name ends in <code>.hbk</code> (it holds <code>Config</code> and <code>Pool</code>), or go up.')}
 $('#wsUp').onclick=()=>{const p=WS.path.replace(/\/$/,'');WS.path=p.includes('/')?p.slice(0,p.lastIndexOf('/')):(WS.remote?'':'/');wsList()};$('#wsGoPath').onclick=()=>{WS.path=$('#wsPath').value;wsList()};
 $('#wsNext').onclick=async()=>{
   if(WS.step===1){const k=WS.kind;
     if(k==='existing'){WS.remote=$('#wsRem').value;if(!WS.remote){alert('No remote selected');return}WS.path=''}
     else if(k==='local'){WS.remote='';WS.path='~'}
     else{const q=k==='drive'?{kind:'drive',name:$('#wsDName').value,client_id:$('#wsCid').value.trim(),client_secret:$('#wsCsec').value.trim()}:{kind:'smb',name:$('#wsSName').value,host:$('#wsHost').value.trim(),user:$('#wsUser').value.trim(),password:$('#wsPass').value};
-      $('#wsConn').textContent=k==='drive'?'A Google sign-in page opens in your browser. Approve it, then come back here…':'Connecting…';$('#wsNext').disabled=true;
+      $('#wsConn').textContent=k==='drive'?'A browser window opens for the Google sign-in. When it shows “Success! All done”, close it and come back to this window…':'Connecting…';$('#wsNext').disabled=true;
       try{const j=await post('/api/rclone/connect',q);const job=await new Promise(res=>{const t=async()=>{const x=await api('/api/job',{id:j.id});if(x.state==='running'){$('#wsConn').textContent=x.message||'';setTimeout(t,1000)}else res(x)};t()});
         if(job.state==='error'){$('#wsConn').textContent='Failed: '+job.error;$('#wsNext').disabled=false;return}
-        WS.remote=job.result.remote;WS.path='';$('#wsConn').textContent='Connected: '+WS.remote}catch(e){$('#wsConn').textContent=e.message;$('#wsNext').disabled=false;return}
+        WS.remote=job.result.remote;WS.path='';const sel=$('#wsRem');if(![...sel.options].some(o=>o.value===WS.remote))sel.add(new Option(WS.remote,WS.remote));sel.value=WS.remote;   // the new connection is the selected one from now on
+        $('#wsConn').textContent='Connected: '+WS.remote+' — now pick the backup folder on it.'}catch(e){$('#wsConn').textContent=e.message;$('#wsNext').disabled=false;return}
       $('#wsNext').disabled=false}
     WS.step=2;wsShow();wsList();return}
-  if(WS.step===2){const r=await api('/api/rclone/ls',{remote:WS.remote,path:WS.path});if(!r.looks_like_hbk){if(!confirm('This folder does not contain Config and Pool. Use it anyway (e.g. a partial copy)?'))return}
+  if(WS.step===2){let r=await api('/api/rclone/ls',{remote:WS.remote,path:WS.path});
+    // Standing in the folder above the backup: one backup found means that is the one; several means pick one first.
+    if(!r.looks_like_hbk&&r.hbk_dirs.length===1){WS.path=wsInto(r.hbk_dirs[0]);r=await api('/api/rclone/ls',{remote:WS.remote,path:WS.path});if(r.error){alert(r.error);return}}
+    else if(!r.looks_like_hbk&&r.hbk_dirs.length>1){await wsList();$('#wsHint').innerHTML='<b>Several backups found here: click the one to use.</b>';return}
+    if(!r.looks_like_hbk){if(!confirm('This is not a Hyper Backup folder (no Config and Pool inside). Pick the folder whose name ends in .hbk, or use this folder only if it is a partial copy.\n\nUse this folder anyway?'))return}
     const base=(WS.path.replace(/\/$/,'').split('/').pop()||'backup');$('#nName').value=WS.remote?`${base} on ${WS.remote.replace(':','')}`:base;
     $('#nLocal').value=WS.remote?`~/CallidoRestore/${base}`:WS.path;$('#nLocal').disabled=!WS.remote;
     $('#wsSummary').textContent=WS.remote?`Metadata is fetched on demand from ${WS.remote}${WS.path} into the cache folder; bucket data only when restoring.`:`The backup is read directly from ${WS.path}.`;
