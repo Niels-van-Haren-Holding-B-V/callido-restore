@@ -1,5 +1,11 @@
 **Callido Restore** restores files from a Synology Hyper Backup (`.hbk`) without Hyper Backup or a working NAS. It reads the backup's own metadata, shows every backup run on a timeline, and restores the folders you pick to a NAS share or a local folder. Files already at the destination are never overwritten or deleted, and the backup source is only read.
 
+## What's new in 0.2.6
+
+- Downloads through the app's rclone helper are throttled the same way the old one-process downloads were (a transactions-per-second cap, Google Drive pacing, more low-level retries). Four index-set slices at a time without that cap made Google rate-limit the preparation.
+- Bytes done and time left during a download no longer run ahead of the real transfer (in-flight bytes were counted twice).
+- README: screenshots of the app, taken from a small demo backup.
+
 ## What's new in 0.2.5
 
 - Every job bar with a known size shows bytes, speed and time left, the restore included; the preparation reports the download of each index set ("downloading index set 2/4 · 123 of 560 MB").
