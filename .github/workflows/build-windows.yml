@@ -88,8 +88,9 @@ jobs:
         with:
           name: CallidoRestore-windows-x64
           path: release
-      # The app's auto-update installs the MSI only when this checksum file is signed with the release key (Ed25519, the same
-      # secret and steps as build.yml's "Sign SHA256SUMS"; update.verified_sha checks it under about.UPDATE_PUBLIC_KEYS).
+      # The app's auto-update installs the MSI only when "callido-restore <tag>\n" + this checksum file is signed with the release
+      # key (Ed25519, the same secret and message as build.yml's "Sign SHA256SUMS"; update.verified_sha checks it under
+      # about.UPDATE_PUBLIC_KEYS with the release's own tag).
       - name: Sign the MSI checksum
         env:
           RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
@@ -97,9 +98,11 @@ jobs:
           (cd release && sha256sum -c CallidoRestore-x64.msi.sha256)
           if [ -z "$RELEASE_SIGNING_KEY" ]; then echo "::warning::RELEASE_SIGNING_KEY is not set: the MSI checksum is not signed (no auto-update on Windows)"; exit 0; fi
           umask 077; printf '%s\n' "$RELEASE_SIGNING_KEY" > "$RUNNER_TEMP/release-signing.pem"
-          openssl pkeyutl -sign -rawin -inkey "$RUNNER_TEMP/release-signing.pem" -in release/CallidoRestore-x64.msi.sha256 -out release/CallidoRestore-x64.msi.sha256.sig
+          # The signed data binds the tag (update.signed_message): an old list and signature under a new tag do not verify.
+          { printf 'callido-restore %s\n' "$GITHUB_REF_NAME"; cat release/CallidoRestore-x64.msi.sha256; } > "$RUNNER_TEMP/signed-message"
+          openssl pkeyutl -sign -rawin -inkey "$RUNNER_TEMP/release-signing.pem" -in "$RUNNER_TEMP/signed-message" -out release/CallidoRestore-x64.msi.sha256.sig
           openssl pkey -in "$RUNNER_TEMP/release-signing.pem" -pubout > "$RUNNER_TEMP/pub.pem"
-          openssl pkeyutl -verify -pubin -inkey "$RUNNER_TEMP/pub.pem" -rawin -in release/CallidoRestore-x64.msi.sha256 -sigfile release/CallidoRestore-x64.msi.sha256.sig
+          openssl pkeyutl -verify -pubin -inkey "$RUNNER_TEMP/pub.pem" -rawin -in "$RUNNER_TEMP/signed-message" -sigfile release/CallidoRestore-x64.msi.sha256.sig
           echo "signed with public key $(openssl pkey -pubin -in "$RUNNER_TEMP/pub.pem" -outform DER | tail -c 32 | xxd -p -c 64)"
           rm -f "$RUNNER_TEMP/release-signing.pem"
       - name: Wait for the release, then attach the MSI
