@@ -43,8 +43,31 @@ jobs:
         run: |
           $env:PATH = "C:\Program Files\Git\usr\bin;$env:PATH"   # gpg for the rclone signature check
           python packaging/windows/build_msi.py
-      - name: Smoke test (install, run, uninstall)
-        run: python packaging/windows/smoke_windows.py --msi dist/CallidoRestore-x64.msi
+      - name: Previous release's MSI (for the auto-update check)
+        id: prev
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # the newest release older than this build that has an MSI (on a PR the latest release usually has the same version)
+          cur=$(sed -n 's/^VERSION = "\([^"]*\)".*/\1/p' callido_restore/about.py)
+          gh release list -R "$GITHUB_REPOSITORY" --limit 30 --json tagName --jq '.[].tagName' > tags.txt || true
+          tag=$(python - "$cur" <<'PY'
+          import re, sys
+          cur = tuple(map(int, sys.argv[1].split(".")))
+          vs = [t.strip() for t in open("tags.txt") if re.fullmatch(r"v\d+\.\d+\.\d+", t.strip())]
+          older = sorted((tuple(map(int, t[1:].split("."))), t) for t in vs if tuple(map(int, t[1:].split("."))) < cur)
+          print(older[-1][1] if older else "")
+          PY
+          )
+          if [ -n "$tag" ] && gh release download "$tag" -R "$GITHUB_REPOSITORY" -p CallidoRestore-x64.msi -D prev 2>/dev/null; then
+            echo "previous release with an MSI: $tag"
+            echo "args=--upgrade-from prev/CallidoRestore-x64.msi --upgrade-from-version ${tag#v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "no older release with an MSI; the auto-update check is skipped"
+          fi
+      - name: Smoke test (auto-update from the previous release, install, run, uninstall)
+        run: python packaging/windows/smoke_windows.py --msi dist/CallidoRestore-x64.msi ${{ steps.prev.outputs.args }}
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: CallidoRestore-windows-x64
@@ -65,15 +88,33 @@ jobs:
         with:
           name: CallidoRestore-windows-x64
           path: release
+      # The app's auto-update installs the MSI only when "callido-restore <tag>\n" + this checksum file is signed with the release
+      # key (Ed25519, the same secret and message as build.yml's "Sign SHA256SUMS"; update.verified_sha checks it under
+      # about.UPDATE_PUBLIC_KEYS with the release's own tag).
+      - name: Sign the MSI checksum
+        env:
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+        run: |
+          (cd release && sha256sum -c CallidoRestore-x64.msi.sha256)
+          if [ -z "$RELEASE_SIGNING_KEY" ]; then echo "::warning::RELEASE_SIGNING_KEY is not set: the MSI checksum is not signed (no auto-update on Windows)"; exit 0; fi
+          umask 077; printf '%s\n' "$RELEASE_SIGNING_KEY" > "$RUNNER_TEMP/release-signing.pem"
+          # The signed data binds the tag (update.signed_message): an old list and signature under a new tag do not verify.
+          { printf 'callido-restore %s\n' "$GITHUB_REF_NAME"; cat release/CallidoRestore-x64.msi.sha256; } > "$RUNNER_TEMP/signed-message"
+          openssl pkeyutl -sign -rawin -inkey "$RUNNER_TEMP/release-signing.pem" -in "$RUNNER_TEMP/signed-message" -out release/CallidoRestore-x64.msi.sha256.sig
+          openssl pkey -in "$RUNNER_TEMP/release-signing.pem" -pubout > "$RUNNER_TEMP/pub.pem"
+          openssl pkeyutl -verify -pubin -inkey "$RUNNER_TEMP/pub.pem" -rawin -in "$RUNNER_TEMP/signed-message" -sigfile release/CallidoRestore-x64.msi.sha256.sig
+          echo "signed with public key $(openssl pkey -pubin -in "$RUNNER_TEMP/pub.pem" -outform DER | tail -c 32 | xxd -p -c 64)"
+          rm -f "$RUNNER_TEMP/release-signing.pem"
       - name: Wait for the release, then attach the MSI
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
         run: |
-          (cd release && sha256sum -c CallidoRestore-x64.msi.sha256)
+          files="release/CallidoRestore-x64.msi release/CallidoRestore-x64.msi.sha256"
+          [ -f release/CallidoRestore-x64.msi.sha256.sig ] && files="$files release/CallidoRestore-x64.msi.sha256.sig"
           for i in $(seq 1 80); do
             if gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-              gh release upload "$TAG" release/CallidoRestore-x64.msi release/CallidoRestore-x64.msi.sha256 -R "$GITHUB_REPOSITORY" --clobber
+              gh release upload "$TAG" $files -R "$GITHUB_REPOSITORY" --clobber
               exit 0
             fi
             echo "release $TAG not there yet (build-macos publishes it); waiting"; sleep 30
