@@ -300,7 +300,8 @@ async function track(p,q,run){const label=activityLabel(p,q);const btn=document.
 const CACHE_TTL=30000;const CACHEABLE=new Set(['/api/remotes']);const CACHE=new Map();
 const api=async(p,q={})=>{const u=new URL(p,location.origin);Object.entries(q).forEach(([k,v])=>v!==undefined&&v!==null&&v!==''&&u.searchParams.set(k,v));
   const key=u.toString();if(CACHEABLE.has(p)){const c=CACHE.get(key);if(c&&Date.now()-c.t<CACHE_TTL)return c.v}
-  return track(p,q,async()=>{const r=await fetch(u);const j=await r.json();if(j&&j.error)throw new Error(j.error);if(CACHEABLE.has(p))CACHE.set(key,{t:Date.now(),v:j});return j})};
+  return track(p,q,async()=>{const r=await fetch(u);const j=await r.json();if(j&&j.error&&!(p==='/api/job'&&j.state))throw new Error(j.error);   // a failed job is an answer (state 'error'), not a failed call: waitJob/pollJob used to retry it as a miss (60 s, or for ever)
+  if(CACHEABLE.has(p))CACHE.set(key,{t:Date.now(),v:j});return j})};
 const post=async(p,b)=>track(p,b,async()=>{const r=await fetch(p,{method:'POST',body:JSON.stringify(b)});const j=await r.json();if(j.error)throw new Error(j.error);if(p==='/api/rclone/connect')CACHE.clear();return j});
 // Per-file check of a restore (pool map placer v3). "verified" in the result means: the file's place in the backup was confirmed by
 // its size and every block's checksum matched while reading (not a checksum of the whole file). "identical_copy": restored from an
