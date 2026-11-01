@@ -20,6 +20,10 @@ Layout facts
 """
 import struct, os, re, json, glob, hashlib, collections, bisect, threading
 from callido_restore.sources import transfer
+
+class Stopped(RuntimeError):
+    """A Stop of the job that runs the read (not an error of the file)."""
+
 def lz4_decompress_py(src, usize):
     """LZ4 block decode used when the lz4 package is not installed. `usize` is the caller's expected size; this fallback does not check it."""
     dst = bytearray(); i = 0; n = len(src)
@@ -641,8 +645,9 @@ class PoolReader:
         data = lz4_decompress(raw, ulen)
         if hashlib.md5(data).digest() != h[:16]: raise ValueError(f"md5 mismatch bucket {b} entry {i}")
         return data
-    def extract(self, off, out_path, size=None, mtime=None, job=None, fh_cache=None):
-        """Write one pooled file to out_path. Returns bytes written."""
+    def extract(self, off, out_path, size=None, mtime=None, job=None, fh_cache=None, cancelled=None):
+        """Write one pooled file to out_path. Returns bytes written. ``cancelled()`` true (Stop) ends it between two chunks
+        (Stopped), so a large file does not hold up a Stop until it is complete."""
         own = fh_cache is None
         if own: fh_cache = {}
         try:
@@ -657,6 +662,7 @@ class PoolReader:
                 locs, rec = self.plan(off); tmp = out_path + ".part"; n = 0
                 with open(tmp, "wb") as f:
                     for b, i in locs:
+                        if cancelled and cancelled(): raise Stopped("stopped")
                         d = self.read_chunk(b, i, fh_cache, job); f.write(d); n += len(d)
             if size is not None and n != size: raise ValueError(f"size mismatch: wrote {n}, expected {size}")
             os.replace(tmp, out_path)
