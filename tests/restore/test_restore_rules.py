@@ -290,6 +290,26 @@ class RestoreLoopRemote(unittest.TestCase):
         self.assertEqual(seen[0], [{"kind": "upload", "name": "share/f.txt", "done": 100, "total": 200, "rate": 50}])
         self.assertEqual(job["transfers"], [])                                          # cleared when the restore stops
 
+    def test_staged_bytes_are_bounded_and_one_large_file_still_goes(self):
+        # STAGE_MAX = 5 bytes; each upload holds its file 0.3 s. When a file is extracted, what already waits plus the new file
+        # stays within 5 bytes, unless nothing waits (h.txt, 9 bytes, still goes alone)
+        import threading as th                                                      # (time.sleep is patched out in setUp)
+        b = _fake_backup("nas:Restore", [("e.txt", 1, 1), ("f.txt", 2, 2), ("g.txt", 3, 3), ("h.txt", 9, 4)])
+        job = {"id": "t9s", "label": "restore", "started": 0.0}; seen = []; real = b.pool.extract
+        def extract(off, out, size=None, **kw):
+            stage = out
+            while not os.path.basename(stage).startswith("hbk-stage-"): stage = os.path.dirname(stage)
+            seen.append((sum(os.path.getsize(os.path.join(r, n)) for r, _, ns in os.walk(stage) for n in ns), size))
+            return real(off, out, size=size, **kw)
+        b.pool.extract = extract
+        def upload(cmd, cancelled=None, **kw):
+            th.Event().wait(0.3); os.unlink(cmd[2]); return 0, ""
+        with mock.patch.object(backup_mod, "upload_watched", side_effect=upload), mock.patch.object(backup_mod, "STAGE_MAX", 5):
+            res = b.restore([{"share": "share", "ver": 1, "path": "", "is_dir": True}], "nas:Restore", job)
+        self.assertEqual(res["restored"], 4)
+        self.assertEqual(len(seen), 4)
+        for waiting, size in seen: self.assertTrue(waiting == 0 or waiting + size <= 5, seen)
+        self.assertEqual(seen[1], (1, 2))                                           # f.txt joins e.txt: 3 bytes fit
 
 class UploadWatchdog(unittest.TestCase):
     def test_kill_uploads_ends_running_upload_processes(self):

@@ -54,7 +54,8 @@ def mapper_phase(line):
 UPLOAD_STALL_S = 600          # an upload whose transferred bytes do not move for this long is ended and retried
 UPLOAD_STALLED, UPLOAD_CANCELLED = -999, -998
 
-UPLOAD_WORKERS = 8           # files uploaded to a remote target at once (each its own rclone process and SMB session)
+UPLOAD_WORKERS = 8                                         # files uploaded to a remote target at once (each its own rclone process and SMB session)
+STAGE_MAX = int(float(os.environ.get("HBK_STAGE_GB", "4")) * (1 << 30))   # extracted files waiting for their upload, bytes
 _UNIT = {"": 1, "B": 1, "K": 1 << 10, "M": 1 << 20, "G": 1 << 30, "T": 1 << 40, "P": 1 << 50}
 _LIVE = set(); _LIVE_LOCK = threading.Lock()           # running upload processes, ended by kill_uploads() when the app quits
 
@@ -694,15 +695,17 @@ class Backup:
         # Uploads to a remote target run UPLOAD_WORKERS at a time (each rclone process opens its own SMB session; one file at a
         # time spent most of its time on that set-up). Reading the backup stays in this thread (the reader's file handles are
         # not shared). The saved position is the oldest file whose upload has not finished, so a resume never skips one.
-        up_ex = concurrent.futures.ThreadPoolExecutor(max_workers=UPLOAD_WORKERS); inflight = {}; up_cancelled = set()
+        up_ex = concurrent.futures.ThreadPoolExecutor(max_workers=UPLOAD_WORKERS); inflight = {}; up_cancelled = set(); staged = {}
+        job.pop("cancel_uploads", None)
+        stopping = lambda: bool(job.get("cancel") or job.get("cancel_uploads"))   # Stop, or the restore ends (an abort does not wait for 8 uploads)
         bytes_done = [done_bytes]
         def upload_task(i, f, out, root, rel):
             key = ("up", i); name = f"{f['share']}/{f['path']}"
             try:
                 for attempt in range(3):
-                    if job.get("cancel"): return "cancelled"
+                    if stopping(): return "cancelled"
                     rc, err = upload_watched([RCLONE, "moveto", out, f"{root}/{rel}", "--ignore-existing", "--retries", "5", "--low-level-retries", "20",
-                                              "--retries-sleep", "5s"], cancelled=lambda: bool(job.get("cancel")),
+                                              "--retries-sleep", "5s"], cancelled=stopping,
                                              progress=lambda d, t, r: tx_set(key, "upload", name, d, t or f["size"], r))
                     if rc == UPLOAD_CANCELLED: return "cancelled"               # Stop: this file is uploaded again on resume
                     if rc == 0:
@@ -735,7 +738,7 @@ class Backup:
             """collect finished uploads; with block, wait for at least one"""
             if block and inflight: concurrent.futures.wait(list(inflight.values()), return_when=concurrent.futures.FIRST_COMPLETED)
             for k in [k for k, fut in inflight.items() if fut.done()]:
-                fut = inflight.pop(k)
+                fut = inflight.pop(k); staged.pop(k, None)
                 try:
                     if fut.result() == "cancelled": up_cancelled.add(k)
                 except Exception: pass
@@ -785,6 +788,9 @@ class Backup:
                 job["next_index"] = resume_point(i)
                 if i % 50 == 0: persist()
                 if remote_dest and rel not in existing[root]:
+                    # room in the staging folder first: at most UPLOAD_WORKERS * 2 files and STAGE_MAX bytes wait for their upload
+                    # (outside the bucket cache limit); one file always goes, however large
+                    while inflight and (len(inflight) >= UPLOAD_WORKERS * 2 or sum(staged.values()) + f["size"] > STAGE_MAX): reap(block=True)
                     out = os.path.join(stage[root], rel); os.makedirs(os.path.dirname(out), exist_ok=True); ok = False
                     for attempt in range(3):
                         try: pool.extract(f["off"], out, size=f["size"], mtime=f["mtime"], job=None, fh_cache=fh_cache); ok = True; break
@@ -793,8 +799,7 @@ class Backup:
                                 job["message"] = f"{f['share']}/{f['path']}: {e} — retrying"; time.sleep([2, 10][attempt]); continue
                             add_error(f, e); break
                     if ok:
-                        while len(inflight) >= UPLOAD_WORKERS * 2: reap(block=True)
-                        inflight[i] = up_ex.submit(upload_task, i, f, out, root, rel)
+                        staged[i] = f["size"]; inflight[i] = up_ex.submit(upload_task, i, f, out, root, rel)
                     else:
                         with lock: bytes_done[0] += f["size"]; job["done_bytes"] = bytes_done[0]
                     if len(fh_cache) > 64:
