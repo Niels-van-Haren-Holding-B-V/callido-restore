@@ -1,0 +1,94 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="560" viewBox="0 0 980 560" role="img" aria-label="The .hbk backup on disk and how a file is found">
+<title>The .hbk backup on disk and how a file is found</title>
+<style>
+  .bg{fill:#ffffff} .t{fill:#1d1d1f;font:13px -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif}
+  .s{fill:#6e6e73;font:11.5px -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif}
+  .m{fill:#1d1d1f;font:12px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  .h{fill:#1d1d1f;font:600 14px -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif}
+  .band{fill:#f5f5f7;stroke:none}
+  .box{fill:#ffffff;stroke:#c7c7cc;stroke-width:1.2}
+  .acc{fill:#f3edff;stroke:#7c3aed;stroke-width:1.3}
+  .ext{fill:#eef6ff;stroke:#2f6fd6;stroke-width:1.2}
+  .ok{fill:#ecf8f0;stroke:#1f9d55;stroke-width:1.2}
+  .warn{fill:#fff6e8;stroke:#c27c0e;stroke-width:1.2;stroke-dasharray:5 3}
+  .a{stroke:#6e6e73;stroke-width:1.4;fill:none;marker-end:url(#arr)}
+  .ad{stroke:#6e6e73;stroke-width:1.3;fill:none;stroke-dasharray:4 3;marker-end:url(#arr)}
+  .ah{fill:#6e6e73}
+  .n{fill:#7c3aed} .nt{fill:#ffffff;font:600 11px -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif}
+  @media (prefers-color-scheme: dark){
+    .bg{fill:#1c1c1e} .t,.m,.h{fill:#f5f5f7} .s{fill:#a1a1a6}
+    .band{fill:#2c2c2e} .box{fill:#1c1c1e;stroke:#48484a}
+    .acc{fill:#2a2140;stroke:#a78bfa} .ext{fill:#15263d;stroke:#5b9bff} .ok{fill:#132a1d;stroke:#3fbf77}
+    .warn{fill:#33270f;stroke:#e0a33a}
+    .a,.ad{stroke:#a1a1a6} .ah{fill:#a1a1a6} .n{fill:#a78bfa} .nt{fill:#1c1c1e}
+  }
+</style>
+<defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+  <path class="ah" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<rect class="bg" x="0" y="0" width="980" height="560"/>
+<text class="h" x="24" y="32" text-anchor="start">A Hyper Backup (.hbk) on disk, and how a file is found in it</text>
+<text class="s" x="24" y="52" text-anchor="start">every file name carries a revision suffix .&lt;N&gt;; the newest N wins · details in docs/FORMAT.md</text>
+<rect class="box" x="24" y="70" width="430" height="466" rx="10"/>
+<text class="m" x="44" y="100" text-anchor="start">backup_1.hbk/</text>
+<text class="m" x="66" y="133" text-anchor="start">_Syno_TaskConfig</text>
+<text class="s" x="440" y="133" text-anchor="end">task settings</text>
+<text class="m" x="66" y="166" text-anchor="start">Config/</text>
+<text class="m" x="88" y="199" text-anchor="start">version_info.db</text>
+<text class="s" x="440" y="199" text-anchor="end">the backup runs</text>
+<text class="m" x="88" y="232" text-anchor="start">@Share/&lt;share&gt;/&lt;ver&gt;.db</text>
+<text class="s" x="440" y="232" text-anchor="end">one share at one run</text>
+<text class="m" x="88" y="265" text-anchor="start">virtual_file.index/</text>
+<text class="s" x="440" y="265" text-anchor="end">8 MiB slices</text>
+<text class="m" x="88" y="298" text-anchor="start">file_chunk{1..4}.index/</text>
+<text class="s" x="440" y="298" text-anchor="end">4 writers&#x27; records</text>
+<text class="m" x="66" y="331" text-anchor="start">Pool/</text>
+<text class="m" x="88" y="364" text-anchor="start">chunk_index/</text>
+<text class="s" x="440" y="364" text-anchor="end">chunk id → bucket</text>
+<text class="m" x="88" y="397" text-anchor="start">0/&lt;d&gt;/&lt;n&gt;.index</text>
+<text class="s" x="440" y="397" text-anchor="end">chunk entries + md5</text>
+<text class="m" x="88" y="430" text-anchor="start">0/&lt;d&gt;/&lt;n&gt;.bucket</text>
+<text class="s" x="440" y="430" text-anchor="end">LZ4 data, ~52 MB</text>
+<text class="m" x="88" y="463" text-anchor="start">file_pool/&lt;n&gt;.file</text>
+<text class="s" x="440" y="463" text-anchor="end">small files, whole</text>
+<text class="m" x="66" y="496" text-anchor="start">Guard/ · Control/</text>
+<text class="s" x="440" y="496" text-anchor="end">integrity, locks</text>
+<circle class="n" cx="468" cy="228" r="10"/>
+<text class="nt" x="468" y="232" text-anchor="middle">1</text>
+<circle class="n" cx="468" cy="261" r="10"/>
+<text class="nt" x="468" y="265" text-anchor="middle">2</text>
+<circle class="n" cx="468" cy="294" r="10"/>
+<text class="nt" x="468" y="298" text-anchor="middle">3</text>
+<circle class="n" cx="468" cy="360" r="10"/>
+<text class="nt" x="468" y="364" text-anchor="middle">4</text>
+<circle class="n" cx="468" cy="393" r="10"/>
+<text class="nt" x="468" y="397" text-anchor="middle">5</text>
+<circle class="n" cx="468" cy="426" r="10"/>
+<text class="nt" x="468" y="430" text-anchor="middle">6</text>
+<circle class="n" cx="518" cy="100" r="10"/>
+<text class="nt" x="518" y="104" text-anchor="middle">1</text>
+<text class="h" x="540" y="104" text-anchor="start">the file&#x27;s row</text>
+<text class="s" x="540" y="122" text-anchor="start">&lt;ver&gt;.db of the share: path, size, mtime and off_virtual_file</text>
+<circle class="n" cx="518" cy="164" r="10"/>
+<text class="nt" x="518" y="168" text-anchor="middle">2</text>
+<text class="h" x="540" y="168" text-anchor="start">its virtual-file entry</text>
+<text class="s" x="540" y="186" text-anchor="start">at off_virtual_file: pointer A to the file&#x27;s chunk list</text>
+<circle class="n" cx="518" cy="228" r="10"/>
+<text class="nt" x="518" y="232" text-anchor="middle">3</text>
+<text class="h" x="540" y="232" text-anchor="start">its chunk list</text>
+<text class="s" x="540" y="250" text-anchor="start">a record in one of the 4 file_chunk streams: chunk ids, in order</text>
+<circle class="n" cx="518" cy="292" r="10"/>
+<text class="nt" x="518" y="296" text-anchor="middle">4</text>
+<text class="h" x="540" y="296" text-anchor="start">each chunk&#x27;s place</text>
+<text class="s" x="540" y="314" text-anchor="start">chunk_index record g: bucket id and entry (a copy points on)</text>
+<circle class="n" cx="518" cy="356" r="10"/>
+<text class="nt" x="518" y="360" text-anchor="middle">5</text>
+<text class="h" x="540" y="360" text-anchor="start">each chunk&#x27;s entry</text>
+<text class="s" x="540" y="378" text-anchor="start">the bucket&#x27;s .index: compressed size, offset, size, md5</text>
+<circle class="n" cx="518" cy="420" r="10"/>
+<text class="nt" x="518" y="424" text-anchor="middle">6</text>
+<text class="h" x="540" y="424" text-anchor="start">the data</text>
+<text class="s" x="540" y="442" text-anchor="start">the .bucket bytes at that offset, LZ4-decompressed, md5-checked</text>
+<rect class="warn" x="506" y="492" width="450" height="44" rx="8"/>
+<text class="s" x="518" y="510" text-anchor="start">No Pool/chunk_index (older backups): step 4 comes from</text>
+<text class="s" x="518" y="526" text-anchor="start">the inferred map (pool/), built once in the background.</text>
+</svg>
