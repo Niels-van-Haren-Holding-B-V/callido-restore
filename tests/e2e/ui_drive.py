@@ -5,7 +5,7 @@ the restore, read what the page says. Screenshots and page/console errors land i
     python -m tests.e2e.ui_drive --chrome "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --out /tmp/ui
 
 HOME is a temporary folder (the user's ~/.hbk-explorer is never touched); the port is HBK_SMOKE_PORT or a free one, never 8765."""
-import argparse, importlib.util, json, os, shutil, subprocess, sys, tempfile, time, urllib.request
+import argparse, importlib.util, json, os, shutil, subprocess, sys, tempfile, time, urllib.error, urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -193,9 +193,65 @@ def stop_flow(b, base, work, m, notes, shot):
     notes.append(f"stop: verdict {'OK' if ok else 'FAILED'}")
 
 
+def settings_flow(b, base, work, home, hbk, notes, shot, env):
+    """#190 Settings: the NAS and Drive connections from the test's own rclone.conf, appearance (remembered over a reload), the
+    update choice (reaches the server), the download cache (filled by a backup read through an rclone remote; Clear refused
+    while a job runs, then frees it), and editing the NAS (closed port: fails fast; what is in rclone.conf afterwards)."""
+    from callido_restore.paths import RCLONE
+    rc = lambda *a: subprocess.run([RCLONE, *a], env=env, capture_output=True, text=True, timeout=60)
+    conf = json.loads(rc("config", "dump").stdout or "{}")
+    notes.append(f"settings: rclone.conf before: { {k: {x: v.get(x) for x in ('type', 'host', 'port', 'user', 'client_id')} for k, v in conf.items()} }")
+    src = post(base, "/api/sources", name="E2E on Drive", local="~/CallidoRestore/e2e_1", remote=f"e2edrive:{hbk.name}")["id"]
+    j = shots.api(base, "/api/open", src=src, job="1"); t0 = time.time()
+    while time.time() - t0 < 60 and shots.api(base, "/api/job", id=j["id"]).get("state") == "running": time.sleep(0.3)
+    b.navigate(base + "/"); b.wait("typeof S!=='undefined' && S.info", 60); time.sleep(1)
+    b.js("document.querySelector('#settingsBtn').click()"); time.sleep(2); shot(b, "settings")
+    notes.append("settings: NAS section: " + b.text("#setNas").replace("\n", " | "))
+    notes.append("settings: Drive section: " + b.text("#setDrive").replace("\n", " | "))
+    b.js("document.querySelector('input[name=setTheme][value=dark]').click()"); time.sleep(0.3)
+    dark = b.js("document.documentElement.dataset.theme||null"); bg = b.js("getComputedStyle(document.body).backgroundColor")
+    b.navigate(base + "/"); b.wait("typeof S!=='undefined' && S.info", 60); time.sleep(0.5)
+    kept = b.js("document.documentElement.dataset.theme||null")
+    b.js("document.querySelector('#settingsBtn').click()"); time.sleep(1.5)
+    b.js("document.querySelector('input[name=setTheme][value=system]').click()"); time.sleep(0.3)
+    notes.append(f"settings: theme dark -> data-theme {dark!r} (body {bg}); after a reload {kept!r}; back to system -> {b.js('document.documentElement.dataset.theme||null')!r}")
+    modes = {}
+    for v in ("off", "mention"):
+        b.js(f"document.querySelector('input[name=setUpd][value={v}]').click()"); time.sleep(1)
+        try: modes[v] = json.loads((home / ".hbk-explorer" / "update.json").read_text()).get("check")   # the stored choice (HBK_NO_UPDATE_CHECK masks it in /api/update)
+        except (OSError, ValueError): modes[v] = None
+    auto = b.js("(()=>{const a=document.querySelector('#setUpdAuto');return {disabled:a.disabled, note:document.querySelector('#setUpdAutoNote').textContent}})()")
+    notes.append(f"settings: updates: stored check after 'off'={modes['off']}, after 'mention'={modes['mention']}; 'automatically': {auto}")
+    c0 = shots.api(base, "/api/cache")
+    j = shots.api(base, "/api/index", src=src, share="*", ver=102)
+    try: busy = post(base, "/api/cache/clear"); busy = ("not refused", busy)
+    except urllib.error.HTTPError as e: busy = (e.code, json.loads(e.read() or b"{}").get("error"))
+    t0 = time.time()                               # the file lists, then the preparation they start: wait until nothing runs
+    while time.time() - t0 < 120 and any(x["state"] == "running" for x in shots.api(base, "/api/jobs")): time.sleep(0.5)
+    b.js("document.querySelector('#settingsClose').click()"); time.sleep(0.3); b.js("document.querySelector('#settingsBtn').click()"); time.sleep(1.5)
+    shown = b.text("#setCache").replace("\n", " | ")
+    b.js("document.querySelector('#setClear') && document.querySelector('#setClear').click()"); time.sleep(2)
+    c1 = shots.api(base, "/api/cache")
+    notes.append(f"settings: cache before {c0.get('bytes')} B; Clear while a job ran: {busy}; shown: {shown[:200]!r}; after Clear {c1.get('bytes')} B; toast {b.text('#toasts')!r}")
+    b.js("document.querySelector('#setNas [data-edit]').click()"); time.sleep(0.8)
+    b.js("""(()=>{const set=(id,v)=>{const i=document.querySelector(id);i.value=v;i.dispatchEvent(new Event('input',{bubbles:true}))};
+             set('#setHost','127.0.0.2');set('#setPort','4455');set('#setUser','bob')})()""")
+    b.js("document.querySelector('#setSave').click()"); t0 = time.time(); time.sleep(2)
+    mid = None
+    while time.time() - t0 < 120 and b.js("!!document.querySelector('#setMsg .spin')"):
+        if mid is None and time.time() - t0 > 3: mid = json.loads(rc("config", "dump").stdout or "{}").get("nas", {})
+        time.sleep(0.5)
+    notes.append(f"settings: rclone.conf [nas] while the test still ran: {({k: mid.get(k) for k in ('host', 'port', 'user')} if mid else None)}")
+    took = time.time() - t0; shot(b, "nas-edit")
+    after = json.loads(rc("config", "dump").stdout or "{}").get("nas", {})
+    notes.append(f"settings: NAS edit took {took:.0f}s: message {b.text('#setMsg')!r}")
+    notes.append(f"settings: rclone.conf [nas] afterwards: host={after.get('host')} port={after.get('port')} user={after.get('user')}")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--chrome", required=True); ap.add_argument("--out", required=True)
+    ap.add_argument("--settings", action="store_true", help="#190: the Settings dialog (NAS edit, Drive key, appearance, updates, cache)")
     ap.add_argument("--stop", action="store_true", help="#187: Stop the running restore, Resume it, byte-exact")
     ap.add_argument("--update", action="store_true", help="an update on offer with hostile release notes: notice and dialog (no network)")
     ap.add_argument("--csrf", action="store_true", help="a page on another site attacks the running app through the browser")
@@ -207,12 +263,21 @@ def main():
     work = Path(tempfile.mkdtemp(prefix="hbk-ui-")); home = work / "home"; (home / ".hbk-explorer").mkdir(parents=True)
     hbk = work / "backups" / "e2e_1.hbk"; m = hbkgen.build(str(hbk), a.scale, a.bucket_kb * 1024, chunk_index=a.chunk_index)
     (home / ".hbk-explorer" / "sources.json").write_text(json.dumps([{"id": "e2e", "name": "E2E backup", "local": str(hbk), "remotes": [], "extra": []}]))
+    if a.settings:                 # the test's own rclone.conf: a NAS that does not answer, a Drive remote with its own key, an alias "Drive"
+        rc_dir = home / ".config" / "rclone"; rc_dir.mkdir(parents=True)
+        (rc_dir / "rclone.conf").write_text("[nas]\ntype = smb\nhost = 127.0.0.1\nport = 1\nuser = alice\n\n[gdrive]\ntype = drive\nscope = drive.readonly\n"
+            "client_id = 123456789-e2e.apps.googleusercontent.com\nclient_secret = e2e\n"
+            'token = {"access_token":"x","token_type":"Bearer","expiry":"2030-01-01T00:00:00Z"}\n\n'
+            f"[e2edrive]\ntype = alias\nremote = {hbk.parent}\n")
     if a.update:
         (home / ".hbk-explorer" / "update.json").write_text(json.dumps({"checked": time.time(), "release": {"tag_name": "v99.0.0", "name": "v99.0.0",
             "body": HOSTILE_NOTES, "html_url": "https://github.com/Niels-van-Haren-Holding-B-V/callido-restore/releases/tag/v99.0.0", "assets": []}}))
     port = int(os.environ.get("HBK_SMOKE_PORT") or shots.free_port()); assert port != 8765
     base = f"http://127.0.0.1:{port}"; log = open(work / "app.log", "w")
     env = dict(os.environ, HOME=str(home), PYTHONPATH=str(ROOT), HBK_NO_UPDATE_CHECK="1"); env.pop("HBK_NO_AUTOPREPARE", None)   # never asks GitHub
+    if a.settings:                 # the update choice must be real here: no HBK_NO_UPDATE_CHECK, but "checked just now" so no check is due
+        env.pop("HBK_NO_UPDATE_CHECK", None)
+        (home / ".hbk-explorer" / "update.json").write_text(json.dumps({"checked": time.time()}))
     srv = subprocess.Popen([sys.executable, "-m", "callido_restore", "--no-window", "--port", str(port)], cwd=str(ROOT), env=env, stdout=log, stderr=subprocess.STDOUT)
     notes = []; n = [0]
     def shot(b, name):
@@ -223,6 +288,9 @@ def main():
             except Exception: time.sleep(0.1)
         with Browser(a.chrome, str(work / "chrome")) as b:
             b.call("Page.enable")
+            if a.settings:
+                settings_flow(b, base, work, home, hbk, notes, lambda b_, name: shot(b_, name), env); notes.extend(f"[{k}] {v}" for k, v in b.events)
+                return
             if a.stop:
                 stop_flow(b, base, work, m, notes, lambda b_, name: shot(b_, name)); notes.extend(f"[{k}] {v}" for k, v in b.events)
                 return

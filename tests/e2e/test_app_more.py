@@ -157,6 +157,45 @@ class DamagedBucket(unittest.TestCase):
 
 
 @unittest.skipUnless(E2E, "set HBK_E2E=1 to run the app-level end-to-end tests")
+class ResumeWhileARestoreRuns(unittest.TestCase):
+    """#190: a stopped restore cannot be resumed while another restore runs (409); once that one is done it resumes and the
+    whole run lands byte-exact next to the other one."""
+    @classmethod
+    def setUpClass(cls):
+        cls.work = Path(tempfile.mkdtemp(prefix="hbk-e2e-resume-")); home = cls.work / "home"; home.mkdir()
+        cls.hbk = cls.work / "backups" / "e2e_1.hbk"
+        cls.m = hbkgen.build(str(cls.hbk), scale=40, bucket_cap=2 << 20, chunk_index=True)
+        cls.app = App(home, cls.work / "app.log").start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.app.stop(); shutil.rmtree(cls.work, ignore_errors=True)
+
+    def test_resume_is_refused_while_another_restore_runs(self):
+        a = self.app; ver = self.m["last_clean"]
+        src = a.post("/api/sources", name="resume", local=str(self.hbk))["id"]
+        a.wait_job(a.get("/api/open", src=src, job="1")["id"]); a.wait_job(a.get("/api/index", src=src, share="*", ver=ver)["id"])
+        items = [{"share": sh, "ver": ver, "path": "", "is_dir": True} for sh in SHARES]
+        first, second = self.work / "first", self.work / "second"
+        jid = a.post("/api/restore", src=src, items=items, dest=str(first))["id"]
+        a.wait_job(jid, until=lambda j: (j.get("done_files") or 0) >= 3)
+        a.get("/api/job/cancel", id=jid); j = a.wait_job(jid)
+        self.assertTrue(j["result"].get("paused"), j)
+        other = a.post("/api/restore", src=src, items=items, dest=str(second))["id"]
+        st, body = a.request("POST", "/api/restore/resume", body={"id": jid})
+        running = a.get("/api/job", id=other)["state"] == "running"
+        self.assertTrue(running, "the second restore finished before the check: raise the scale")
+        self.assertEqual(st, 409, body); self.assertIn("already running", body.get("error", ""))
+        self.assertEqual([x["state"] for x in a.get("/api/jobs/saved") if x["id"] == jid], ["paused"], "the refused resume must keep the saved restore")
+        a.wait_job(other, timeout=600)
+        j = a.wait_job(a.post("/api/restore/resume", id=jid)["id"], timeout=600)
+        self.assertEqual(j["state"], "done", j.get("error")); self.assertEqual(j["errors"], [])
+        for dest in (first, second):
+            cmp_ = flow.compare(self.m, ver, {sh: dest / sh for sh in SHARES})
+            for k in ("missing", "wrong_bytes", "wrong_mtime", "extra"): self.assertEqual(cmp_[k], [], f"{dest.name} {k}")
+
+
+@unittest.skipUnless(E2E, "set HBK_E2E=1 to run the app-level end-to-end tests")
 class LocalApiGuard(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

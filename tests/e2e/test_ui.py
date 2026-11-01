@@ -67,5 +67,40 @@ class UiScenarios(unittest.TestCase):
         self.assertIn("csrf: verdict OK", notes, notes)
 
 
+
+@unittest.skipUnless(os.environ.get("HBK_E2E_UI") == "1", "set HBK_E2E_UI=1 to run the UI scenarios in headless Chrome")
+@unittest.skipIf(os.name == "nt", "the driver talks to Chrome over a pipe (POSIX)")
+class SettingsDialog(unittest.TestCase):
+    """#190 ⚙ Settings, one run of the --settings scenario: connections from the test's own rclone.conf (a NAS that does not
+    answer, a Drive remote with its own key), appearance, the update choice, the cache, and editing the NAS."""
+    @classmethod
+    def setUpClass(cls):
+        t = UiScenarios("test_restore_like_a_person")
+        cls.notes = t.drive("settings", "--settings", scale=1, bucket_kb=256)
+        cls.line = staticmethod(lambda key: next((l for l in cls.notes.splitlines() if l.startswith("settings: " + key)), ""))
+
+    def test_connections_appearance_updates_cache(self):
+        self.assertIn("127.0.0.1:1 · user alice", self.line("NAS section"))
+        self.assertIn("your own Google key is in use", self.line("Drive section"))
+        th = self.line("theme")
+        self.assertIn("data-theme 'dark'", th); self.assertIn("after a reload 'dark'", th); self.assertIn("back to system -> None", th)
+        self.assertIn("after 'off'=False, after 'mention'=True", self.line("updates"))
+        c = self.line("cache")
+        self.assertIn("Clear while a job ran: (409", c); self.assertIn("after Clear 0 B", c); self.assertIn("Cleared", c)
+
+    @unittest.expectedFailure
+    def test_a_failed_nas_edit_leaves_the_connection_as_it_was(self):
+        """hbk-6 finding U9: the edit is written to rclone.conf before the shares are listed; when the NAS does not answer the
+        dialog says "Not saved: …" but rclone.conf already holds the new address, port and user."""
+        self.assertIn("Not saved", self.line("NAS edit"))
+        self.assertIn("host=127.0.0.1 port=1 user=alice", self.line("rclone.conf [nas] afterwards"))
+
+    @unittest.expectedFailure
+    def test_a_nas_that_does_not_answer_is_reported_within_the_promised_time(self):
+        """hbk-6 finding U10: the message says "did not answer … within 20 seconds", the dialog took about 80 s to say so."""
+        took = int(re.search(r"NAS edit took (\d+)s", self.line("NAS edit")).group(1))
+        self.assertLess(took, 40, self.line("NAS edit"))
+
+
 if __name__ == "__main__":
     unittest.main()
