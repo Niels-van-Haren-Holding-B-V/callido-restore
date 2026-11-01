@@ -89,9 +89,59 @@ def msiexec(*args):
         die(f"msiexec {' '.join(args)} returned {r.returncode}")
 
 
+UPGRADE_CODE = "{FC1126F1-1B40-48ED-9E1B-F366AA822764}"          # packaging/windows/CallidoRestore.wxs
+
+
+def related_products():
+    """ProductCodes installed under our UpgradeCode (one after a clean upgrade, none after uninstall)."""
+    ps = f"$i = New-Object -ComObject WindowsInstaller.Installer; $i.RelatedProducts('{UPGRADE_CODE}') | ForEach-Object {{ $_ }}"
+    r = subprocess.run(["powershell.exe", "-NoProfile", "-Command", ps], capture_output=True, text=True)
+    return [l.strip() for l in r.stdout.splitlines() if l.strip()]
+
+
+def check_auto_update(old_msi, old_version, new_msi, app_name, version, folder):
+    """The real auto-update path: the previous release installed, then callido_restore.update_windows's helper (wait for the
+    app's pid, msiexec /passive, start the app) with the new MSI. The restarted app must report the new version, and only one
+    product may be registered under the UpgradeCode (an in-place upgrade, not a second install)."""
+    vt = lambda v: tuple(int(x) for x in v.split("."))
+    if vt(old_version) >= vt(version):
+        print(f"auto-update check skipped: previous release {old_version} is not older than {version}"); return
+    sys.path.insert(0, str(ROOT))
+    from callido_restore import update_windows as uw
+    msiexec("/i", str(old_msi))
+    exe = folder / f"{app_name}.exe"
+    if not exe.is_file(): die(f"previous release {old_version} did not install {exe}")
+    dummy = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(3)"])     # stands in for the running app
+    log = Path(tempfile.gettempdir()) / "callido-update.log"
+    subprocess.Popen(uw.helper_command(Path(new_msi).resolve(), exe, dummy.pid, log),
+                     creationflags=uw.DETACHED_PROCESS | uw.CREATE_NEW_PROCESS_GROUP, close_fds=True)
+    dummy.wait()
+    global PORT
+    saved, PORT = PORT, 8765                                                           # the relaunched app uses its default port
+    try:
+        got = None
+        for _ in range(240):
+            try: got = json.loads(get("/api/about")).get("version")
+            except (OSError, ValueError): got = None
+            if got == version: break
+            time.sleep(1)
+        if got != version:
+            try: print(Path(str(log) + ".result").read_text())
+            except OSError: pass
+            die(f"after the update the app reports {got!r}, expected {version}")
+        print(f"auto-update: {old_version} -> {got}, app restarted")
+        get("/api/quit"); time.sleep(3)
+    finally: PORT = saved
+    prods = related_products()
+    if len(prods) != 1: die(f"expected one installed product after the upgrade, found {prods}")
+    print("auto-update check passed (in-place upgrade, one product)")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--msi", help="install this MSI, test the installed app, uninstall")
+    ap.add_argument("--upgrade-from", help="previous release's MSI: first test the auto-update from it to --msi")
+    ap.add_argument("--upgrade-from-version", help="version of --upgrade-from (x.y.z)")
     a = ap.parse_args()
     if os.name != "nt": die("Windows only")
     app_name, version = about_py()
@@ -101,6 +151,7 @@ def main():
     folder = Path(os.environ.get("ProgramW6432") or os.environ["ProgramFiles"]) / "Callido" / app_name
     start_menu = Path(os.environ["ProgramData"]) / "Microsoft" / "Windows" / "Start Menu" / "Programs" / f"{app_name}.lnk"
     desktop = Path(os.environ.get("PUBLIC", r"C:\Users\Public")) / "Desktop" / f"{app_name}.lnk"
+    if a.upgrade_from: check_auto_update(a.upgrade_from, a.upgrade_from_version, msi, app_name, version, folder)
     msiexec("/i", str(msi))
     try:
         for lnk in (start_menu, desktop):
@@ -110,6 +161,7 @@ def main():
         msiexec("/x", str(msi))
     if (folder / f"{app_name}.exe").exists(): die(f"uninstall left {folder}")
     if start_menu.exists() or desktop.exists(): die("uninstall left a shortcut behind")
+    if related_products(): die(f"uninstall left products registered: {related_products()}")
     print("smoke test passed (install, run, uninstall)")
 
 
