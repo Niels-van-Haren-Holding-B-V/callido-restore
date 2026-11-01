@@ -1,5 +1,13 @@
 **Callido Restore** restores files from a Synology Hyper Backup (`.hbk`) without Hyper Backup or a working NAS. It reads the backup's own metadata, shows every backup run on a timeline, and restores the folders you pick to a NAS share or a local folder. Files already at the destination are never overwritten or deleted, and the backup source is only read.
 
+## What's new in 1.0.0
+
+The first stable release: restores from a real Synology Hyper Backup on Google Drive to a NAS work end to end, on macOS (Apple silicon and Intel) and Windows.
+
+- **Edit a saved NAS connection.** In the restore step, **Edit** next to "NAS connection" changes the address (for example a new VPN or Tailscale address), the user or the password; leave the password empty to keep it. The connection keeps its name, so targets and earlier restores that use it keep working.
+- **Backups with their own chunk table need no preparation.** The app reads where every piece of every file is stored straight from the backup, so a restore can start as soon as a share's file list is loaded; backups without the table still get the one-time preparation.
+- **A long restore can be continued.** If the computer sleeps, the network drops or the app is closed, open the Restore tab and press **Continue** on the earlier restore: it resumes at the next file, and files already at the target are skipped. Keep the computer awake and plugged in during a long restore.
+
 ## What's new in 0.4.3
 
 - **Photos and other files that failed with "no record magic" restore now.** Some files carry an extra block of file attributes in the backup, in front of the list of their data blocks; the app looked for that list in the wrong place and refused those files (safely: nothing was written). It now follows the backup's own pointer to the list. On a real backup all 349,914 files of three shares read, 4,421 of them with the extra block (#161, #162).
