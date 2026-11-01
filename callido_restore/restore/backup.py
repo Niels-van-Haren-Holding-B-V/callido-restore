@@ -58,6 +58,7 @@ def mapper_phase(line):
 UPLOAD_STALL_S = 600          # an upload whose transferred bytes do not move for this long is ended and retried
 UPLOAD_STALLED, UPLOAD_CANCELLED = -999, -998
 
+DOWNLOAD_BARS = 8                                  # files shown with their download from the backup
 UPLOAD_WORKERS = 8                                         # files uploaded to a remote target at once (each its own rclone process and SMB session)
 STAGE_MAX = int(float(os.environ.get("HBK_STAGE_GB", "4")) * (1 << 30))   # extracted files waiting for their upload, bytes
 _UNIT = {"": 1, "B": 1, "K": 1 << 10, "M": 1 << 20, "G": 1 << 30, "T": 1 << 40, "P": 1 << 50}
@@ -639,11 +640,31 @@ class Backup:
         if not start_at or "unverified_total" not in job: job["unverified_total"] = len(job["unverified"])
         lock = threading.RLock()                                # counters and lists below are shared with the upload threads
         tx = {}; job["transfers"] = []                          # every running download / upload: what the progress bars show
+        win = []; cur = [-1]; got = {}                          # files ahead with their buckets; the file being read; buckets here (size)
+        def file_bars():
+            """one "download" bar per file whose data is still coming from the backup (the next ones, at most DOWNLOAD_BARS),
+            and the file being read now: done/total = its buckets' bytes downloaded / their size (0 = size not known yet)"""
+            out = []; uploading = {t["name"] for t in tx.values() if t["kind"] == "upload"}
+            for j, f, bks in win:
+                if j < cur[0] or f"{f['share']}/{f['path']}" in uploading: continue
+                waiting = [b for b in bks if b not in got]
+                if not waiting and j != cur[0]: continue
+                done = total = rate = 0; known = True
+                for b in bks:
+                    if b in got: done += got[b]; total += got[b]; continue
+                    t = tx.get(("dl", b))
+                    if t: done += t["done"]; total += t["total"]; rate += t["rate"]
+                    if not t or not t["total"]: known = False
+                out.append({"kind": "download", "name": f"{f['share']}/{f['path']}", "done": done, "total": total if known else 0, "rate": rate})
+                if len(out) >= DOWNLOAD_BARS: break
+            return out
         def publish_tx():
-            # rates: bytes/s now, summed per direction: "download" from the backup source, "upload" to a NAS target. The bar's own
-            # speed is files handled (skipped ones too), so it can be far above what reaches the NAS.
-            job["transfers"] = list(tx.values())
-            job["rates"] = {k: sum(t["rate"] for t in tx.values() if t["kind"] == k) for k in ("download", "upload")}
+            # transfers: a "download" bar per file being fetched from the backup, an "upload" bar per file going to a NAS target, and
+            # the backup's own bucket files ("bucket", not shown by the page). rates: bytes/s now, "download" from the backup source,
+            # "upload" to a NAS target (the main bar's speed counts skipped files too, so it can be far above what reaches the NAS).
+            job["transfers"] = file_bars() + list(tx.values())
+            job["rates"] = {"download": sum(t["rate"] for t in tx.values() if t["kind"] == "bucket"),
+                            "upload": sum(t["rate"] for t in tx.values() if t["kind"] == "upload")}
         def tx_set(key, kind, name, done, total, rate):
             with lock:
                 tx[key] = {"kind": kind, "name": name, "done": int(done or 0), "total": int(total or 0), "rate": int(rate or 0)}
@@ -708,8 +729,11 @@ class Backup:
             if already is None:
                 try: total = (self.src.listdir(os.path.dirname(rel)).get(os.path.basename(rel)) or {}).get("size") or 0
                 except Exception: total = 0
-            try: path = self.src.ensure(rel, progress=lambda done, speed, note="": tx_set(key, "download", os.path.basename(rel), done, total, speed))
+            try: path = self.src.ensure(rel, progress=lambda done, speed, note="": tx_set(key, "bucket", os.path.basename(rel), done, total, speed))
             finally: tx_done(key)
+            try:
+                with lock: got[bk] = path.stat().st_size; publish_tx()
+            except OSError: pass
             # Only files in the app cache are eligible for eviction (also ones an earlier run downloaded), never a source folder.
             if self.src.in_cache(path) and path.is_file():
                 with dl_lock:
@@ -723,7 +747,7 @@ class Backup:
                 for bk in list(downloaded):
                     if dl_size[0] <= limit: break
                     if limit and (bk in upcoming or bk in pending): continue
-                    path, sz = downloaded.pop(bk)
+                    path, sz = downloaded.pop(bk); got.pop(bk, None)
                     fh = fh_cache.pop(bk, None)
                     if fh: fh.close()
                     try:
@@ -734,16 +758,17 @@ class Backup:
         prof = transfer.profile("restore")                     # sources/transfer.py: 8 bucket files in flight, 16 queued ahead
         ex = concurrent.futures.ThreadPoolExecutor(max_workers=prof.workers); pending = {}
         def prefetch_from(i):
-            seen = set()
-            for f in files[i:i + 40]:
+            w = []; order = []
+            for j, f in enumerate(files[i:i + 40], i):
                 if f["off"] is None or f["off"] < 0: continue
                 try: locs, _ = pool.plan(f["off"])
                 except Exception: continue
-                for bk, _ in locs:
-                    if bk in seen: continue
-                    seen.add(bk)
-                    if bk not in pending and len(pending) < prof.prefetch: pending[bk] = ex.submit(fetch, bk)
-            with dl_lock: upcoming.clear(); upcoming.update(seen)          # what eviction keeps
+                bks = sorted({bk for bk, _ in locs}); w.append((j, f, bks))
+                order += [bk for bk, _ in locs if bk not in order]
+            with dl_lock: upcoming.clear(); upcoming.update(order)         # what eviction keeps
+            with lock: win[:] = w; publish_tx()                            # the file bars know the window before any fetch reports
+            for bk in order:
+                if bk not in pending and len(pending) < prof.prefetch: pending[bk] = ex.submit(fetch, bk)
         # Uploads to a remote target run UPLOAD_WORKERS at a time (each rclone process opens its own SMB session; one file at a
         # time spent most of its time on that set-up). Reading the backup stays in this thread (the reader's file handles are
         # not shared). The saved position is the oldest file whose upload has not finished, so a resume never skips one.
@@ -868,6 +893,8 @@ class Backup:
             """restore one file of the plan (index i): extract it and place it, or hand it to the upload threads. again =
             (k, n): the k-th of n files the final check found missing; the saved position then stays at the end of the plan
             (a Stop during the check resumes with the check)"""
+            if not again:
+                with lock: cur[0] = i; publish_tx()
             if f["off"] is not None and f["off"] >= 0:
                 try:
                     for bk, _ in pool.plan(f["off"])[0]:
@@ -973,7 +1000,7 @@ class Backup:
         finally:
             job["cancel_uploads"] = True
             up_ex.shutdown(wait=True, cancel_futures=True)              # running uploads end with the cancel flag or finish
-            with lock: tx.clear(); publish_tx()
+            with lock: tx.clear(); win.clear(); publish_tx()
             ex.shutdown(wait=False, cancel_futures=True)
             for fh in fh_cache.values(): fh.close()
             for root, st in stage.items():               # only this job's staging folders; never anything else at a destination

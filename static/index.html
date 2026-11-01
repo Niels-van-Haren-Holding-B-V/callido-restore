@@ -507,7 +507,7 @@ function progressHtml(job,rich,extra){const stoppedEarly=!!(job.result&&job.resu
   // note has its own small line under the bar, so the main line keeps its shape from poll to poll.
   const slots=[];
   if(dlDone)slots.push(String(job.label||'').startsWith('restore')?`${human(job.total_bytes)} · ${pct}%`:`${human(job.total_bytes)} downloaded · ${pct}%`);   // a restore from a local backup downloads nothingelse if(job.total_bytes)slots.push(`${human(job.done_bytes||0)} of ${human(job.total_bytes)} (${pct}%)`);else slots.push(`${pct}%`);
-  if(running&&job.rates&&job.rates.upload!=null)slots.push(`${human(job.rates.upload)}/s to the target`);   // what really reaches the NAS (skipped files are not speed)
+  if(running&&job.rates&&job.rates.upload)slots.push(`${human(job.rates.upload)}/s to the target`);   // 0: nothing uploading now, or a local target   // what really reaches the NAS (skipped files are not speed)
   else if(running&&Array.isArray(job.transfers)&&job.transfers.length){const r=job.transfers.filter(x=>x.kind==='upload').reduce((s,x)=>s+(x.rate||0),0);slots.push(r?human(r)+'/s':speedText(job.id))}   // parallel files: their own rates
   else if(running&&job.total_bytes&&!dlDone)slots.push(speedText(job.id));
   if(running)slots.push(eta||'time left: estimating…');
@@ -941,15 +941,21 @@ async function tabRestore(){const el=$('#tab-restore');
   const startRestore=async(its,dest,skip)=>{const g=$('#rsGo');if(g){g.disabled=true;g.textContent='Starting…'}pendingBar($('#rsProg'),'Starting the restore…');
     try{const j=await post('/api/restore',{src:S.src,dest,items:its,skip_meta:skip});if(g)g.textContent='Restoring…';showSaved();watchRestore(j.id)}
     catch(e){$('#rsProg').innerHTML='';if(g){g.disabled=false;g.textContent='Start restore'}toastError(e)}};
-  // Parallel transfers of a running restore (hbk-1's engine: job.transfers = [{kind: download|upload, name, done, total, rate}],
-  // every ~2 s): one small bar per file being restored (name, %, speed). The backup's internal downloads are not shown (Niels:
-  // "I just want the files"). Shown only while the restore runs; nothing when the engine does not report transfers.
+  // Parallel transfers of a running restore (hbk-1's engine: job.transfers = [{kind: download|upload|bucket, name, done, total, rate}]):
+  // one small bar per file. "download": a file whose data is coming from the backup (the next ones, and the one being read);
+  // "upload": a file going to the NAS. The backup's own bucket files ("bucket") are not shown (Niels: "I just want the files").
+  // A total of 0 means the size is not known yet: no percentage, the bar stays empty until bytes arrive.
   const xferBar=x=>{const pct=x.total?Math.min(100,Math.round(100*(x.done||0)/x.total)):null;const nm=String(x.name||'');const short=nm.split('/').pop()||nm;
-    return `<div class="xf" title="${esc(nm)}"><div class="xfh"><span class="xfn mono">${esc(short)}</span><span class="help">${pct==null?human(x.done||0):pct+' %'}${x.rate?' · '+human(x.rate)+'/s':''}</span></div><div class="prog thin"><i style="width:${pct==null?100:pct}%"></i></div></div>`};
-  const showXfers=job=>{const el=$('#rsXfers');if(!el)return;const xs=job.state==='running'&&Array.isArray(job.transfers)?job.transfers.filter(x=>x.kind==='upload'):[];
-    if(!xs.length){el.innerHTML='';return}const rate=xs.reduce((s,x)=>s+(x.rate||0),0);
-    const dl=(job.rates&&job.rates.download)||0;
-    el.innerHTML=`<div class="help" style="margin:6px 0 2px">Restoring ${xs.length} file${xs.length===1?'':'s'} at the same time${rate?' · to the target '+human(rate)+'/s':''}${dl?' · from the backup '+human(dl)+'/s':''}</div><div class="xfgrid">${xs.map(xferBar).join('')}</div>`};
+    const up=x.kind==='upload';const what=up?'↑ to the target':'↓ from the backup';
+    const amount=pct!=null?pct+' %':(x.done?human(x.done):'waiting');
+    return `<div class="xf" title="${esc(nm)} · ${what}"><div class="xfh"><span class="xfn mono">${esc(short)}</span><span class="help">${up?'↑':'↓'} ${amount}${x.rate?' · '+human(x.rate)+'/s':''}</span></div><div class="prog thin"><i style="width:${pct==null?0:pct}%"></i></div></div>`};
+  const showXfers=job=>{const el=$('#rsXfers');if(!el)return;const all=job.state==='running'&&Array.isArray(job.transfers)?job.transfers:[];
+    const ups=all.filter(x=>x.kind==='upload'),downs=all.filter(x=>x.kind==='download');
+    if(!ups.length&&!downs.length){el.innerHTML='';return}
+    const rate=ups.reduce((s,x)=>s+(x.rate||0),0),dl=(job.rates&&job.rates.download)||0;
+    const head=(t,n)=>`<div class="help" style="margin:6px 0 2px">${t}</div>`;
+    el.innerHTML=(downs.length?head(`↓ Downloading from the backup: ${downs.length} file${downs.length===1?'':'s'}${dl?' · '+human(dl)+'/s':''}`)+`<div class="xfgrid">${downs.map(xferBar).join('')}</div>`:'')
+      +(ups.length?head(`↑ Uploading to the target: ${ups.length} file${ups.length===1?'':'s'} at the same time${rate?' · '+human(rate)+'/s':''}`)+`<div class="xfgrid">${ups.map(xferBar).join('')}</div>`:'')};
   const watchRestore=id=>{$('#rsProg').innerHTML='<h4 style="font-size:12.5px;margin:6px 0 2px">Restoring</h4><div id="rsBar"></div><div id="rsXfers"></div>';
     pollJob(id,$('#rsBar'),job=>{const g=$('#rsGo');if(g){g.disabled=false;g.textContent='Start restore'}showSaved();const stopped=!!(job.result&&job.result.paused);$('#rsProg').querySelector('h4').textContent=stopped?'Restore stopped':job.state==='error'?'Restore failed':'Restore finished';$('#rsProg').innerHTML+=`<p><b>${stopped?'Stopped':'Done'}:</b> ${job.result?`${job.result.restored} restored · ${job.result.skipped} skipped · ${job.result.errors} errors · ${human(job.result.bytes)}${verifyText(job.result)}${checkText(job.result)}`:esc(job.error||'')}</p>`+(stopped?`<div class="row" style="margin:0 0 6px"><button class="small primary" id="rsResume">Resume</button><span class="help">It keeps its progress and goes on with the next file.</span></div>`:'');
       const rr=$('#rsResume');if(rr)rr.onclick=async()=>{rr.disabled=true;rr.textContent='Resuming…';try{await post('/api/restore/resume',{id:job.id});tabRestore()}catch(e){toastError(e);rr.disabled=false;rr.textContent='Resume'}};
