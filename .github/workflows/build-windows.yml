@@ -88,15 +88,30 @@ jobs:
         with:
           name: CallidoRestore-windows-x64
           path: release
+      # The app's auto-update installs the MSI only when this checksum file is signed with the release key (Ed25519, the same
+      # secret and steps as build.yml's "Sign SHA256SUMS"; update.verified_sha checks it under about.UPDATE_PUBLIC_KEYS).
+      - name: Sign the MSI checksum
+        env:
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+        run: |
+          (cd release && sha256sum -c CallidoRestore-x64.msi.sha256)
+          if [ -z "$RELEASE_SIGNING_KEY" ]; then echo "::warning::RELEASE_SIGNING_KEY is not set: the MSI checksum is not signed (no auto-update on Windows)"; exit 0; fi
+          umask 077; printf '%s\n' "$RELEASE_SIGNING_KEY" > "$RUNNER_TEMP/release-signing.pem"
+          openssl pkeyutl -sign -rawin -inkey "$RUNNER_TEMP/release-signing.pem" -in release/CallidoRestore-x64.msi.sha256 -out release/CallidoRestore-x64.msi.sha256.sig
+          openssl pkey -in "$RUNNER_TEMP/release-signing.pem" -pubout > "$RUNNER_TEMP/pub.pem"
+          openssl pkeyutl -verify -pubin -inkey "$RUNNER_TEMP/pub.pem" -rawin -in release/CallidoRestore-x64.msi.sha256 -sigfile release/CallidoRestore-x64.msi.sha256.sig
+          echo "signed with public key $(openssl pkey -pubin -in "$RUNNER_TEMP/pub.pem" -outform DER | tail -c 32 | xxd -p -c 64)"
+          rm -f "$RUNNER_TEMP/release-signing.pem"
       - name: Wait for the release, then attach the MSI
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
         run: |
-          (cd release && sha256sum -c CallidoRestore-x64.msi.sha256)
+          files="release/CallidoRestore-x64.msi release/CallidoRestore-x64.msi.sha256"
+          [ -f release/CallidoRestore-x64.msi.sha256.sig ] && files="$files release/CallidoRestore-x64.msi.sha256.sig"
           for i in $(seq 1 80); do
             if gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-              gh release upload "$TAG" release/CallidoRestore-x64.msi release/CallidoRestore-x64.msi.sha256 -R "$GITHUB_REPOSITORY" --clobber
+              gh release upload "$TAG" $files -R "$GITHUB_REPOSITORY" --clobber
               exit 0
             fi
             echo "release $TAG not there yet (build-macos publishes it); waiting"; sleep 30

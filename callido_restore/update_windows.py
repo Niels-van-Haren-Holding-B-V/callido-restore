@@ -1,16 +1,14 @@
-"""Windows step of the auto-update: fetch the release's MSI into the app cache, check it against the release's .sha256, then
+"""Windows step of the auto-update: fetch the release's MSI into the app cache, check it against the release's signed checksum, then
 hand over to a detached helper that waits for the app to exit, runs msiexec (the MSI has a fixed UpgradeCode, so a newer
 version upgrades the installed one in place; msiexec asks for the UAC elevation itself) and starts the app again.
 
-The release check, the UI and the "not while a restore runs" rule live in the shared update code; this module only needs
-the release JSON from https://api.github.com/repos/<owner>/<repo>/releases/<...> (``tag_name`` and ``assets``)."""
-import hashlib, os, re, subprocess, sys, time, urllib.request
+The release check, the signature check, the UI and the "not while a restore runs" rule live in ``callido_restore/update.py``
+(hbk-2); this module adds the MSI install in place and the restart."""
+import os, subprocess, sys, time
 from pathlib import Path
 from callido_restore import oscompat, paths
 
 MSI_NAME = "CallidoRestore-x64.msi"
-SUM_NAME = MSI_NAME + ".sha256"
-ALLOWED_HOSTS = ("https://github.com/", "https://objects.githubusercontent.com/", "https://release-assets.githubusercontent.com/")
 DETACHED_PROCESS = 0x00000008
 CREATE_NEW_PROCESS_GROUP = 0x00000200
 
@@ -19,70 +17,13 @@ class UpdateError(RuntimeError):
     pass
 
 
-def _version(release):
-    v = (release.get("tag_name") or "").lstrip("v")
-    if not re.fullmatch(r"\d+\.\d+\.\d+", v): raise UpdateError(f"release has no x.y.z version: {release.get('tag_name')!r}")
-    return v
-
-
-def _asset_url(release, name):
-    for a in release.get("assets") or []:
-        if a.get("name") == name:
-            url = a.get("browser_download_url") or ""
-            if not url.startswith(ALLOWED_HOSTS[0]): raise UpdateError(f"{name} is not served from github.com: {url}")
-            return url, int(a.get("size") or 0)
-    raise UpdateError(f"the release has no {name}")
-
-
-def _open(url, timeout=60):
-    req = urllib.request.Request(url, headers={"User-Agent": "callido-restore-updater"})
-    r = urllib.request.urlopen(req, timeout=timeout)
-    if not r.geturl().startswith(ALLOWED_HOSTS):            # redirects from github.com go to GitHub's own asset hosts only
-        r.close(); raise UpdateError(f"unexpected download host: {r.geturl()}")
-    return r
-
-
-def _sha256_of(path):
-    h = hashlib.sha256()
-    with open(path, "rb") as f:
-        for b in iter(lambda: f.read(1 << 20), b""): h.update(b)
-    return h.hexdigest()
-
-
-def update_dir(version):
-    return paths.CACHE_DIR / "updates" / version
-
-
 def download(release, progress=None, cancelled=None):
-    """Path of the release's MSI in the app cache, its sha256 checked against the release's .sha256 file. A file already
-    there with the right sum is reused. ``progress(done_bytes, total_bytes)``; ``cancelled()`` true stops (UpdateError).
-    A file whose sum does not match is deleted and never returned."""
-    version = _version(release)
-    msi_url, size = _asset_url(release, MSI_NAME)
-    sum_url, _ = _asset_url(release, SUM_NAME)
-    with _open(sum_url) as r: text = r.read(4096).decode("utf-8", "replace")
-    m = re.search(r"\b([0-9a-fA-F]{64})\b", text)
-    if not m: raise UpdateError(f"{SUM_NAME} holds no sha256")
-    want = m.group(1).lower()
-    d = update_dir(version); d.mkdir(parents=True, exist_ok=True)
-    out = d / MSI_NAME
-    if out.is_file() and _sha256_of(out) == want: return out
-    part = d / (MSI_NAME + ".part")
-    h = hashlib.sha256(); done = 0
-    try:
-        with _open(msi_url, timeout=120) as r, open(part, "wb") as f:
-            total = int(r.headers.get("Content-Length") or size or 0)
-            while True:
-                if cancelled and cancelled(): raise UpdateError("update download cancelled")
-                b = r.read(1 << 20)
-                if not b: break
-                f.write(b); h.update(b); done += len(b)
-                if progress: progress(done, total)
-        if h.hexdigest() != want: raise UpdateError(f"{MSI_NAME} does not match its published sha256; not installing it")
-        os.replace(part, out)
-        return out
-    finally:
-        if part.exists(): part.unlink()
+    """Path of the release's MSI in cache/updates/<version>/, kept only when its SHA-256 matches the release's *signed*
+    checksum (``CallidoRestore-x64.msi.sha256`` + ``.sig``, Ed25519 under ``about.UPDATE_PUBLIC_KEYS``). All checks (newer
+    version, this platform's asset, signature, GitHub hosts, hash) are the shared ``update.download_verified``; a failure
+    raises RuntimeError with a readable message and leaves no file behind. ``progress(done, total)``; ``cancelled()``."""
+    from callido_restore import update
+    return update.download_verified(release, MSI_NAME, progress=progress, cancelled=cancelled)
 
 
 def _ps_quote(s):

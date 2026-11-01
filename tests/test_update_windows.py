@@ -1,71 +1,24 @@
-"""Windows auto-update step (update_windows): the MSI is fetched into the app cache only when its sha256 matches the release's
-.sha256, only from GitHub's hosts, and the helper waits for the app, runs msiexec /passive and starts the app again."""
-import hashlib, http.server, os, tempfile, threading, unittest
+"""Windows auto-update step (update_windows): the MSI comes through the shared signed download (update.download_verified), and
+the helper waits for the app, runs msiexec /passive and starts the app again."""
+import tempfile, unittest
 from pathlib import Path
 from unittest import mock
 
-from callido_restore import paths, update_windows as uw
-
-MSI = b"MSI-BYTES" * 1000
-
-
-class _Handler(http.server.BaseHTTPRequestHandler):
-    files = {}
-    def do_GET(self):
-        body = self.files.get(self.path)
-        if body is None: self.send_response(404); self.end_headers(); return
-        self.send_response(200); self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
-    def log_message(self, *a): pass
-
+from callido_restore import update_windows as uw
 
 class Download(unittest.TestCase):
-    def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory(); self.old = paths.CACHE_DIR; paths.CACHE_DIR = Path(self.tmp.name) / "cache"
-        self.srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
-        threading.Thread(target=self.srv.serve_forever, daemon=True).start()
-        self.base = f"http://127.0.0.1:{self.srv.server_port}"
-        # the test server stands in for github.com: allow its address for the duration of the test
-        self.hosts = mock.patch.object(uw, "ALLOWED_HOSTS", (self.base + "/",))
-        self.hosts.start()
-        _Handler.files = {"/msi": MSI, "/sum": f"{hashlib.sha256(MSI).hexdigest()}  {uw.MSI_NAME}\n".encode()}
-    def tearDown(self):
-        self.hosts.stop(); self.srv.shutdown(); self.srv.server_close(); paths.CACHE_DIR = self.old; self.tmp.cleanup()
-    def release(self, tag="v1.2.3", msi="/msi", sum_="/sum"):
-        a = [{"name": uw.MSI_NAME, "browser_download_url": self.base + msi, "size": len(MSI)}]
-        if sum_: a.append({"name": uw.SUM_NAME, "browser_download_url": self.base + sum_})
-        return {"tag_name": tag, "assets": a}
+    def test_uses_the_signed_shared_download(self):
+        from callido_restore import update
+        rel = {"tag_name": "v9.9.9", "assets": []}; prog, canc = (lambda d, t: None), (lambda: False)
+        with mock.patch.object(update, "download_verified", return_value=Path("x.msi")) as dv:
+            self.assertEqual(uw.download(rel, progress=prog, cancelled=canc), Path("x.msi"))
+        dv.assert_called_once_with(rel, uw.MSI_NAME, progress=prog, cancelled=canc)
+        self.assertEqual(uw.MSI_NAME, update.checksum_list(uw.MSI_NAME)[:-len(".sha256")])   # the list that covers the MSI
 
-    def test_downloads_into_the_cache_and_checks_the_sum(self):
-        seen = []
-        p = uw.download(self.release(), progress=lambda d, t: seen.append((d, t)))
-        self.assertEqual(p, paths.CACHE_DIR / "updates" / "1.2.3" / uw.MSI_NAME); self.assertEqual(p.read_bytes(), MSI)
-        self.assertEqual(seen[-1], (len(MSI), len(MSI)))
-        self.assertFalse(any(x.name.endswith(".part") for x in p.parent.iterdir()))
-
-    def test_a_good_file_is_reused(self):
-        p = uw.download(self.release()); _Handler.files.pop("/msi")
-        self.assertEqual(uw.download(self.release()), p)
-
-    def test_mismatch_is_refused_and_nothing_is_kept(self):
-        _Handler.files["/sum"] = ("0" * 64 + f"  {uw.MSI_NAME}\n").encode()
-        with self.assertRaises(RuntimeError) as c: uw.download(self.release())
-        self.assertIn("does not match", str(c.exception))
-        self.assertEqual(list((paths.CACHE_DIR / "updates" / "1.2.3").iterdir()), [])
-
-    def test_missing_assets_and_bad_versions(self):
-        with self.assertRaises(RuntimeError): uw.download(self.release(sum_=None))
-        with self.assertRaises(RuntimeError): uw.download(self.release(tag="nightly"))
-
-    def test_only_github_hosts(self):
-        self.hosts.stop()
-        try:
-            with self.assertRaises(RuntimeError) as c: uw.download(self.release())
-            self.assertIn("not served from github.com", str(c.exception))
-        finally: self.hosts.start()
-
-    def test_cancel(self):
-        with self.assertRaises(RuntimeError): uw.download(self.release(), cancelled=lambda: True)
-        self.assertFalse((paths.CACHE_DIR / "updates" / "1.2.3" / uw.MSI_NAME).exists())
+    def test_refusals_pass_through(self):
+        from callido_restore import update
+        with mock.patch.object(update, "download_verified", side_effect=RuntimeError("the signature of x does not verify")):
+            with self.assertRaises(RuntimeError): uw.download({"tag_name": "v9.9.9"})
 
 
 class Helper(unittest.TestCase):
