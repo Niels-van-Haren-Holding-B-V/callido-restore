@@ -39,7 +39,7 @@
 <rect class="box" x="624" y="80" width="332" height="74" rx="8"/>
 <text class="h" x="636" y="101" text-anchor="start">app cache  ~/.hbk-explorer/cache</text>
 <text class="s" x="636" y="120" text-anchor="start">slices and bucket files on demand;</text>
-<text class="s" x="636" y="136" text-anchor="start">LRU ≤ 20 GB, 8 buckets at once</text>
+<text class="s" x="636" y="136" text-anchor="start">LRU ≤ 20 GB, several buckets at once</text>
 <path class="a" d="M224,117 L304,117"/>
 <text class="s" x="264.0" y="108" text-anchor="middle">read only</text>
 <path class="a" d="M544,117 L624,117"/>
