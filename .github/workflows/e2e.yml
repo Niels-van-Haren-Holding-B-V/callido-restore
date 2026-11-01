@@ -1,0 +1,76 @@
+name: e2e
+# End-to-end tests (tests/e2e, docs/handovers/2026-10-31-1530-claude-hbk6.md): synthetic backups with a real pool, the real app
+# process over HTTP, rclone remotes standing in for Google Drive and the NAS, and the UI in headless Chrome. Offline: the
+# remotes are rclone `alias` remotes on temporary folders, updates are never checked (HBK_NO_UPDATE_CHECK), nothing leaves the runner.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+jobs:
+  e2e:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-15]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    env:
+      HBK_NO_UPDATE_CHECK: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: rclone (pinned version, signed checksums verified like build_app.sh)
+        run: |
+          command -v gpg >/dev/null || brew install gnupg
+          scripts/fetch_rclone_ci.sh "$RUNNER_TEMP/rclone-bin"
+          echo "$RUNNER_TEMP/rclone-bin" >> "$GITHUB_PATH"
+      - name: Chrome
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            # the runner's kernel does not allow Chrome's user-namespace sandbox; the page under test is our own app
+            printf '#!/bin/sh\nexec /usr/bin/google-chrome --no-sandbox "$@"\n' > "$RUNNER_TEMP/chrome"; chmod +x "$RUNNER_TEMP/chrome"
+            echo "HBK_CHROME=$RUNNER_TEMP/chrome" >> "$GITHUB_ENV"
+          else
+            echo "HBK_CHROME=/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" >> "$GITHUB_ENV"
+          fi
+      - name: Engine flows incl. the stress layouts
+        run: HBK_E2E_STRESS=1 python -m unittest tests.e2e.test_e2e -v
+      - name: The app over HTTP (local backup, rclone remotes as Drive and NAS, damaged bucket, API guard)
+        run: HBK_E2E=1 HBK_E2E_STRESS=1 python -m unittest tests.e2e.test_app tests.e2e.test_app_more -v
+      - name: The app over HTTP on a backup with its own chunk table
+        run: HBK_E2E=1 HBK_E2E_CHUNK_INDEX=1 python -m unittest tests.e2e.test_app -v
+      - name: The UI in headless Chrome
+        env:
+          HBK_E2E_UI_OUT: ${{ runner.temp }}/ui
+        run: HBK_E2E_UI=1 python -m unittest tests.e2e.test_ui -v
+      - name: Keep the UI notes and screenshots
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-ui-${{ matrix.os }}
+          path: ${{ runner.temp }}/ui
+          if-no-files-found: ignore
+
+  e2e-windows:
+    # informative until the app-level tests have run green on Windows (hbk-5); no rclone and no Chrome here yet
+    runs-on: windows-latest
+    continue-on-error: true
+    timeout-minutes: 30
+    env:
+      HBK_NO_UPDATE_CHECK: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: The app over HTTP (local backup, damaged bucket, API guard; the rclone cases skip)
+        env:
+          HBK_E2E: "1"
+        run: python -m unittest tests.e2e.test_e2e tests.e2e.test_app tests.e2e.test_app_more -v
