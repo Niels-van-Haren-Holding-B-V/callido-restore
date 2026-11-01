@@ -9,6 +9,7 @@ A maintenance release for restores to a NAS. Install it from the header ("Versio
 - **Faster to the NAS.** Up to 8 files are uploaded at the same time, each with its own progress bar, and the line above them shows the speed to the NAS and the speed from the backup separately (#201, #202, #208).
 - **The download cache stays small.** Downloaded backup data only passes through: at most about 5 GB is kept while a restore runs (data left over by earlier, interrupted runs now counts too), and a finished restore deletes it (#208).
 - **Resume counts every file once.** After a Stop and Resume, files that had already finished are no longer counted again as skipped (#208).
+- **Clicks on the restore's progress bar work.** Stop and the red error count no longer miss a click while the bar redraws; the error count jumps to the error list (#210).
 - **Quit stops running uploads** on Windows and macOS, so no rclone process keeps running after the app closes (#202).
 - **Checking for updates no longer hangs.** Settings no longer stays at "checking…"; a check ends after 20 seconds and says why it failed (#203, #205, #206).
 
