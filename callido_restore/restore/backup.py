@@ -706,11 +706,13 @@ class Backup:
         # Speeds and time left, measured here over the last METER_S seconds (the page's own sampling of done_bytes jumped with every
         # finished or skipped file): bytes that moved to the target and from the backup, and bytes of files really restored.
         flow = {"upload": 0, "bucket": 0, "restored": 0}; samples = collections.deque(); last_s = [0.0]
+        high = {}                                               # per transfer: the most bytes already counted
         def meter(force=False):
             now = time.monotonic()
             if force or now - last_s[0] >= 1:
                 last_s[0] = now; samples.append((now, flow["upload"], flow["bucket"], flow["restored"]))
                 while len(samples) > 2 and now - samples[0][0] > METER_S: samples.popleft()
+            job["moved"] = {"upload": flow["upload"], "download": flow["bucket"]}   # bytes so far, each counted once
             t0, u0, d0, r0 = samples[0] if samples else (now, 0, 0, 0); dt = now - t0
             if dt < 3: return
             up, dl, rs = (flow["upload"] - u0) / dt, (flow["bucket"] - d0) / dt, (flow["restored"] - r0) / dt
@@ -720,7 +722,7 @@ class Backup:
         def tx_set(key, kind, name, done, total, rate):
             with lock:
                 if kind in ("upload", "bucket"):
-                    prev = tx.get(key, {}).get("done", 0); flow[kind] += max(0, int(done or 0) - prev)
+                    d = int(done or 0); flow[kind] += max(0, d - high.get(key, 0)); high[key] = max(high.get(key, 0), d)   # a retry restarting at 0 is not counted twice
                 tx[key] = {"kind": kind, "name": name, "done": int(done or 0), "total": int(total or 0), "rate": int(rate or 0)}
                 publish_tx()
         def tx_done(key):
@@ -786,7 +788,7 @@ class Backup:
             try:
                 path = self.src.ensure(rel, progress=lambda done, speed, note="": tx_set(key, "bucket", os.path.basename(rel), done, total, speed))
                 if already is None and path.is_file():
-                    with lock: flow["bucket"] += max(0, path.stat().st_size - tx.get(key, {}).get("done", 0))
+                    with lock: flow["bucket"] += max(0, path.stat().st_size - high.pop(key, 0))
             finally: tx_done(key)
             try:
                 with lock: got[bk] = path.stat().st_size; publish_tx()
@@ -861,7 +863,7 @@ class Backup:
                     if attempt < 2:
                         job["message"] = f"{name}: {err} — retrying"; time.sleep([2, 10][attempt]); continue
                     add_error(f, err); return "done"
-                with lock: flow["upload"] += max(0, f["size"] - tx.get(key, {}).get("done", 0))   # bytes no stats line reported
+                with lock: flow["upload"] += max(0, f["size"] - high.pop(key, 0))   # bytes no stats line reported
                 tx_done(key)                                                   # uploaded: the bar goes, the rename follows
                 for attempt in range(3):                                       # the complete file is at the temporary name now
                     try: moved = move_no_replace(part, f"{root}/{rel}"); break
@@ -876,7 +878,7 @@ class Backup:
                 add_error(f, e); return "done"
             finally:
                 tx_done(key)
-                with lock: bytes_done[0] += f["size"]; job["done_bytes"] = bytes_done[0]
+                with lock: bytes_done[0] += f["size"]; job["done_bytes"] = bytes_done[0]; high.pop(key, None)
                 if os.path.exists(out):
                     try: os.unlink(out)
                     except OSError: pass
