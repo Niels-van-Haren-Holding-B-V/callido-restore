@@ -49,8 +49,8 @@ Found by reading the code; each is a small, guarded change that leaves macOS unc
 ## Status (2026-11-01)
 
 Done: the MSI (#108) and the code changes above (#112), the MSI in every release from 0.4.0 (#116), a real-machine test on
-Windows 10 and 11 by Niels (install, Drive source, SMB connect to the NAS, restore to the NAS), SMB connect feedback and
-plain errors found in that test (#138, #139, #141, #143), restore errors in the UI and app.log (#160).
+Windows 10 and 11 by Niels (it included installing, connecting the NAS over SMB and a restore to the NAS), SMB connect
+feedback and plain errors found in that test (#138, #139, #141, #143), restore errors in the UI and app.log (#160).
 
 Open:
 
