@@ -7,11 +7,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]   # windows: T14 portability (tests/test_windows_compat.py runs its real Windows cases there)
+        os: [ubuntu-24.04, windows-latest]   # windows: T14 portability (tests/test_windows_compat.py runs its real Windows cases there)
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (node24)
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0 (node24)
         with:
           python-version: "3.12"
       - name: Install dependencies
