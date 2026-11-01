@@ -8,6 +8,7 @@
 - **A settings menu (⚙ in the header)** gathers every setting in one place: the NAS address, port, user and password (switch between a local and a VPN address; if the NAS does not answer after a change, the app says so and offers to put the old address back), your own Google key and signing in to Drive again, light, dark or system appearance, how updates are handled, and the cache with its size and a Clear button. Nothing else on the screens moved (#190, #196).
 - **Updates can install themselves.** In Settings → Updates choose "Install automatically", "Only mention" (the default) or "Don't check". Automatic installs wait until no restore or preparation is running, and announce the restart a minute ahead with a **Later** button (#195, #197, #198).
 - Photos and other files with an extra attribute block in the backup are also found by the fallback map used for backups without their own chunk table (#194).
+- When a step fails (connecting, loading a list, a job), the page shows the error at once instead of waiting a minute or spinning forever (#199).
 - The build and release machines use GitHub's current actions (Node 24) and a fixed Ubuntu version (#192).
 - **The app only answers its own window.** Requests from other web pages are refused, so a website cannot talk to the app running on your computer (#182, #184, #189).
 
