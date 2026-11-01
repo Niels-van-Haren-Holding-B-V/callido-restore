@@ -984,7 +984,9 @@ class Backup:
                 # room in the staging folder first: at most UPLOAD_WORKERS * 2 files and STAGE_MAX bytes wait for their upload
                 # (outside the bucket cache limit); one file always goes, however large
                 while inflight and (len(inflight) >= UPLOAD_WORKERS * 2 or sum(staged.values()) + f["size"] > STAGE_MAX): reap(block=True)
-                out = os.path.join(stage[root], rel); os.makedirs(os.path.dirname(out), exist_ok=True); ok = False
+                # staged under the plan index, not the backup's name: a Mac name such as "Icon\r" or "a:b" cannot exist on Windows, and
+                # the NAS gets the file under its own name (rel) from the upload below
+                out = os.path.join(stage[root], str(i)); os.makedirs(stage[root], exist_ok=True); ok = False
                 for attempt in range(3):
                     try: pool.extract(f["off"], out, size=f["size"], mtime=f["mtime"], job=None, fh_cache=fh_cache); ok = True; break
                     except Exception as e:
