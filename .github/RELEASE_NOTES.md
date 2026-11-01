@@ -1,5 +1,17 @@
 **Callido Restore** restores files from a Synology Hyper Backup (`.hbk`) without Hyper Backup or a working NAS. It reads the backup's own metadata, shows every backup run on a timeline, and restores the folders you pick to a NAS share or a local folder. Files already at the destination are never overwritten or deleted, and the backup source is only read.
 
+## What's new in 1.2.2
+
+**On Windows, install this version once by hand** (download `CallidoRestore-x64.msi` below): in 1.2.0 and 1.2.1 the update button is the broken part. Later versions then install themselves.
+
+- **Windows: updating from the app works.** In 1.2.0 and 1.2.1, "Install" closed the app on Windows without installing anything and without starting it again. The updater now starts first, and the app closes only once it runs; if it cannot start, the app stays open and says so (#212).
+- **Progress bars that move.** Every file being uploaded to the NAS has a bar that goes from 0 to 100 % (before, rclone reported only every 10 seconds, so a bar showed up at 100 %). Files whose data is still coming from Google Drive get their own bars too, in a "↓ Downloading from the backup" group next to "↑ Uploading to the target", each with its own speed, so you can see whether Google Drive or the NAS is the slow part (#214, #216).
+- **Speed and time left you can trust.** The main line shows the real speed to the NAS (it could say "0 B/s to the target" while files were uploading) and a time left based on what was really restored in the last 30 seconds, so it no longer climbs every time a file finishes (#216).
+- **Starting over a share that is mostly restored is much faster.** Files already at the target (same name and size) are skipped before anything is downloaded for them; before, their data was still fetched from Google Drive first. The progress line says "already at the target, skipped" (#214).
+- **"Restores you can resume" lists each restore once.** The restore that is running is no longer listed there, and starting or resuming a restore removes older saved copies of the same restore (#214).
+- **Resume keeps its counts** also when Stop came while the first file was uploading (#216).
+- **The app opens at once.** On some Macs it waited 35 seconds at start for a network name lookup; on Windows, starting it a second time finds the app that is already running (#213).
+
 ## What's new in 1.2.1
 
 A maintenance release for restores to a NAS. Install it from the header ("Version 1.2.1 is available") or by hand.
