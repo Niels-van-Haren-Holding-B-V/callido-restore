@@ -977,6 +977,7 @@ class Backup:
                             concurrent.futures.wait([fut], timeout=0.5)
                         with dl_lock:
                             if bk in downloaded: downloaded.move_to_end(bk)
+                    if job.get("cancel"): raise Stopped("stopped")            # the Stop may have ended the downloads themselves: no read then
                 except Stopped: raise
                 except Exception: pass
             root, rel = file_target(f, items, dest); remote_dest = is_remote_path(root); out = os.path.join(root, rel)
