@@ -24,7 +24,7 @@ class Download(unittest.TestCase):
 class Helper(unittest.TestCase):
     def test_hash_is_checked_again_before_msiexec(self):          # hbk-4: the cached MSI must not be swapped before UAC elevates it
         script = uw.helper_command(r"C:\c\x.msi", r"C:\P\a.exe", 1, r"C:\l.txt", "ab" * 32)[-1]
-        i_hash, i_check, i_msi = script.index("Get-FileHash -LiteralPath 'C:\\c\\x.msi'"), script.index("if ($h -ne '" + "AB" * 32 + "')"), script.index("Start-Process -FilePath 'msiexec.exe'")
+        i_hash, i_check, i_msi = script.index("[IO.File]::OpenRead('C:\\c\\x.msi')"), script.index("if ($h -ne '" + "AB" * 32 + "')"), script.index("Start-Process -FilePath 'msiexec.exe'")
         self.assertTrue(i_hash < i_check < i_msi)
         self.assertIn("throw ('the MSI changed after it was verified", script)
         for bad in (None, "", "zz" * 32, "ab" * 31): 

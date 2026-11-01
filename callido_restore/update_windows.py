@@ -46,7 +46,8 @@ def helper_command(msi, app_exe, pid, log, sha256):
         f"$ErrorActionPreference = 'Stop'; "
         f"try {{ Add-Content -LiteralPath {res} -Value ('helper started ' + (Get-Date -Format o)); "
         f"Wait-Process -Id {int(pid)} -Timeout 60 -ErrorAction SilentlyContinue; "
-        f"$h = (Get-FileHash -LiteralPath {_ps_quote(msi)} -Algorithm SHA256).Hash; "
+        # .NET, not Get-FileHash: that cmdlet is missing when powershell.exe inherits a PowerShell 7 module path
+        f"$s = [IO.File]::OpenRead({_ps_quote(msi)}); try {{ $h = [BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash($s)).Replace('-', '') }} finally {{ $s.Dispose() }}; "
         f"if ($h -ne '{sha256.upper()}') {{ throw ('the MSI changed after it was verified (sha256 ' + $h + '); not installing it') }}; "
         f"$p = Start-Process -FilePath 'msiexec.exe' -ArgumentList {msi_args} "
         f"-Wait -PassThru; "
