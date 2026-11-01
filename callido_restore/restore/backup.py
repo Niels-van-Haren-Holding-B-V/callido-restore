@@ -51,6 +51,31 @@ def mapper_phase(line):
     return s, None
 
 
+UPLOAD_STALL_S = 600          # an upload whose transferred bytes do not move for this long is ended and retried
+UPLOAD_STALLED, UPLOAD_CANCELLED = -999, -998
+
+def upload_watched(argv, cancelled=None, stall_s=None, poll_s=10):
+    """Run an rclone upload; returns (returncode, stderr tail). rclone reports its progress every ``poll_s`` seconds; when the
+    transferred bytes do not change for ``stall_s`` (a connection that stays open but carries nothing; seen over a VPN for two
+    hours) the process is ended and UPLOAD_STALLED is returned so the caller retries. ``cancelled()`` true (Stop) ends it at
+    once: UPLOAD_CANCELLED."""
+    stall_s = stall_s or UPLOAD_STALL_S
+    p = subprocess.Popen(argv + ["--stats", f"{poll_s}s", "--stats-one-line", "--stats-log-level", "NOTICE"], stdout=subprocess.DEVNULL,
+                         stderr=subprocess.PIPE, text=True, **popen_kw())
+    last = [time.time()]; seen = [None]; tail = []
+    def read():
+        for line in p.stderr:
+            tail.append(line); del tail[:-20]
+            m = re.search(r"([\d.]+ ?[KMGTP]?i?B) / ", line)
+            if m and m.group(1) != seen[0]: seen[0] = m.group(1); last[0] = time.time()
+    t = threading.Thread(target=read, daemon=True); t.start()
+    while p.poll() is None:
+        time.sleep(min(poll_s, 1))
+        if cancelled and cancelled(): p.kill(); p.wait(); t.join(2); return UPLOAD_CANCELLED, "".join(tail)
+        if time.time() - last[0] > stall_s: p.kill(); p.wait(); t.join(2); return UPLOAD_STALLED, "".join(tail)
+    t.join(2)
+    return p.returncode, "".join(tail)
+
 class Backup:
     def __init__(self, src: Source, log=None):
         """log(message) is called at every step of the scan, so a job can show progress (the first open of a remote backup
@@ -563,6 +588,7 @@ class Backup:
             if not start_at or k not in job: job[k] = zero if not isinstance(zero, list) else list(zero)
         if not start_at or "errors_total" not in job: job["errors_total"] = len(job["errors"])        # a seed without the counter: the list is all we know
         if not start_at or "unverified_total" not in job: job["unverified_total"] = len(job["unverified"])
+        stalled = set()                                         # files whose upload to a remote target stalled in this run
         # verified / identical_copy / unverified: per restored file, how its placement was established
         pool = self.pool; fh_cache = {}
         def restored(f):
@@ -661,10 +687,19 @@ class Backup:
                         out = os.path.join(stage[root], rel); os.makedirs(os.path.dirname(out), exist_ok=True)
                         pool.extract(f["off"], out, size=f["size"], mtime=f["mtime"], job=None, fh_cache=fh_cache)
                         # --ignore-existing: if the file appeared at the target since the listing, rclone leaves it alone
-                        r = subprocess.run([RCLONE, "moveto", out, f"{root}/{rel}", "--ignore-existing", "--retries", "5", "--low-level-retries", "20", "--retries-sleep", "5s"], capture_output=True, text=True, **popen_kw())
-                        if r.returncode != 0: raise RuntimeError("upload failed: " + r.stderr.strip()[-200:])
+                        rc, err = upload_watched([RCLONE, "moveto", out, f"{root}/{rel}", "--ignore-existing", "--retries", "5", "--low-level-retries", "20", "--retries-sleep", "5s"],
+                                                 cancelled=lambda: bool(job.get("cancel")))
+                        if rc == UPLOAD_CANCELLED:   # Stop during an upload: end it now; this file is uploaded again on resume
+                            job["next_index"] = i; job["message"] = "paused"; persist("paused"); return result(paused=True, next_index=i, bytes=done_bytes)
+                        if rc == UPLOAD_STALLED: stalled.add(rel); raise RuntimeError(f"upload stalled: no progress for {UPLOAD_STALL_S // 60} min (network or NAS not answering)")
+                        if rc != 0: raise RuntimeError("upload failed: " + err.strip()[-200:])
                         if os.path.exists(out):      # not moved: the target already had it
-                            os.unlink(out); job["skipped"] += 1; job["done_files"] += 1; break
+                            os.unlink(out)
+                            if rel in stalled:       # what is there may be the start of our own interrupted upload: say so, never overwrite
+                                job["errors"].append({"path": f"{f['share']}/{f['path']}", "error": "an upload of this file was interrupted and a file is at the "
+                                                      "target now; check its size, delete it if it is incomplete, and restore this file again"})
+                                job["errors_total"] += 1; break                # an error, like a failed upload: not counted as done
+                            job["skipped"] += 1; job["done_files"] += 1; break
                         restored(f); break
                     if os.path.lexists(out):         # anything already there is kept as is, whatever its size or date
                         job["skipped"] += 1; job["done_files"] += 1; break
