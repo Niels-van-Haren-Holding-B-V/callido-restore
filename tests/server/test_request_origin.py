@@ -1,7 +1,7 @@
 """The local API refuses requests from other web pages (DNS rebinding, cross-site requests) and serves its own window and
 command-line tools."""
 import json, threading, unittest
-from http.server import ThreadingHTTPServer
+from callido_restore.server.api import LocalServer
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError
 
@@ -38,7 +38,7 @@ class Refusal(unittest.TestCase):
 
 class OverHttp(unittest.TestCase):
     def setUp(self):
-        self.srv = ThreadingHTTPServer(("127.0.0.1", 0), api.H); threading.Thread(target=self.srv.serve_forever, daemon=True).start()
+        self.srv = LocalServer(("127.0.0.1", 0), api.H); threading.Thread(target=self.srv.serve_forever, daemon=True).start()
         self.port = self.srv.server_address[1]
     def tearDown(self): self.srv.shutdown(); self.srv.server_close()
 

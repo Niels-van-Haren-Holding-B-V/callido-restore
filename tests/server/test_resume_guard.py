@@ -1,6 +1,6 @@
 """/api/restore/resume never starts a second restore: 409 while that job or any restore runs (hbk-4 on #187)."""
 import json, tempfile, threading, unittest
-from http.server import ThreadingHTTPServer
+from callido_restore.server.api import LocalServer
 from pathlib import Path
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError
@@ -13,7 +13,7 @@ class ResumeGuard(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(); self.old = paths.JOBS_DIR; paths.JOBS_DIR = Path(self.tmp.name)
         (paths.JOBS_DIR / "6135a4c2a9").with_suffix(".json").write_text(json.dumps({"id": "6135a4c2a9", "state": "paused", "src": "x", "items": []}))
-        self.srv = ThreadingHTTPServer(("127.0.0.1", 0), api.H); threading.Thread(target=self.srv.serve_forever, daemon=True).start()
+        self.srv = LocalServer(("127.0.0.1", 0), api.H); threading.Thread(target=self.srv.serve_forever, daemon=True).start()
         self.port = self.srv.server_address[1]; self.saved = dict(api.JOBS)
 
     def tearDown(self):

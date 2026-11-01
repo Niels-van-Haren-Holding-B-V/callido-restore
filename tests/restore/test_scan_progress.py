@@ -2,7 +2,7 @@
 which takes seconds per step): ``Backup(src, log)`` calls ``log`` per step, and ``/api/open?job=1`` runs the scan as a job whose
 message follows those steps, after which a plain ``/api/open`` returns the info."""
 import json, os, tempfile, threading, time, unittest
-from http.server import ThreadingHTTPServer
+from callido_restore.server.api import LocalServer
 from pathlib import Path
 from urllib.request import urlopen
 
@@ -36,7 +36,7 @@ class ScanProgressTests(unittest.TestCase):
 
     def test_open_as_job_then_info(self):
         SOURCES["scan"] = self.src; BACKUPS.pop("scan", None)
-        srv = ThreadingHTTPServer(("127.0.0.1", 0), H); threading.Thread(target=srv.serve_forever, daemon=True).start()
+        srv = LocalServer(("127.0.0.1", 0), H); threading.Thread(target=srv.serve_forever, daemon=True).start()
         try:
             base = f"http://127.0.0.1:{srv.server_address[1]}"
             with urlopen(base + "/api/open?src=scan&job=1") as r: j = json.loads(r.read())

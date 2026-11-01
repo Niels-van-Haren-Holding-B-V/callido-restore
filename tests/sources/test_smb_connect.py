@@ -1,7 +1,7 @@
 """SMB connect feedback (Niels on Windows: "slow, no progress, not sure it went well"): the host as people type it, live
 elapsed-time messages while rclone works, and the API's early checks."""
 import json, threading, time, unittest
-from http.server import ThreadingHTTPServer
+from callido_restore.server.api import LocalServer
 from unittest import mock
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
@@ -78,7 +78,7 @@ class Elapsed(unittest.TestCase):
 
 class ConnectApi(unittest.TestCase):
     def setUp(self):
-        self.srv = ThreadingHTTPServer(("127.0.0.1", 0), H)
+        self.srv = LocalServer(("127.0.0.1", 0), H)
         threading.Thread(target=self.srv.serve_forever, daemon=True).start()
     def tearDown(self):
         self.srv.shutdown(); self.srv.server_close()

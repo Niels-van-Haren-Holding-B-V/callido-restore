@@ -1,13 +1,12 @@
 """Entry point: start the local server, show the UI in a native window (or the browser with --browser), log to app.log when
 frozen. Usage: python -m callido_restore [--port 8765] [--browser | --no-window] [--smoke]"""
 import argparse, os, subprocess, sys, threading
-from http.server import ThreadingHTTPServer
 from pathlib import Path
 from callido_restore import paths
 from callido_restore.about import APP_NAME, VERSION
 from callido_restore.paths import RCLONE, _bundled, _resource_roots
 from callido_restore.restore.jobs import JOBS
-from callido_restore.server.api import H, _exit_app, start_auto_update
+from callido_restore.server.api import H, _exit_app, start_auto_update, LocalServer
 from callido_restore.sources import rclone
 from callido_restore.sources.source import load_sources
 
@@ -99,7 +98,7 @@ def main():
         try: signal.signal(sig, lambda *_: _exit_app(0))
         except (ValueError, OSError): pass
     windowed = not a.no_window and not a.browser
-    try: srv = ThreadingHTTPServer(("127.0.0.1", a.port), H)
+    try: srv = LocalServer(("127.0.0.1", a.port), H)
     except OSError as e:
         if _already_running(a.port):
             _log(f"already running on port {a.port}; showing the running instance")
