@@ -433,7 +433,7 @@ async function setCache(){const el=$('#setCache');let c;try{c=await api('/api/ca
       $('#setClearNo').onclick=()=>setCache();return}
     b.disabled=true;$('#setCacheMsg').innerHTML='<span class="spin"></span> Clearing…';
     try{const r=await post('/api/cache/clear',{});toast(`Cleared ${human(r.freed)}${r.left?` (${human(r.left)} still in use)`:''}.`,{kind:'ok'});setCache()}catch(e){$('#setCacheMsg').textContent=e.message;b.disabled=false}}}
-function openSettings(){$('#dlgSettings').showModal();SET.editing=null;setConns();setTheme();setCache();updPoll(false).then(setUpdates)}
+function openSettings(){$('#dlgSettings').showModal();SET.editing=null;setConns();setTheme();setCache();if(UPD.st){updRender(UPD.st);setUpdates()}updPoll(false).then(setUpdates)}
 $('#setUpdCheck').onclick=async()=>{$('#setUpdState').innerHTML='<span class="spin"></span> checking…';const st=await updPoll(true);setUpdates();if(!st)$('#setUpdState').textContent='updates are not available in this version'};
 $('#settingsBtn').onclick=openSettings;$('#settingsClose').onclick=()=>$('#dlgSettings').close();
 updPoll(false);
