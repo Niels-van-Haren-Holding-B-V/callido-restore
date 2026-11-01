@@ -267,6 +267,17 @@ class RestoreApiTests(_Fixture):
         try: self.assertNotIn(j["id"], [x["id"] for x in self.get("/api/jobs/saved")])
         finally: JOBS[j["id"]]["state"] = "done"
 
+    def test_compare_endpoint_runs_a_job_and_writes_nothing(self):
+        code, j = self.post("/api/compare", {"src": "t8", "dest": "", "items": self.items})
+        self.assertEqual(code, 200)
+        for _ in range(100):
+            job = self.get(f"/api/job?id={j['id']}")
+            if job["state"] != "running": break
+            time.sleep(0.05)
+        self.assertEqual(job["state"], "done", job); r = job["result"]
+        self.assertEqual((r["files"], r["same"], r["missing"]), (4, 0, 4))
+        self.assertEqual(self.b.pool.extracted, []); self.assertEqual(os.listdir(self.dA), [])
+
     def test_mapped_target_inside_backup_is_refused(self):
         bad = [dict(self.items[0]), dict(self.items[1], dest=os.path.join(self.src.local, "Pool"))]
         code, out = self.post("/api/restore", {"src": "t8", "dest": "", "items": bad})

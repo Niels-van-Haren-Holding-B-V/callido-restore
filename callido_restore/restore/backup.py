@@ -67,6 +67,7 @@ _LIVE = set(); _LIVE_LOCK = threading.Lock()           # running upload processe
 
 CACHE_GB = 5                                      # downloaded backup data kept on this computer during a restore (HBK_CACHE_GB)
 PART_SUFFIX = ".callido-restore.part"             # an upload's name on the target until it is complete
+COMPARE_LIST_MAX = 2000                           # files listed by name in a comparison (the counts cover all)
 CHECK_ROUNDS = 2                                  # the final check restores missing files again this many times
 CHECK_WAIT_S = 120                                # and first waits this long when an upload failed (the NAS had the file in use)
 PARTIAL_RE = re.compile(r"^(.*)\.[0-9a-f]{8}\.partial$")   # rclone's temporary name while it uploads <name>
@@ -609,6 +610,34 @@ class Backup:
                 root, rel = file_target(mine[0], items, dest)
                 m["sample_from"] = f"{mine[0]['share']}/{mine[0]['path']}"; m["sample_to"] = (f"{root}/{rel}" if is_remote_path(root) else ui_path(f"{root}/{rel}")) if root else rel   # Windows: one separator
         return {"files": len(files), "bytes": sum(f["size"] for f in files), "mappings": out, "sample": [f"{f['share']}/{f['path']}" for f in files[:20]]}
+    def compare_target(self, items, dest, job, skip_meta=True):
+        """Compare the selected items of a backup run with what is at their targets (the same mapping as a restore: H8), by
+        name and size, reading nothing but listings. For a folder restored some other way (Niels restored folders from the NAS
+        himself): which files of the backup are not there, which are there with another size. One recursive listing per NAS
+        target; a local target is looked at file by file. Nothing is written anywhere."""
+        files = self.restore_plan(items, skip_meta); roots = restore_roots(items, dest); sizes = {}
+        for root in roots:
+            if is_remote_path(root):
+                job["message"] = f"listing {root}"
+                sizes[root] = destination_sizes(root)
+        job["message"] = "comparing"; same = same_b = 0; missing = []; differs = []; folders = collections.Counter(); fbytes = collections.Counter()
+        for n, f in enumerate(files):
+            root, rel = file_target(f, items, dest)
+            have = sizes[root].get(rel) if is_remote_path(root) else local_size(os.path.join(root, rel))
+            pth = f"{f['share']}/{f['path']}"
+            if have == f["size"]: same += 1; same_b += f["size"]
+            elif have is None:
+                missing.append({"path": pth, "size": f["size"]})
+                top = "/".join(pth.split("/")[:-1][:3]) or f["share"]; folders[top] += 1; fbytes[top] += f["size"]
+            else: differs.append({"path": pth, "at_target": have, "in_backup": f["size"]})
+            if n % 2000 == 0: job["progress"] = n / max(1, len(files))
+        job["progress"] = 1.0
+        log(f"compare: {len(files)} files: {same} at the target, {len(missing)} missing, {len(differs)} with another size")
+        return {"files": len(files), "bytes": sum(f["size"] for f in files), "same": same, "same_bytes": same_b,
+                "missing": len(missing), "missing_bytes": sum(m["size"] for m in missing), "differs": len(differs),
+                "missing_list": missing[:COMPARE_LIST_MAX], "differs_list": differs[:COMPARE_LIST_MAX],
+                "missing_by_folder": [{"folder": k, "files": v, "bytes": fbytes[k]} for k, v in folders.most_common(50)],
+                "roots": roots}
     def restore(self, items, dest, job, skip_meta=True, start_at=0):
         """Restore the selected items. An item with its own 'dest' gets its contents there (H8: one target per folder);
         the others go under dest as <share>/<path>. A file already at a destination is kept, whatever its date: with the
