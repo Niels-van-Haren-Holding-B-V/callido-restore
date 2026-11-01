@@ -157,6 +157,14 @@ def _fetch_small(rel, name, timeout=30):
 
 
 # ----------------------------------------------------------------------------- the check
+def _proxy_for_log(url):
+    """scheme://host:port of a proxy setting, never the user:password@ it may carry."""
+    try:
+        u = urllib.parse.urlparse(url if "://" in url else "http://" + url)
+        return f"{u.scheme}://{u.hostname}" + (f":{u.port}" if u.port else "")
+    except ValueError: return "(unreadable)"
+
+
 def _fetch_latest(box):
     try: box["rel"] = latest_release()
     except Exception as e: box["err"] = e
@@ -167,7 +175,7 @@ def _check_now():
     proxy that accepts and then stalls (seen on Windows), so the fetch runs in its own thread and is abandoned after the deadline."""
     t0 = time.time(); box = {}
     try:
-        proxies = {k: v for k, v in urllib.request.getproxies().items() if k in ("https", "all")}
+        proxies = {k: _proxy_for_log(v) for k, v in urllib.request.getproxies().items() if k in ("https", "all")}
         log(f"checking {API}" + (f" through proxy {proxies}" if proxies else ""))
         w = threading.Thread(target=_fetch_latest, args=(box,), daemon=True, name="update-fetch"); w.start(); w.join(CHECK_DEADLINE)
         if w.is_alive(): raise TimeoutError(f"no answer from GitHub within {CHECK_DEADLINE} s (network, proxy or firewall)")

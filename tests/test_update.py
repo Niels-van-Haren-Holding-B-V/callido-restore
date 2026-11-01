@@ -305,3 +305,11 @@ class CheckDeadline(Fixture):
         with mock.patch.object(update, "latest_release", return_value=self.rel): update._check_now()
         p = mock.patch.object(update, "_checking", [True]); p.start(); self.addCleanup(p.stop)
         self.assertIsNone(update.status()["error"])
+
+
+class ProxyLog(unittest.TestCase):
+    def test_no_credentials_in_the_log(self):
+        self.assertEqual(update._proxy_for_log("http://user:secret@192.0.2.10:3128"), "http://192.0.2.10:3128")
+        self.assertEqual(update._proxy_for_log("proxy.example:8080"), "http://proxy.example:8080")
+        self.assertEqual(update._proxy_for_log("https://proxy.example"), "https://proxy.example")
+        self.assertNotIn("secret", update._proxy_for_log("socks5://a:secret@[::1]:1080"))
