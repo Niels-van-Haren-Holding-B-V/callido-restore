@@ -176,8 +176,7 @@ class UploadsToANasStopAndResume(unittest.TestCase):
         self.assertEqual(R["strays_after_resume"], [], "no temporary or stray files may stay on the NAS: " + R["report"])
         self.assertEqual(R["final"]["state"], "done", R["final"].get("error")); self.assertEqual(R["final"]["errors"], [])
 
-    @unittest.expectedFailure
-    def test_2_resume_leaves_no_truncated_file(self):
+    def test_2_resume_leaves_no_truncated_file(self):          # E9, fixed in #208
         """hbk-6 finding E9: Stop kills the running `rclone moveto`s; the target keeps each partial upload under its final name
         (WebDAV here; SMB unverified), and Resume skips it as "already there" (--ignore-existing): the restore ends with
         0 errors and the files that were in flight truncated on the NAS."""
@@ -185,8 +184,7 @@ class UploadsToANasStopAndResume(unittest.TestCase):
         self.assertEqual(R["truncated"], [], "after Stop no file under its final name may be part of an upload: " + R["report"])
         for k in ("missing", "wrong_bytes", "extra"): self.assertEqual(R["cmp"][k], [], f"{k}: " + R["report"])
 
-    @unittest.expectedFailure
-    def test_3_resume_counts_every_file_once(self):
+    def test_3_resume_counts_every_file_once(self):            # E10, fixed in #208
         """hbk-6 finding E10: Resume restarts at the oldest unfinished file; the files that finished before Stop are seeded
         as restored and counted again as skipped (e.g. 21 restored + 21 skipped for 25 files)."""
         R = self.run_flow(); r = R["final"]["result"]
