@@ -134,7 +134,7 @@ label.f{display:grid;gap:4px;margin-bottom:10px;font-size:12.5px;color:var(--mut
 .empty b{color:var(--ink);font-size:15px;font-weight:600}.empty p{margin:0;max-width:460px}
 .empty img{width:72px;height:72px;border-radius:16px;box-shadow:var(--shadow)}
 details.adv{margin:8px 0 0}
-.xfgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:4px 12px}.xfgrid.small{grid-template-columns:repeat(auto-fill,minmax(210px,1fr))}.xf{min-width:0}.xfh{display:flex;justify-content:space-between;gap:6px;font-size:11.5px}.xfh .help{white-space:nowrap;flex:none}.xfn{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.prog.thin{height:4px}.xf .prog{width:100%}
+.xfgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:4px 12px}.xf{min-width:0}.xfh{display:flex;justify-content:space-between;gap:6px;font-size:11.5px}.xfh .help{white-space:nowrap;flex:none}.xfn{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.prog.thin{height:4px}.xf .prog{width:100%}
 .setSec{border-top:1px solid var(--line,#ddd);padding:8px 0 10px}.setSec h4{margin:0 0 4px;font-size:13px}.setSec table{width:100%}.setSec td{padding:4px 6px;vertical-align:middle}
 #dlgSrc.keyOnly #ws1>p,#dlgSrc.keyOnly label:has(input[name=wsk]:not([value=existing])),#dlgSrc.keyOnly #wsDrive,#dlgSrc.keyOnly #wsSmb{display:none}   /* key-only mode: just the connection and its key */
 details.adv summary{cursor:pointer;color:var(--muted);font-size:12.5px;list-style:none;display:inline-flex;align-items:center;gap:4px;user-select:none}
@@ -374,7 +374,7 @@ $('#updGo').onclick=async()=>{const go=$('#updGo');go.disabled=true;go.textConte
 $('#updAuto').onchange=async()=>{const a=$('#updAuto');try{updRender(await post('/api/update/settings',{check:a.checked}))}catch(e){a.checked=!a.checked;toastError(e)}};
 $('#updCheck').onclick=async()=>{$('#updState').innerHTML='<span class="spin"></span> checking…';const st=await updPoll(true);if(!st)$('#updState').textContent='updates are not available in this version'};
 // ---------- settings (⚙): connections, backups, updates, cache in one place
-const SET={editing:null};const XF={open:true};   // XF.open: the downloads grid stays as the user left it
+const SET={editing:null};
 // A NAS connection is saved before it is tested (so a NAS that only answers elsewhere, over Tailscale for example, can be set up).
 // When the test fails, read back what is saved: if the connection changed, say "saved, but the NAS did not answer" and offer to
 // put the previous address and user back; if nothing changed, it really was "not saved" (hbk-6's U9).
@@ -494,7 +494,8 @@ function progressHtml(job,rich,extra){const stoppedEarly=!!(job.result&&job.resu
   // note has its own small line under the bar, so the main line keeps its shape from poll to poll.
   const slots=[];
   if(dlDone)slots.push(String(job.label||'').startsWith('restore')?`${human(job.total_bytes)} · ${pct}%`:`${human(job.total_bytes)} downloaded · ${pct}%`);   // a restore from a local backup downloads nothingelse if(job.total_bytes)slots.push(`${human(job.done_bytes||0)} of ${human(job.total_bytes)} (${pct}%)`);else slots.push(`${pct}%`);
-  if(running&&job.total_bytes&&!dlDone)slots.push(speedText(job.id));
+  if(running&&Array.isArray(job.transfers)&&job.transfers.length){const r=job.transfers.filter(x=>x.kind==='upload').reduce((s,x)=>s+(x.rate||0),0);slots.push(r?human(r)+'/s':speedText(job.id))}   // parallel files: their own rates
+  else if(running&&job.total_bytes&&!dlDone)slots.push(speedText(job.id));
   if(running)slots.push(eta||'time left: estimating…');
   if(running)slots.push(`${sinceText(job.started)} elapsed`);
   if(running&&!(job.progress>0)&&!(job.done_bytes>0))
@@ -927,17 +928,13 @@ async function tabRestore(){const el=$('#tab-restore');
     try{const j=await post('/api/restore',{src:S.src,dest,items:its,skip_meta:skip});if(g)g.textContent='Restoring…';showSaved();watchRestore(j.id)}
     catch(e){$('#rsProg').innerHTML='';if(g){g.disabled=false;g.textContent='Start restore'}toastError(e)}};
   // Parallel transfers of a running restore (hbk-1's engine: job.transfers = [{kind: download|upload, name, done, total, rate}],
-  // every ~2 s): files being written first, one small bar each; bucket downloads below in a compact grid with a summary line.
-  // Shown only while the restore runs; nothing when the engine does not report them.
+  // every ~2 s): one small bar per file being restored (name, %, speed). The backup's internal downloads are not shown (Niels:
+  // "I just want the files"). Shown only while the restore runs; nothing when the engine does not report transfers.
   const xferBar=x=>{const pct=x.total?Math.min(100,Math.round(100*(x.done||0)/x.total)):null;const nm=String(x.name||'');const short=nm.split('/').pop()||nm;
     return `<div class="xf" title="${esc(nm)}"><div class="xfh"><span class="xfn mono">${esc(short)}</span><span class="help">${pct==null?human(x.done||0):pct+' %'}${x.rate?' · '+human(x.rate)+'/s':''}</span></div><div class="prog thin"><i style="width:${pct==null?100:pct}%"></i></div></div>`};
-  const showXfers=job=>{const el=$('#rsXfers');if(!el)return;const xs=job.state==='running'&&Array.isArray(job.transfers)?job.transfers:[];
-    if(!xs.length){el.innerHTML='';return}
-    const up=xs.filter(x=>x.kind==='upload'),dn=xs.filter(x=>x.kind!=='upload');const sum=a=>a.reduce((s,x)=>s+(x.rate||0),0);
-    const open=XF.open;
-    el.innerHTML=(up.length?`<div class="help" style="margin:6px 0 2px">Writing ${up.length} file${up.length===1?'':'s'}${sum(up)?' · '+human(sum(up))+'/s':''}</div><div class="xfgrid">${up.map(xferBar).join('')}</div>`:'')+
-      (dn.length?`<details id="xfDn" ${open?'open':''}><summary class="help" style="margin:6px 0 2px">Downloading ${dn.length} part${dn.length===1?'':'s'} of the backup${sum(dn)?' · '+human(sum(dn))+'/s':''}</summary><div class="xfgrid small">${dn.map(xferBar).join('')}</div></details>`:'');
-    const d=$('#xfDn');if(d)d.ontoggle=()=>{XF.open=d.open}};
+  const showXfers=job=>{const el=$('#rsXfers');if(!el)return;const xs=job.state==='running'&&Array.isArray(job.transfers)?job.transfers.filter(x=>x.kind==='upload'):[];
+    if(!xs.length){el.innerHTML='';return}const rate=xs.reduce((s,x)=>s+(x.rate||0),0);
+    el.innerHTML=`<div class="help" style="margin:6px 0 2px">Restoring ${xs.length} file${xs.length===1?'':'s'} at the same time${rate?' · '+human(rate)+'/s':''}</div><div class="xfgrid">${xs.map(xferBar).join('')}</div>`};
   const watchRestore=id=>{$('#rsProg').innerHTML='<h4 style="font-size:12.5px;margin:6px 0 2px">Restoring</h4><div id="rsBar"></div><div id="rsXfers"></div>';
     pollJob(id,$('#rsBar'),job=>{const g=$('#rsGo');if(g){g.disabled=false;g.textContent='Start restore'}showSaved();const stopped=!!(job.result&&job.result.paused);$('#rsProg').querySelector('h4').textContent=stopped?'Restore stopped':job.state==='error'?'Restore failed':'Restore finished';$('#rsProg').innerHTML+=`<p><b>${stopped?'Stopped':'Done'}:</b> ${job.result?`${job.result.restored} restored · ${job.result.skipped} skipped · ${job.result.errors} errors · ${human(job.result.bytes)}${verifyText(job.result)}`:esc(job.error||'')}</p>`+(stopped?`<div class="row" style="margin:0 0 6px"><button class="small primary" id="rsResume">Resume</button><span class="help">It keeps its progress and goes on with the next file.</span></div>`:'');
       const rr=$('#rsResume');if(rr)rr.onclick=async()=>{rr.disabled=true;rr.textContent='Resuming…';try{await post('/api/restore/resume',{id:job.id});tabRestore()}catch(e){toastError(e);rr.disabled=false;rr.textContent='Resume'}};
