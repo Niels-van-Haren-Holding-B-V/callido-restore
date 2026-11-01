@@ -13,6 +13,7 @@ from unittest import mock
 
 from callido_restore import paths
 from callido_restore.restore.backup import Backup
+from callido_restore.restore import backup as backup_mod
 from callido_restore.restore.destination import list_destination, place_file
 
 
@@ -227,12 +228,17 @@ class RestoreLoopRemote(unittest.TestCase):
             self.calls.append(cmd)
             if cmd[1] == "lsjson":
                 return subprocess.CompletedProcess(cmd, 0, stdout=json.dumps([{"Path": "share/a.txt", "Size": 3}]), stderr="")
-            if cmd[1] == "moveto":
-                staged, target = cmd[2], cmd[3]
-                if not target.endswith("/c.txt"): os.unlink(staged)        # moved; c.txt "appeared" after the listing: left in place
-                return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
             raise AssertionError(cmd)
+        def upload(cmd, cancelled=None, **kw):
+            self.calls.append(cmd)
+            staged, target = cmd[2], cmd[3]
+            if target in self.stall_once: self.stall_once.discard(target); return backup_mod.UPLOAD_STALLED, ""
+            if not target.endswith("/c.txt") and target not in self.partial: os.unlink(staged)   # moved; c.txt "appeared" after the listing
+            return 0, ""
+        self.stall_once = set(); self.partial = set()
         p = mock.patch.object(subprocess, "run", side_effect=run); p.start(); self.addCleanup(p.stop)
+        p = mock.patch.object(backup_mod, "upload_watched", side_effect=upload); p.start(); self.addCleanup(p.stop)
+        p = mock.patch.object(backup_mod.time, "sleep", lambda s: None); p.start(); self.addCleanup(p.stop)
 
     def test_listed_and_late_files_are_skipped_others_uploaded(self):
         b = _fake_backup("nas:Restore", [("a.txt", 5, 1), ("b.txt", 4, 2), ("c.txt", 3, 3)])
@@ -243,6 +249,45 @@ class RestoreLoopRemote(unittest.TestCase):
         self.assertTrue(all("--ignore-existing" in c for c in moves))
         self.assertEqual((res["files"], res["restored"], res["skipped"], res["errors"]), (3, 1, 2, 0))
         self.assertEqual(b.pool.calls, ["b.txt", "c.txt"])
+
+
+    def test_a_stalled_upload_is_retried_and_an_interrupted_one_reported(self):
+        # b.txt stalls once and then uploads; d.txt stalls once and on the retry the target already holds a file (the start of
+        # the interrupted upload): reported as an error, never overwritten, never counted as skipped.
+        b = _fake_backup("nas:Restore", [("b.txt", 4, 2), ("d.txt", 6, 4)])
+        self.stall_once = {"nas:Restore/share/b.txt", "nas:Restore/share/d.txt"}; self.partial = {"nas:Restore/share/d.txt"}
+        job = {"id": "t5", "label": "restore", "started": 0.0}
+        res = b.restore([{"share": "share", "ver": 1, "path": "", "is_dir": True}], "nas:Restore", job)
+        self.assertEqual((res["restored"], res["skipped"], res["errors"]), (1, 0, 1))
+        self.assertIn("interrupted", job["errors"][0]["error"])
+
+    def test_stop_during_an_upload_pauses_at_that_file(self):
+        b = _fake_backup("nas:Restore", [("b.txt", 4, 2), ("e.txt", 5, 5)]); job = {"id": "t6", "label": "restore", "started": 0.0}
+        def upload(cmd, cancelled=None, **kw):
+            job["cancel"] = True; return backup_mod.UPLOAD_CANCELLED, ""
+        with mock.patch.object(backup_mod, "upload_watched", side_effect=upload):
+            res = b.restore([{"share": "share", "ver": 1, "path": "", "is_dir": True}], "nas:Restore", job)
+        self.assertTrue(res["paused"]); self.assertEqual(res["next_index"], 0)
+
+
+class UploadWatchdog(unittest.TestCase):
+    """upload_watched with a stand-in for rclone that prints its one-line stats to stderr."""
+    def run_fake(self, script, **kw):
+        import sys
+        return backup_mod.upload_watched([sys.executable, "-c", script], poll_s=1, **kw)
+
+    def test_progress_then_success(self):
+        rc, _ = self.run_fake("import sys,time\nfor i in range(3): print(f'{i} MiB / 3 MiB, 33%', file=sys.stderr, flush=True); time.sleep(0.3)", stall_s=5)
+        self.assertEqual(rc, 0)
+
+    def test_no_progress_is_a_stall(self):
+        rc, _ = self.run_fake("import sys,time\nprint('1 MiB / 3 MiB', file=sys.stderr, flush=True)\ntime.sleep(30)", stall_s=2)
+        self.assertEqual(rc, backup_mod.UPLOAD_STALLED)
+
+    def test_stop_ends_it_at_once(self):
+        import time as _t
+        t = _t.time(); rc, _ = self.run_fake("import time\ntime.sleep(30)", stall_s=60, cancelled=lambda: _t.time() - t > 1)
+        self.assertEqual(rc, backup_mod.UPLOAD_CANCELLED); self.assertLess(_t.time() - t, 10)
 
 
 class NoOverwriteParameter(unittest.TestCase):
