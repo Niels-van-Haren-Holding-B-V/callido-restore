@@ -26,6 +26,7 @@ from callido_restore.about import REPO, UPDATE_PUBLIC_KEYS, VERSION
 
 API = f"https://api.github.com/repos/{REPO}/releases/latest"
 CHECK_EVERY = 24 * 3600
+CHECK_DEADLINE = 20                                                # seconds a check may take in all (DNS has no timeout of its own)
 ASSET_HOSTS = {"github.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com"}
 UA = {"User-Agent": f"CallidoRestore/{VERSION}"}
 _lock = threading.Lock(); _checking = [False]
@@ -156,13 +157,26 @@ def _fetch_small(rel, name, timeout=30):
 
 
 # ----------------------------------------------------------------------------- the check
+def _fetch_latest(box):
+    try: box["rel"] = latest_release()
+    except Exception as e: box["err"] = e
+
+
 def _check_now():
+    """One check, at most ``CHECK_DEADLINE`` seconds: the socket timeout covers connect and reads, but not the name lookup or a
+    proxy that accepts and then stalls (seen on Windows), so the fetch runs in its own thread and is abandoned after the deadline."""
+    t0 = time.time(); box = {}
     try:
-        rel = latest_release()
+        proxies = {k: v for k, v in urllib.request.getproxies().items() if k in ("https", "all")}
+        log(f"checking {API}" + (f" through proxy {proxies}" if proxies else ""))
+        w = threading.Thread(target=_fetch_latest, args=(box,), daemon=True, name="update-fetch"); w.start(); w.join(CHECK_DEADLINE)
+        if w.is_alive(): raise TimeoutError(f"no answer from GitHub within {CHECK_DEADLINE} s (network, proxy or firewall)")
+        if "err" in box: raise box["err"]
+        rel = box["rel"]
         d = _read(); d.update(checked=time.time(), release={k: rel.get(k) for k in ("tag_name", "name", "body", "html_url", "assets")}, error=None)
-        _write(d); log(f"latest release {rel.get('tag_name')} (running {VERSION})")
-    except (urllib.error.URLError, OSError, ValueError, TimeoutError, RuntimeError) as e:
-        d = _read(); d.update(checked=time.time(), error=str(e)[:200]); _write(d); log(f"check failed: {str(e)[:200]}")
+        _write(d); log(f"latest release {rel.get('tag_name')} (running {VERSION}) in {time.time() - t0:.1f} s")
+    except Exception as e:
+        d = _read(); d.update(checked=time.time(), error=str(e)[:200]); _write(d); log(f"check failed after {time.time() - t0:.1f} s: {str(e)[:200]}")
     finally:
         _checking[0] = False
 
@@ -175,6 +189,7 @@ def status(force=False):
             _checking[0] = True; threading.Thread(target=_check_now, daemon=True, name="update-check").start()
     rel = d.get("release") or {}; tag = rel.get("tag_name") or ""; avail = bool(tag) and newer(tag); asset = platform_asset()
     return {"current": VERSION, "check": check_enabled(), "mode": mode(), "auto": mode() == "auto", "checking": _checking[0], "checked": d.get("checked"),
+            "error": d.get("error"),                                   # why the last check failed (None after a good one)
             "available": avail, "latest": tag.lstrip("v"), "name": rel.get("name") or tag, "notes": rel.get("body") or "",
             "url": rel.get("html_url") or f"https://github.com/{REPO}/releases/latest", "asset": asset,
             "signed_updates": bool(UPDATE_PUBLIC_KEYS),

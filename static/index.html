@@ -353,7 +353,9 @@ async function updFetch(check){try{const r=await fetch('/api/update'+(check?'?ch
 function updRender(st){UPD.st=st;const n=$('#updNote');if(!n)return;
   if(!st||!st.available){n.style.display='none'}else{n.style.display='inline-flex';$('#updText').textContent=`Version ${st.latest} is available`;
     $('#updMore').textContent=st.installable?"What's new · Update now":"What's new · Download"}
-  const s=$('#updState');if(s)s.textContent=!st?'':st.checking?'checking…':st.available?`version ${st.latest} is available`:`this is the newest version (${st.current})`;
+  // About and Settings both show it; the 4 s re-poll after "Check now" must reach both, or one stays at "checking…"
+  const t=!st?'':st.checking?'checking…':st.available?`version ${st.latest} is available`:st.error?`could not check for updates: ${st.error}`:`this is the newest version (${st.current})`;
+  for(const id of ['#updState','#setUpdState']){const s=$(id);if(s)s.textContent=t}
   const a=$('#updAuto');if(a&&st)a.checked=!!st.check}
 async function updPoll(check){const st=await updFetch(check);if(st)updRender(st);clearTimeout(UPD.timer);UPD.timer=setTimeout(()=>updPoll(false),st&&st.checking?4000:3600*1000);return st}
 function updOpen(){const st=UPD.st;if(!st)return;$('#updTitle').textContent=`Version ${st.latest} is available (you have ${st.current})`;
@@ -419,7 +421,7 @@ function setTheme(){const v=document.documentElement.dataset.theme||'system';$$(
 function setUpdates(){const st=UPD.st;const mode=!st?'mention':!st.check?'off':st.auto?'auto':'mention';
   const autoOk=!!st&&'auto' in st;$('#setUpdAuto').disabled=!autoOk;$('#setUpdAutoNote').textContent=autoOk?'(when no restore or preparation runs)':'(not available in this version yet)';
   $$('input[name=setUpd]').forEach(i=>{i.checked=i.value===mode;i.onchange=async()=>{try{updRender(await post('/api/update/settings',{check:i.value!=='off',auto:i.value==='auto'}));setUpdates()}catch(e){toastError(e);setUpdates()}}});
-  $('#setUpdState').textContent=$('#updState')?$('#updState').textContent:''}
+}
 async function setCache(){const el=$('#setCache');let c;try{c=await api('/api/cache')}catch(e){el.textContent='Could not read the cache: '+e.message;return}
   el.innerHTML=`<p class="help" style="margin:0 0 6px">Downloaded backup data the app keeps so it does not fetch it twice. Everything here is downloaded again when needed; clearing it never undoes the file lists or the preparation.</p>
     <div class="row" style="gap:8px"><span>In use: <b>${human(c.bytes)}</b></span><span class="mono help">${esc(c.path)}</span><button class="small" id="setClear" ${c.bytes?'':'disabled'}>Clear the cache</button><span id="setCacheMsg" class="status"></span></div>

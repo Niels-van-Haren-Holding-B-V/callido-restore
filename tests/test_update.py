@@ -287,3 +287,21 @@ class Later_(Fixture):
              mock.patch.object(update, "install_mac", return_value={"restarting": "x"}):
             update.install(job, lambda c: None)
         self.assertNotIn("restart_at", job)
+
+
+class CheckDeadline(Fixture):
+    """A check that hangs (a stalled proxy, a name lookup without timeout) ends after CHECK_DEADLINE and says why."""
+    def test_hanging_check_gives_up_and_reports(self):
+        import threading, time
+        gate = threading.Event(); self.addCleanup(gate.set)
+        with mock.patch.object(update, "CHECK_DEADLINE", 0.3), mock.patch.object(update, "latest_release", side_effect=lambda: gate.wait(10)):
+            t0 = time.time(); update._checking[0] = True; update._check_now()
+        self.assertLess(time.time() - t0, 3); self.assertFalse(update._checking[0])
+        st = update.status(); self.assertIn("no answer from GitHub", st["error"]); self.assertFalse(st["available"])
+
+    def test_error_cleared_by_a_good_check(self):
+        with mock.patch.object(update, "latest_release", side_effect=urllib.error.URLError("offline")): update._check_now()
+        self.assertIn("offline", update._read()["error"])
+        with mock.patch.object(update, "latest_release", return_value=self.rel): update._check_now()
+        p = mock.patch.object(update, "_checking", [True]); p.start(); self.addCleanup(p.stop)
+        self.assertIsNone(update.status()["error"])
