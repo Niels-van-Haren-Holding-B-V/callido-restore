@@ -250,7 +250,7 @@ class DestCheckApiTests(SourceFixture):
         code, j, calls = self._connect({"kind": "smb", "name": "nas", "host": "100.64.0.7", "user": "", "password": ""}, [("nas:", "smb")])
         self.assertEqual((code, j["state"]), (200, "done"), j)
         cfg = [c for c in calls if c[1] == "config"][0]
-        self.assertEqual(cfg[1:4], ["config", "update", "nas"]); self.assertIn("host=100.64.0.7", cfg)
+        self.assertEqual(cfg[1:4], ["config", "update", "nas"]); self.assertIn("host=100.64.0.7", cfg); self.assertIn("port=", cfg)   # no port typed: reset to 445
         self.assertFalse([a for a in cfg if a.startswith(("pass=", "user="))]); self.assertFalse([c for c in calls if c[1] == "obscure"])
         code, j, calls = self._connect({"kind": "smb", "name": "nas", "host": "nas", "user": "alice", "password": "pw"}, [("nas:", "smb")])
         cfg = [c for c in calls if c[1] == "config"][0]
