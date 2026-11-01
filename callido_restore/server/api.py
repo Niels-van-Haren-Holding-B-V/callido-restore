@@ -129,9 +129,11 @@ class H(BaseHTTPRequestHandler):
             if u.path == "/api/remotes":
                 try: pairs = rclone.remotes(cache=True)
                 except rclone.RcloneError: pairs = []
-                try: keys = {n: i["own_key"] for n, i in rclone.remote_info(cache=True).items()}
-                except rclone.RcloneError: keys = {}
-                out = {"remotes": [n for n, _ in pairs], "types": dict(pairs), "keys": keys, "dirs": []}
+                try: info = rclone.remote_info(cache=True)
+                except rclone.RcloneError: info = {}
+                keys = {n: i["own_key"] for n, i in info.items()}
+                smb = {n: {k: i.get(k, "") for k in ("host", "port", "user")} for n, i in info.items() if i.get("type") == "smb"}
+                out = {"remotes": [n for n, _ in pairs], "types": dict(pairs), "keys": keys, "smb": smb, "dirs": []}
                 if q.get("remote"):
                     try: out["dirs"] = [e["Name"] for e in rclone.ls(q["remote"] + (q.get("path") or ""), dirs_only=True, cache=True)]
                     except rclone.RcloneError as e: out["error"] = str(e)[-200:]
@@ -298,10 +300,19 @@ class H(BaseHTTPRequestHandler):
                         except rclone.RcloneError as e: raise RuntimeError(str(e))
                     else:
                         def create():
-                            obs = subprocess.run([RCLONE, "obscure", "-"], input=pw + "\n", capture_output=True, text=True, **popen_kw()).stdout.strip()
-                            if not obs: raise RuntimeError("rclone could not prepare the password")
-                            r = subprocess.run([RCLONE, "config", "create", name, "smb", f"host={host}", *([f"port={port}"] if port else []), f"user={body.get('user', '')}", f"pass={obs}",
-                                                "--obscure=false", "--non-interactive"], capture_output=True, text=True, timeout=600, **popen_kw())
+                            obs = subprocess.run([RCLONE, "obscure", "-"], input=pw + "\n", capture_output=True, text=True, **popen_kw()).stdout.strip() if (pw or existing != "smb") else ""
+                            if not obs and (pw or existing != "smb"): raise RuntimeError("rclone could not prepare the password")
+                            if existing == "smb":
+                                # Edit of a saved NAS connection (a new address, e.g. a VPN one; another user or password): only what
+                                # was given changes, the name stays, so the restore targets and saved restores that use it keep working.
+                                upd = [f"host={host}", *([f"port={port}"] if port else [])]
+                                if body.get("user"): upd.append(f"user={body['user']}")
+                                if pw: upd.append(f"pass={obs}")
+                                r = subprocess.run([RCLONE, "config", "update", name, *upd, "--obscure=false", "--non-interactive"],
+                                                   capture_output=True, text=True, timeout=600, **popen_kw())
+                            else:
+                                r = subprocess.run([RCLONE, "config", "create", name, "smb", f"host={host}", *([f"port={port}"] if port else []), f"user={body.get('user', '')}", f"pass={obs}",
+                                                    "--obscure=false", "--non-interactive"], capture_output=True, text=True, timeout=600, **popen_kw())
                             if r.returncode != 0: raise RuntimeError(r.stderr.strip()[-400:] or "rclone config failed")
                         user = body.get("user", "")
                         log(f"connect smb '{name}': host={host} port={port or 445} user={user} (password not logged)")

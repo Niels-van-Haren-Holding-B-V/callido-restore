@@ -244,6 +244,25 @@ class DestCheckApiTests(SourceFixture):
             with urlopen(f"http://127.0.0.1:{self.srv.server_address[1]}/api/remotes") as r: out = json.loads(r.read())
         self.assertEqual(out["types"], {"gdrive:": "drive", "nas:": "smb"}); self.assertEqual(out["keys"], {"gdrive:": True, "nas:": False})
 
+    def test_editing_a_saved_nas_connection_updates_only_what_was_given(self):
+        """A new address for an existing SMB connection (e.g. a Tailscale IP): `config update` with the host, no password when
+        none was typed (the saved one stays), the name unchanged; shares are listed through it afterwards."""
+        code, j, calls = self._connect({"kind": "smb", "name": "nas", "host": "100.64.0.7", "user": "", "password": ""}, [("nas:", "smb")])
+        self.assertEqual((code, j["state"]), (200, "done"), j)
+        cfg = [c for c in calls if c[1] == "config"][0]
+        self.assertEqual(cfg[1:4], ["config", "update", "nas"]); self.assertIn("host=100.64.0.7", cfg)
+        self.assertFalse([a for a in cfg if a.startswith(("pass=", "user="))]); self.assertFalse([c for c in calls if c[1] == "obscure"])
+        code, j, calls = self._connect({"kind": "smb", "name": "nas", "host": "nas", "user": "alice", "password": "pw"}, [("nas:", "smb")])
+        cfg = [c for c in calls if c[1] == "config"][0]
+        self.assertIn("user=alice", cfg); self.assertTrue([a for a in cfg if a.startswith("pass=")])
+
+    def test_remotes_endpoint_gives_the_smb_address_never_the_password(self):
+        from callido_restore.sources import rclone
+        with mock.patch.object(rclone, "remotes", return_value=[("nas:", "smb"), ("gdrive:", "drive")]), \
+             mock.patch.object(rclone, "remote_info", return_value={"nas:": rclone._info({"type": "smb", "host": "192.0.2.10", "user": "alice", "pass": "x"}), "gdrive:": rclone._info({"type": "drive", "token": "t"})}):
+            with urlopen(f"http://127.0.0.1:{self.srv.server_address[1]}/api/remotes") as r: out = json.loads(r.read())
+        self.assertEqual(out["smb"], {"nas:": {"host": "192.0.2.10", "port": "", "user": "alice"}}); self.assertNotIn("pass", json.dumps(out)); self.assertNotIn('"t"', json.dumps(out))
+
     def test_a_non_drive_remote_is_never_turned_into_drive(self):
         """The SMB restore target (or any other remote) under the selected name is refused before anything runs."""
         code, j, calls = self._connect({"kind": "drive", "name": "nas", "client_id": "1-a.apps.googleusercontent.com", "client_secret": "s"}, [("nas:", "smb")])
