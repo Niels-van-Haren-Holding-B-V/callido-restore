@@ -92,6 +92,9 @@ class H(BaseHTTPRequestHandler):
                 return self._send(200, page.read_bytes(), "text/html; charset=utf-8")
             if u.path == "/api/sources":
                 return self._json([s.to_json() for s in SOURCES.values()])
+            if u.path == "/api/update":                            # is a newer release published (answers at once; checks daily in the background)
+                from callido_restore import update
+                return self._json(update.status(force=q.get("check") == "1"))
             if u.path == "/api/about":
                 try: line = rclone.version() or "rclone not found"
                 except (rclone.RcloneError, OSError): line = "rclone not found"
@@ -241,6 +244,16 @@ class H(BaseHTTPRequestHandler):
         u = urlparse(self.path); n = int(self.headers.get("Content-Length") or 0)
         body = json.loads(self.rfile.read(n) or b"{}")
         try:
+            if u.path == "/api/update/settings":                   # {check: bool}: the daily check on or off
+                from callido_restore import update
+                return self._json(update.set_check(bool(body.get("check", True))))
+            if u.path == "/api/update/install":                    # a job: download, verify the signed checksum, install, restart
+                from callido_restore import update
+                busy = [j for j in JOBS.values() if j["state"] == "running" and (j["label"].startswith("restore") or j["label"] == "build pool map" or j["label"] == "update")]
+                if busy: return self._json({"error": f"Wait until the {'restore' if busy[0]['label'].startswith('restore') else 'preparation' if busy[0]['label'] == 'build pool map' else 'update'} has finished or is paused; a paused restore continues after the update."}, 409)
+                st = update.status()
+                if not st["installable"]: return self._json({"error": ("This version cannot install updates itself: download the new version from the release page." if st["available"] else "No update to install: this is already the newest version.")}, 409)
+                return self._json(start_job(lambda job: update.install(job, _exit_app), "update"))
             if u.path == "/api/sources":
                 s = add_source(body["name"], body["local"], body.get("remote"), body.get("extra")); return self._json(s.to_json())
             if u.path in ("/api/pool/pause", "/api/pool/resume"):   # the user's pause survives share loads and restarts

@@ -81,6 +81,22 @@ jobs:
           name: release-bundle
           path: release
       - run: ./scripts/assemble_release.sh release
+      # Release signing (docs/HANDOVER.md): SHA256SUMS is signed with the Ed25519 key in the secret RELEASE_SIGNING_KEY; the app
+      # installs an update only when this signature verifies under a key in about.UPDATE_PUBLIC_KEYS. Without the secret the
+      # release is published unsigned and the app offers it only as a link to the release page.
+      - name: Sign SHA256SUMS
+        env:
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+        run: |
+          if [ -z "$RELEASE_SIGNING_KEY" ]; then echo "::warning::RELEASE_SIGNING_KEY is not set: SHA256SUMS is not signed"; exit 0; fi
+          umask 077; printf '%s\n' "$RELEASE_SIGNING_KEY" > "$RUNNER_TEMP/release-signing.pem"
+          # the tag is part of the signed data (update.signed_message): an old signed list cannot pass for a newer release
+          { printf 'callido-restore %s\n' "$GITHUB_REF_NAME"; cat release/SHA256SUMS; } > "$RUNNER_TEMP/signed-message"
+          openssl pkeyutl -sign -rawin -inkey "$RUNNER_TEMP/release-signing.pem" -in "$RUNNER_TEMP/signed-message" -out release/SHA256SUMS.sig
+          openssl pkey -in "$RUNNER_TEMP/release-signing.pem" -pubout > "$RUNNER_TEMP/pub.pem"
+          openssl pkeyutl -verify -pubin -inkey "$RUNNER_TEMP/pub.pem" -rawin -in "$RUNNER_TEMP/signed-message" -sigfile release/SHA256SUMS.sig
+          echo "signed with public key $(openssl pkey -pubin -in "$RUNNER_TEMP/pub.pem" -outform DER | tail -c 32 | xxd -p -c 64)"
+          rm -f "$RUNNER_TEMP/release-signing.pem"
       - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           name: Callido Restore ${{ github.ref_name }}
@@ -89,4 +105,4 @@ jobs:
           files: |
             release/CallidoRestore-arm64.dmg
             release/CallidoRestore-amd64.dmg
-            release/SHA256SUMS
+            release/SHA256SUMS*
