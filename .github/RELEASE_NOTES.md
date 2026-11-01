@@ -1,5 +1,18 @@
 **Callido Restore** restores files from a Synology Hyper Backup (`.hbk`) without Hyper Backup or a working NAS. It reads the backup's own metadata, shows every backup run on a timeline, and restores the folders you pick to a NAS share or a local folder. Files already at the destination are never overwritten or deleted, and the backup source is only read.
 
+## What's new in 1.2.1
+
+A maintenance release for restores to a NAS. Install it from the header ("Version 1.2.1 is available") or by hand.
+
+- **No more cut-off files on the NAS.** Every file is uploaded under a temporary name (`<name>.callido-restore.part`) and renamed on the NAS only when it is complete, never over a file that is there. A Stop, a closed app or a dropped connection in the middle of an upload no longer leaves an incomplete file under its real name (on some NAS connections 1.2.0 could). A file at the target whose size differs from the backup's is kept and listed as an error instead of being counted as "skipped", so a cut-off copy from earlier is found (#208).
+- **A check at the end of every restore.** When all files are through, the app lists the target and checks every file's size against the backup. Files that are missing are restored again (twice at most; after an upload the NAS refused, for example "share access flags are incompatible", it first waits two minutes). The result line says how many files are at the target and how many were restored again (#208).
+- **Faster to the NAS.** Up to 8 files are uploaded at the same time, each with its own progress bar, and the line above them shows the speed to the NAS and the speed from the backup separately (#201, #202, #208).
+- **The download cache stays small.** Downloaded backup data only passes through: at most about 5 GB is kept while a restore runs (data left over by earlier, interrupted runs now counts too), and a finished restore deletes it (#208).
+- **Resume counts every file once.** After a Stop and Resume, files that had already finished are no longer counted again as skipped (#208).
+- **Clicks on the restore's progress bar work.** Stop and the red error count no longer miss a click while the bar redraws; the error count jumps to the error list (#210).
+- **Quit stops running uploads** on Windows and macOS, so no rclone process keeps running after the app closes (#202).
+- **Checking for updates no longer hangs.** Settings no longer stays at "checking…"; a check ends after 20 seconds and says why it failed (#203, #205, #206).
+
 ## What's new in 1.2.0
 
 - **The app updates itself.** Once a day it checks for a new version and shows "Version X is available · What's new" in the header; **Install now** downloads it, checks it, installs it and restarts (Windows and macOS). Every update is signed with Callido's release key and checked against its published checksum before anything is installed; an update that fails a check is deleted and nothing changes. Only newer versions are accepted. (#178, #180, #181, #183, #185). **This is the first version that can update itself; to get it, install 1.2.0 by hand once.**
