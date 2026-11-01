@@ -76,14 +76,43 @@ def backup_for(sid, refresh=False, log=None):
     if refresh or sid not in BACKUPS: BACKUPS[sid] = Backup(SOURCES[sid], log)
     return BACKUPS[sid]
 
+LOCAL_HOSTS = {"127.0.0.1", "localhost", "[::1]"}
+
+
+def request_refusal(host, origin, fetch_site, server_port):
+    """Why a request to the local API is refused, or None. The server listens on 127.0.0.1 only, but a web page in any
+    browser on this computer can still send it requests:
+    * DNS rebinding: a page on evil.example whose name re-points to 127.0.0.1 can read the answers; its requests carry
+      Host: evil.example, so the Host must be this server itself (127.0.0.1 / localhost with our port).
+    * Cross-site requests (CSRF): another site's page can make the browser call /api/quit or start a restore even though
+      it cannot read the answer; browsers mark those with Origin and Sec-Fetch-Site, which must then be this server.
+    The app's own window and command-line tools (curl, the smoke tests) send neither header and pass."""
+    h = (host or "").strip().lower()
+    name, _, port = h.rpartition(":") if not h.startswith("[") or "]:" in h else (h, "", "")
+    if not name: name, port = h, ""
+    if name not in LOCAL_HOSTS or (port and port != str(server_port)):
+        return f"refused: Host {host!r} is not this app"
+    if fetch_site and fetch_site.lower() not in ("same-origin", "none"):
+        return f"refused: a {fetch_site} request from another site"
+    if origin and origin.lower() != "null":
+        o = origin.lower().rstrip("/")
+        if o not in {f"http://{n}:{server_port}" for n in LOCAL_HOSTS}: return f"refused: Origin {origin!r} is not this app"
+    return None
+
+
 class H(BaseHTTPRequestHandler):
     def log_message(self, *a): pass
+    def _refused(self):
+        why = request_refusal(self.headers.get("Host"), self.headers.get("Origin"), self.headers.get("Sec-Fetch-Site"), self.server.server_address[1])
+        if why: self._send(403, jdump({"error": why}))
+        return bool(why)
     def _send(self, code, body, ctype="application/json; charset=utf-8", extra=None):
         self.send_response(code); self.send_header("Content-Type", ctype); self.send_header("Content-Length", str(len(body)))
         for k, v in (extra or {}).items(): self.send_header(k, v)
         self.end_headers(); self.wfile.write(body)
     def _json(self, o, code=200): self._send(code, jdump(o))
     def do_GET(self):
+        if self._refused(): return
         u = urlparse(self.path); q = {k: v[0] for k, v in parse_qs(u.query).items()}
         try:
             if u.path in ("/", "/index.html"):
@@ -241,6 +270,7 @@ class H(BaseHTTPRequestHandler):
         except Exception as e:
             self._json({"error": str(e), "trace": traceback.format_exc()}, 500)
     def do_POST(self):
+        if self._refused(): return
         u = urlparse(self.path); n = int(self.headers.get("Content-Length") or 0)
         body = json.loads(self.rfile.read(n) or b"{}")
         try:
