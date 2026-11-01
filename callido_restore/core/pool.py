@@ -50,6 +50,7 @@ except Exception:  # pure python fallback (slow)
 SLICE = 8388608
 BLOCK = 2260
 REC_MAGIC = 0xa93b0200
+ATTR_MAGIC = 0xa93b0186         # a 28-byte attribute TLV some file records carry before their chunk list
 TAGK = 9                                        # version_list.tag covers a file's first TAGK chunks at most
 SET_OF_WRITER = {0: 4, 1: 3, 2: 1, 3: 2}      # writer w's records live in file_chunk<set>.index
 WRITER_OF_SET = {v: k for k, v in SET_OF_WRITER.items()}
@@ -195,7 +196,10 @@ def parse_record_stream(path_iter, on_record, cancelled=None, progress=None):
         if magic == REC_MAGIC and ln % 8 == 0 and ln >= 8 and p + 8 + ln <= n:
             refs = struct.unpack_from(f">{ln // 8}Q", data, p + 8)
             if (refs[-1] >> 32) == 0x74000000:
-                on_record(p - 4, [(r - 64) // 29 for r in refs[:-1] if (r - 64) % 29 == 0])
+                # the record's key is virtual-file pointer B: the header (flags word) at p - 4, or, when a 28-byte attribute TLV
+                # (0xa93b0186) precedes it, that TLV's body at p - 28 (the flags word is the body's last word; FORMAT.md)
+                key = p - 28 if p >= 36 and struct.unpack_from(">II", data, p - 36) == (ATTR_MAGIC, 28) else p - 4
+                on_record(key, [(r - 64) // 29 for r in refs[:-1] if (r - 64) % 29 == 0])
         p += 8 + ln
 
 class PoolMap:

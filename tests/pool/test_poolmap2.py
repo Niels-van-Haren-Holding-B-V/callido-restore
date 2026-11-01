@@ -222,6 +222,17 @@ class ReaderMaps(unittest.TestCase):
         self.assertEqual(recs.record(1, b1)["ids"], [5, 6, 7]); self.assertEqual(recs.record(1, b1, b1 + 12)["ids"], [5, 6, 7])
         self.assertEqual(recs.record(1, b2)["ids"], [5, 6, 7]); self.assertEqual(recs.record(1, b2, b2 + 36)["ids"], [5, 6, 7])
 
+    def test_record_stream_keys_records_by_pointer_b(self):
+        # parse_record_stream must report a record under the key the snapshot / restore side uses (virtual-file pointer B): the
+        # header for a plain record, the attribute TLV's body for one with the 0xa93b0186 TLV in front (hbk-6's E8)
+        refs = [64 + 29 * g for g in (5, 6)]; body = b"".join(struct.pack(">Q", r) for r in refs) + struct.pack(">II", 0x74000000, 0)
+        plain = struct.pack(">III", 0, pool.REC_MAGIC, len(body)) + body
+        attr = struct.pack(">II", pool.ATTR_MAGIC, 28) + bytes.fromhex("000000c9010000001200000001000000" "08000000ffffffff00000000")
+        stream = b"\0" * 64 + plain + attr + struct.pack(">II", pool.REC_MAGIC, len(body)) + body
+        p = os.path.join(self.pool, "s.idx"); open(p, "wb").write(stream); got = []
+        pool.parse_record_stream([p], lambda off, ids: got.append((off, ids)))
+        self.assertEqual(got, [(64, [5, 6]), (64 + len(plain) + 8, [5, 6])])
+
     def test_dump_json_atomic(self):
         p = os.path.join(self.pool, "x.json"); pool.dump_json(p, [1]); self.assertEqual(pool.load_json(p), [1]); self.assertEqual(os.listdir(self.pool), ["x.json"])
 
