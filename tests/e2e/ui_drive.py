@@ -235,8 +235,11 @@ def settings_flow(b, base, work, home, hbk, notes, shot, env):
     while time.time() - t0 < 120 and any(x["state"] == "running" for x in shots.api(base, "/api/jobs")): time.sleep(0.5)
     b.js("document.querySelector('#settingsClose').click()"); time.sleep(0.3); b.js("document.querySelector('#settingsBtn').click()"); time.sleep(1.5)
     shown = b.text("#setCache").replace("\n", " | ")
+    b.js("document.querySelector('#setClear') && document.querySelector('#setClear').click()"); time.sleep(0.8)     # #196: asks first
+    ask = b.text("#setCacheMsg").replace("\n", " "); mid = shots.api(base, "/api/cache").get("bytes")
     b.js("document.querySelector('#setClear') && document.querySelector('#setClear').click()"); time.sleep(2)
     c1 = shots.api(base, "/api/cache")
+    notes.append(f"settings: cache asks first: {ask[:160]!r}; still {mid} B after the first click")
     notes.append(f"settings: cache before {c0.get('bytes')} B; Clear while a job ran: {busy}; shown: {shown[:200]!r}; after Clear {c1.get('bytes')} B; toast {b.text('#toasts')!r}")
     b.js("document.querySelector('#setNas [data-edit]').click()"); time.sleep(0.8)
     b.js("""(()=>{const set=(id,v)=>{const i=document.querySelector(id);i.value=v;i.dispatchEvent(new Event('input',{bubbles:true}))};
@@ -251,6 +254,12 @@ def settings_flow(b, base, work, home, hbk, notes, shot, env):
     after = json.loads(rc("config", "dump").stdout or "{}").get("nas", {})
     notes.append(f"settings: NAS edit took {took:.0f}s: message {b.text('#setMsg')!r}")
     notes.append(f"settings: rclone.conf [nas] afterwards: host={after.get('host')} port={after.get('port')} user={after.get('user')}")
+    undo = b.js("(()=>{const x=document.querySelector('#setNas [data-undo], #setMsg [data-undo]');if(x){const t=x.textContent;x.click();return t}return null})()")
+    t1 = time.time(); time.sleep(1)
+    while time.time() - t1 < 120 and "Putting it back" in b.text("#setNas"): time.sleep(0.5)
+    back = json.loads(rc("config", "dump").stdout or "{}").get("nas", {})
+    notes.append(f"settings: Put back button {undo!r}; after {time.time() - t1:.0f}s: {b.text('#setNas').replace(chr(10), ' | ')[-160:]!r}")
+    notes.append(f"settings: rclone.conf [nas] after Put back: host={back.get('host')} port={back.get('port')} user={back.get('user')}")
 
 
 def main():

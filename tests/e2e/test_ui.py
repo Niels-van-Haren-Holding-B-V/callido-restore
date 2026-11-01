@@ -85,22 +85,25 @@ class SettingsDialog(unittest.TestCase):
         th = self.line("theme")
         self.assertIn("data-theme 'dark'", th); self.assertIn("after a reload 'dark'", th); self.assertIn("back to system -> None", th)
         self.assertIn("after 'off'=False, after 'mention'=True", self.line("updates"))
-        c = self.line("cache")
+        c = self.line("cache before")
         self.assertIn("Clear while a job ran: (409", c); self.assertIn("after Clear 0 B", c); self.assertIn("Cleared", c)
+        ask = self.line("cache asks first")                       # #196: the first click only asks, nothing is deleted yet
+        self.assertIn("This deletes", ask); self.assertNotIn("still 0 B", ask)
 
-    @unittest.expectedFailure
-    def test_a_failed_nas_edit_leaves_the_connection_as_it_was(self):
-        """hbk-6 finding U9: the edit is written to rclone.conf before the shares are listed; when the NAS does not answer the
-        dialog says "Not saved: …" but rclone.conf already holds the new address, port and user."""
-        self.assertIn("Not saved", self.line("NAS edit"))
-        self.assertIn("host=127.0.0.1 port=1 user=alice", self.line("rclone.conf [nas] afterwards"))
+    def test_a_failed_nas_edit_says_saved_and_can_be_put_back(self):
+        """U9 (fixed in #198): the edit is saved even when the NAS does not answer (a VPN address set while away from it), and
+        the dialog now says so ("Saved, but the NAS did not answer") with "Put back <old address>", which restores the previous
+        address, port and user."""
+        self.assertIn("Saved, but the NAS did not answer", self.line("NAS edit"))
+        self.assertIn("host=127.0.0.2 port=4455 user=bob", self.line("rclone.conf [nas] afterwards"))
+        self.assertIn("Put back 127.0.0.1:1", self.line("Put back button"))
+        self.assertIn("host=127.0.0.1 port=1 user=alice", self.line("rclone.conf [nas] after Put back"))
 
-    @unittest.expectedFailure
     def test_a_nas_that_does_not_answer_is_reported_within_the_promised_time(self):
-        """hbk-6 finding U10: the message says "did not answer … within 20 seconds", the dialog took about 80 s to say so."""
+        """U10 (fixed in #199): the page treated a failed job as a failed call and polled it 60 more times (about 80 s for a
+        20 s server answer)."""
         took = int(re.search(r"NAS edit took (\d+)s", self.line("NAS edit")).group(1))
         self.assertLess(took, 40, self.line("NAS edit"))
-
 
 if __name__ == "__main__":
     unittest.main()
