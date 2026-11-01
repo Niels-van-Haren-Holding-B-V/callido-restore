@@ -279,12 +279,15 @@ def upload_flow(b, base, notes, shot):
     while time.time() - t0 < 300:                       # until this restore job itself has ended (a slow runner takes minutes)
         if jid is None: jid = next((j["id"] for j in restores()), None)
         elif shots.api(base, "/api/job", id=jid).get("state") != "running": time.sleep(2.5); break     # the page polls every ~2 s
-        bars = b.js("[...document.querySelectorAll('#rsXfers .xf')].map(x=>x.innerText.replace(/\\n/g,' '))") or []
-        if len(bars) > most: most = len(bars); seen = bars; head = b.text("#rsXfers").split("\n")[0]
+        groups = b.js("""[...document.querySelectorAll('#rsXfers .xfgrid')].map(g=>({head:(g.previousElementSibling||{}).innerText||'',
+                         bars:[...g.querySelectorAll('.xf')].map(x=>x.innerText.replace(/\\n/g,' '))}))""") or []
+        up = next((g for g in groups if "Upload" in g["head"]), None)      # #214: "↓ Downloading …" and "↑ Uploading …" groups
+        bars = up["bars"] if up else []
+        if len(bars) > most: most = len(bars); seen = bars; head = up["head"]
         if len(bars) >= 2 and not getattr(b, "_shot", None): shot(b, "upload-bars"); b._shot = True
         time.sleep(0.3)
-    notes.append(f"upload: most bars at once {most}: {seen[:4]}")
-    notes.append(f"upload: line above the bars: {head if most else None!r}")
+    notes.append(f"upload: most upload bars at once {most}: {seen[:4]}")
+    notes.append(f"upload: heading of the upload group: {head if most else None!r}")
     left = b.js("document.querySelectorAll('#rsXfers .xf').length")
     notes.append(f"upload: bars after the restore: {left}; result {b.text('#rsProg')[-160:]!r}")
 
@@ -292,6 +295,7 @@ def upload_flow(b, base, notes, shot):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--chrome", required=True); ap.add_argument("--out", required=True)
+    ap.add_argument("--app", default=os.environ.get("HBK_E2E_APP"), help="run this built app instead of the source (e.g. <mount>/Callido Restore.app/Contents/MacOS/Callido Restore)")
     ap.add_argument("--upload", action="store_true", help="#201/#202: per-file bars while a restore uploads to a NAS (rclone WebDAV)")
     ap.add_argument("--settings", action="store_true", help="#190: the Settings dialog (NAS edit, Drive key, appearance, updates, cache)")
     ap.add_argument("--stop", action="store_true", help="#187: Stop the running restore, Resume it, byte-exact")
@@ -328,7 +332,8 @@ def main():
     if a.settings:                 # the update choice must be real here: no HBK_NO_UPDATE_CHECK, but "checked just now" so no check is due
         env.pop("HBK_NO_UPDATE_CHECK", None)
         (home / ".hbk-explorer" / "update.json").write_text(json.dumps({"checked": time.time()}))
-    srv = subprocess.Popen([sys.executable, "-m", "callido_restore", "--no-window", "--port", str(port)], cwd=str(ROOT), env=env, stdout=log, stderr=subprocess.STDOUT)
+    cmd = [a.app] if a.app else [sys.executable, "-m", "callido_restore"]       # --app: a built app (the .app's executable or the .exe)
+    srv = subprocess.Popen([*cmd, "--no-window", "--port", str(port)], cwd=str(ROOT), env=env, stdout=log, stderr=subprocess.STDOUT)
     notes = []; n = [0]
     def shot(b, name):
         n[0] += 1; p = out / f"{n[0]:02d}-{name}.png"; p.write_bytes(b.png()); notes.append(f"[shot] {p.name}")

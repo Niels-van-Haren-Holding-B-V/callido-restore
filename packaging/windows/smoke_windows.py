@@ -61,6 +61,22 @@ def check_child_pipe(exe):
     print("child pipe check passed")
 
 
+def check_update_helper(exe):
+    """The update helper started from the windowed exe itself (no console), the way v1.2.x starts it before quitting: it must
+    confirm it runs, and keep running after the exe has exited (v1.2.0 quit without a helper on a real Windows 11 PC)."""
+    with tempfile.TemporaryDirectory() as d:
+        res = Path(d) / "helper.result"
+        r = subprocess.run([str(exe), "--helper-smoke", str(res)], capture_output=True, text=True, timeout=120)
+        first = res.read_text(errors="replace") if res.exists() else ""
+        print(f"update helper smoke: rc={r.returncode} result={first.strip()!r}")
+        if r.returncode != 0 or "helper started" not in first: die(f"the windowed exe could not start the update helper: {first.strip()!r}")
+        for _ in range(40):
+            if "helper done" in res.read_text(errors="replace"): break
+            time.sleep(0.5)
+        else: die("the update helper did not outlive the app that started it")
+    print("update helper check passed")
+
+
 def check_window(exe):
     r = subprocess.run([str(exe), "--smoke", "--port", str(PORT)], capture_output=True, text=True, timeout=120)
     print("window smoke:", r.returncode, (r.stdout or "").strip()[-400:])
@@ -77,6 +93,7 @@ def check_app(exe, app_name, version):
     print("bundled", line)
     check_server(exe, app_name, version)
     check_child_pipe(exe)
+    check_update_helper(exe)
     check_window(exe)
 
 
@@ -119,12 +136,12 @@ def check_auto_update(old_msi, old_version, new_msi, app_name, version, folder):
         restarts on the default port and return the version that app reports (and quit it)."""
         dummy = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(3)"])     # stands in for the running app
         log = Path(tempfile.gettempdir()) / f"callido-update-{tag}.log"
-        helper = subprocess.Popen(uw.helper_command(new_msi, exe, dummy.pid, log, sha), stdout=subprocess.PIPE,
-                                  stderr=subprocess.STDOUT, text=True)
+        # started exactly as the app starts it (hidden, CREATE_NO_WINDOW), and confirmed running before the "app" goes
+        helper = uw.start_helper(uw.helper_command(new_msi, exe, dummy.pid, log, sha), str(log) + ".result")
         dummy.wait()
-        try: out, _ = helper.communicate(timeout=600)
-        except subprocess.TimeoutExpired: helper.kill(); out, _ = helper.communicate()
-        print(f"[{tag}] helper exit", helper.returncode, (out or "").strip()[-1500:])
+        try: helper.wait(timeout=600)
+        except subprocess.TimeoutExpired: helper.kill(); helper.wait()
+        print(f"[{tag}] helper exit", helper.returncode)
         try: result = Path(str(log) + ".result").read_text(); print(result)
         except OSError: result = ""; print("no helper result file")
         global PORT

@@ -39,6 +39,20 @@ def _exit_app(code=0):
 
 JOB_ID = re.compile(r"[0-9a-f]{8,64}")             # job ids are uuid4 hex (10 chars); the id names a file under paths.JOBS_DIR, so nothing else may pass
 
+def drop_saved_restores(src, items, dest, keep=None):
+    """Delete the saved (stopped or interrupted) jobs of the same restore (same source, items and target): a new start or a
+    resume of it replaces them, so "Restores you can resume" lists each restore once. Files at the target are never touched
+    (the new run skips what is there). Returns how many were dropped."""
+    n = 0
+    for jf in paths.JOBS_DIR.glob("*.json") if paths.JOBS_DIR.is_dir() else []:
+        try: d = json.loads(jf.read_text())
+        except Exception: continue
+        if d.get("id") == keep or (d.get("id") in JOBS and JOBS[d["id"]]["state"] == "running"): continue
+        if d.get("state") != "done" and d.get("src") == src and d.get("items") == items and (d.get("dest") or "") == (dest or ""):
+            try: jf.unlink(); n += 1
+            except OSError: pass
+    return n
+
 def job_file(jid):
     """Path of a persisted restore job, or None when the id is not a job id (never a path)."""
     return paths.JOBS_DIR / f"{jid}.json" if isinstance(jid, str) and JOB_ID.fullmatch(jid) else None
@@ -262,7 +276,7 @@ class H(BaseHTTPRequestHandler):
                 for jf in sorted(paths.JOBS_DIR.glob("*.json"), key=lambda x: x.stat().st_mtime, reverse=True):
                     try: d = json.loads(jf.read_text())
                     except Exception: continue
-                    if d["id"] in JOBS and JOBS[d["id"]]["state"] == "running": d["state"] = "running"
+                    if d["id"] in JOBS and JOBS[d["id"]]["state"] == "running": continue   # the restore running now has its own bar, it is not "to resume"
                     out.append({k: d.get(k) for k in ("id", "label", "state", "dest", "roots", "items", "next_index", "total_files", "done_files", "skipped", "total_bytes", "done_bytes", "started", "updated", "src", "verified", "identical_copy")} | {"errors": d.get("errors_total", len(d.get("errors") or [])), "unverified": d.get("unverified_total", len(d.get("unverified") or []))})
                 return self._json(out[:20])
             if u.path == "/api/job/cancel":
@@ -470,7 +484,8 @@ class H(BaseHTTPRequestHandler):
                     items.append(it)
                 err = restore_target_error(b.src, items, dest, create=True)
                 if err: return self._json({"error": err}, 400)
-                return self._json(start_job(lambda job: b.restore(items, dest, job, body.get("skip_meta", True)), "restore"))
+                superseded = drop_saved_restores(body["src"], items, dest)       # the same restore saved earlier: this one replaces it
+                return self._json(start_job(lambda job: b.restore(items, dest, job, body.get("skip_meta", True)), "restore") | {"replaced": superseded})
             if u.path == "/api/restore/resume":
                 jf = job_file(body.get("id"))
                 if jf is None: return self._json({"error": "not a job id"}, 400)
@@ -480,7 +495,7 @@ class H(BaseHTTPRequestHandler):
                 d = json.loads(jf.read_text()); b = backup_for(d["src"]); dest = d.get("dest") or ""
                 err = restore_target_error(b.src, d["items"], dest, create=False)     # source check again, roots still there
                 if err: return self._json({"error": err}, 400)                        # the job file stays, so it can be resumed later
-                jf.unlink()
+                jf.unlink(); drop_saved_restores(d["src"], d["items"], dest)          # older saved copies of the same restore go too
                 seed = {k: d[k] for k in ("done_files", "skipped", "errors", "errors_total", "verified", "identical_copy", "unverified", "unverified_total", "done_ahead") if k in d}   # counts and lists from before the pause
                 if "errors_total" not in seed and "errors" in seed: seed["errors_total"] = len(seed["errors"])        # a job file from before the counters
                 if "unverified_total" not in seed and "unverified" in seed: seed["unverified_total"] = len(seed["unverified"])
