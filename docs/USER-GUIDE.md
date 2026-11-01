@@ -40,8 +40,9 @@
      A backup without that record needs a one-time preparation first (the app downloads the backup's index files and builds a
      map; it starts by itself and shows its progress on one line). You can press **Start when the backup is prepared**: the
      restore then starts by itself as soon as the preparation is done.
-   * **The result.** The bar shows the restore while it runs. A restore cut short (the app closed, a crash, a restart) is listed under
-     "Earlier restores you can continue". When it ends, one line sums it up: restored, skipped (already at the target), errors, size, and how many files were
+   * **The result.** The bar shows the restore while it runs. Under it, "Earlier restores you can continue" lists the restore with
+     **Pause**; a paused restore, or one cut short by a closed app, a crash or a restart, keeps its progress and goes on with
+     **Continue**. When it ends, one line sums it up: restored, skipped (already at the target), errors, size, and how many files were
      **checked** (the file's place in the backup was confirmed and every block's checksum matched while it was read). Files that
      **couldn't be verified** were restored, but check them before you rely on them; files that could not be restored at all are
      listed under **Errors**.
