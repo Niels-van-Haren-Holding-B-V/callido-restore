@@ -22,9 +22,17 @@ class Download(unittest.TestCase):
 
 
 class Helper(unittest.TestCase):
+    def test_hash_is_checked_again_before_msiexec(self):          # hbk-4: the cached MSI must not be swapped before UAC elevates it
+        script = uw.helper_command(r"C:\c\x.msi", r"C:\P\a.exe", 1, r"C:\l.txt", "ab" * 32)[-1]
+        i_hash, i_check, i_msi = script.index("[IO.File]::OpenRead('C:\\c\\x.msi')"), script.index("if ($h -ne '" + "AB" * 32 + "')"), script.index("Start-Process -FilePath 'msiexec.exe'")
+        self.assertTrue(i_hash < i_check < i_msi)
+        self.assertIn("throw ('the MSI changed after it was verified", script)
+        for bad in (None, "", "zz" * 32, "ab" * 31): 
+            with self.assertRaises(RuntimeError): uw.helper_command("x.msi", "a.exe", 1, "l", bad)
+
     def test_command(self):
         cmd = uw.helper_command(r"C:\Users\x\.hbk-explorer\cache\updates\1.2.3\CallidoRestore-x64.msi",
-                                r"C:\Program Files\Callido\Callido Restore\Callido Restore.exe", 4321, r"C:\log's.txt")
+                                r"C:\Program Files\Callido\Callido Restore\Callido Restore.exe", 4321, r"C:\log's.txt", "ab" * 32)
         self.assertEqual(cmd[0], "powershell.exe"); script = cmd[-1]
         self.assertIn("Wait-Process -Id 4321", script); self.assertIn("catch {", script)
         self.assertIn("""-ArgumentList '/i "C:\\Users\\x\\.hbk-explorer\\cache\\updates\\1.2.3\\CallidoRestore-x64.msi" /passive /norestart /l*v "C:\\log''s.txt"'""", script)
@@ -32,7 +40,7 @@ class Helper(unittest.TestCase):
         self.assertTrue(script.endswith("finally { Start-Process -FilePath 'C:\\Program Files\\Callido\\Callido Restore\\Callido Restore.exe' }"))
 
     def test_paths_with_spaces_stay_one_argument(self):
-        script = uw.helper_command(r"C:\Users\Jan de Vries\.hbk-explorer\cache\updates\1.2.3\x.msi", r"C:\P\a.exe", 1, r"C:\Users\Jan de Vries\u.log")[-1]
+        script = uw.helper_command(r"C:\Users\Jan de Vries\.hbk-explorer\cache\updates\1.2.3\x.msi", r"C:\P\a.exe", 1, r"C:\Users\Jan de Vries\u.log", "ab" * 32)[-1]
         self.assertIn('/i "C:\\Users\\Jan de Vries\\.hbk-explorer\\cache\\updates\\1.2.3\\x.msi" /passive', script)
         self.assertTrue(script.endswith("finally { Start-Process -FilePath 'C:\\P\\a.exe' }"))
 
@@ -49,6 +57,8 @@ class Helper(unittest.TestCase):
                 uw.install_and_relaunch(msi, exit_app=exits.append)
             self.assertEqual(exits, [0]); args, kw = popen.call_args
             self.assertEqual(args[0][0], "powershell.exe"); self.assertTrue(kw["creationflags"] & uw.DETACHED_PROCESS)
+            import hashlib
+            self.assertIn(hashlib.sha256(b"x").hexdigest().upper(), args[0][-1])           # hashed right after the download's check
 
 
 if __name__ == "__main__":
