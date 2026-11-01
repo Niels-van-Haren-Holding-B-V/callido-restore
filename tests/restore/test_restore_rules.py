@@ -513,6 +513,29 @@ class AlreadyThereNeedsNoDownload(unittest.TestCase):
         self.assertEqual((res["restored"], res["skipped"]), (1, 1))
         self.assertEqual(fetched, ["Pool/0/0/1.bucket.1"])                      # nothing fetched for f0.txt
 
+
+class MeterRetry(unittest.TestCase):
+    def test_an_upload_retry_restarting_at_zero_is_not_counted_twice(self):
+        # hbk-4's note on #216: the speed read high after a retry (its bytes were counted again from 0)
+        d = Path(tempfile.mkdtemp()); self.addCleanup(shutil.rmtree, d, True)
+        p = mock.patch.object(paths, "JOBS_DIR", d / "jobs"); p.start(); self.addCleanup(p.stop)
+        p = mock.patch.object(backup_mod.time, "sleep", lambda s: None); p.start(); self.addCleanup(p.stop)
+        p = mock.patch.object(backup_mod, "CHECK_WAIT_S", 0); p.start(); self.addCleanup(p.stop)
+        b = _fake_backup("nas:R", [("a.txt", 100, 0)]); calls = [0]
+        nas = {}
+        def upload(cmd, cancelled=None, progress=None, **kw):
+            calls[0] += 1; progress(60, 100, 0)
+            if calls[0] == 1: return 1, "connection reset"                        # fails after 60 bytes, then a retry from 0
+            progress(100, 100, 0); nas["share/a.txt.callido-restore.part"] = 100; os.unlink(cmd[2]); return 0, ""
+        with mock.patch.object(backup_mod, "upload_watched", side_effect=upload), \
+             mock.patch.object(backup_mod, "destination_sizes", side_effect=lambda r: dict(nas)), \
+             mock.patch.object(backup_mod, "move_no_replace", side_effect=lambda a, c: nas.update({"share/a.txt": nas.pop("share/a.txt.callido-restore.part")}) or True), \
+             mock.patch.object(backup_mod, "METER_S", 3600):
+            job = {"id": "mr", "label": "restore", "started": 0.0}
+            res = b.restore([{"share": "share", "ver": 1, "path": "", "is_dir": True}], "nas:R", job)
+        self.assertEqual((res["restored"], res["errors"]), (1, 0))
+        self.assertEqual(job["moved"]["upload"], 100)                              # 100 bytes moved, not 160
+
 class UploadWatchdog(unittest.TestCase):
     def test_kill_uploads_ends_running_upload_processes(self):
         import sys, threading as th, time as _t
