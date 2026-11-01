@@ -26,6 +26,15 @@ class Refusal(unittest.TestCase):
         # what the real pywebview window sends (probed): GET without Origin, POST with our origin, both same-origin
         self.assertIsNone(r("127.0.0.1:8765", None, "same-origin")); self.assertIsNone(r("127.0.0.1:8765", "http://127.0.0.1:8765", "same-origin"))
 
+    def test_page_opened_from_a_link_elsewhere(self):
+        r = lambda path, mode, dest, host="127.0.0.1:8765", origin=None: api.request_refusal(host, origin, "cross-site", 8765, path, mode, dest)
+        self.assertIsNone(r("/", "navigate", "document")); self.assertIsNone(r("/index.html", "navigate", "document"))
+        self.assertIsNotNone(r("/", "navigate", "iframe"))                                  # never inside another site's frame
+        self.assertIsNotNone(r("/api/quit", "navigate", "document"))                        # a link to the API stays refused
+        self.assertIsNotNone(r("/", "no-cors", "image"))
+        self.assertIsNotNone(r("/", "navigate", "document", host="evil.example:8765"))      # DNS rebinding still refused
+        self.assertIsNotNone(r("/", "navigate", "document", origin="https://evil.example")) # a form POSTed to / is not a link
+
 
 class OverHttp(unittest.TestCase):
     def setUp(self):
@@ -45,6 +54,9 @@ class OverHttp(unittest.TestCase):
         self.assertEqual(code, 403); self.assertIn("not this app", body["error"])
         self.assertEqual(self.get("/api/quit", **{"Sec-Fetch-Site": "cross-site"})[0], 403)           # and the app is still up
         self.assertEqual(self.get("/api/about")[0], 200)
+        nav = {"Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "navigate", "Sec-Fetch-Dest": "document"}
+        with urlopen(Request(f"http://127.0.0.1:{self.port}/", headers=nav)) as r: self.assertEqual(r.status, 200)  # opened from a link
+        self.assertEqual(self.get("/api/quit", **nav)[0], 403)
         req = Request(f"http://127.0.0.1:{self.port}/api/job/cancel", data=b"{}", headers={"Origin": "https://evil.example", "Content-Type": "application/json"})
         with self.assertRaises(HTTPError) as cm: urlopen(req)
         self.assertEqual(cm.exception.code, 403)

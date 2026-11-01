@@ -79,19 +79,28 @@ def backup_for(sid, refresh=False, log=None):
 LOCAL_HOSTS = {"127.0.0.1", "localhost", "[::1]"}
 
 
-def request_refusal(host, origin, fetch_site, server_port):
+PAGE_PATHS = ("/", "/index.html")
+
+
+def request_refusal(host, origin, fetch_site, server_port, path=None, fetch_mode=None, fetch_dest=None):
     """Why a request to the local API is refused, or None. The server listens on 127.0.0.1 only, but a web page in any
     browser on this computer can still send it requests:
     * DNS rebinding: a page on evil.example whose name re-points to 127.0.0.1 can read the answers; its requests carry
       Host: evil.example, so the Host must be this server itself (127.0.0.1 / localhost with our port).
     * Cross-site requests (CSRF): another site's page can make the browser call /api/quit or start a restore even though
       it cannot read the answer; browsers mark those with Origin and Sec-Fetch-Site, which must then be this server.
-    The app's own window and command-line tools (curl, the smoke tests) send neither header and pass."""
+    The app's own window and command-line tools (curl, the smoke tests) send neither header and pass.
+    Opening the page itself from a link on another page (a top-level navigation to /) is allowed: it changes nothing, and the
+    page's own calls that follow are same-origin. Only as the whole tab (Sec-Fetch-Dest document), never inside another
+    site's frame."""
     h = (host or "").strip().lower()
     name, _, port = h.rpartition(":") if not h.startswith("[") or "]:" in h else (h, "", "")
     if not name: name, port = h, ""
     if name not in LOCAL_HOSTS or (port and port != str(server_port)):
         return f"refused: Host {host!r} is not this app"
+    if (path in PAGE_PATHS and (fetch_mode or "").lower() == "navigate" and (fetch_dest or "").lower() == "document"
+            and not origin):
+        return None
     if fetch_site and fetch_site.lower() not in ("same-origin", "none"):
         return f"refused: a {fetch_site} request from another site"
     if origin and origin.lower() == "null":
@@ -108,7 +117,9 @@ def request_refusal(host, origin, fetch_site, server_port):
 class H(BaseHTTPRequestHandler):
     def log_message(self, *a): pass
     def _refused(self):
-        why = request_refusal(self.headers.get("Host"), self.headers.get("Origin"), self.headers.get("Sec-Fetch-Site"), self.server.server_address[1])
+        why = request_refusal(self.headers.get("Host"), self.headers.get("Origin"), self.headers.get("Sec-Fetch-Site"), self.server.server_address[1],
+                              urlparse(self.path).path if self.command == "GET" else None, self.headers.get("Sec-Fetch-Mode"),
+                              self.headers.get("Sec-Fetch-Dest"))
         if why: self._send(403, jdump({"error": why}))
         return bool(why)
     def _send(self, code, body, ctype="application/json; charset=utf-8", extra=None):
