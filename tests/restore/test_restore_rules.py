@@ -535,6 +535,8 @@ class MeterRetry(unittest.TestCase):
             res = b.restore([{"share": "share", "ver": 1, "path": "", "is_dir": True}], "nas:R", job)
         self.assertEqual((res["restored"], res["errors"]), (1, 0))
         self.assertEqual(job["moved"]["upload"], 100)                              # 100 bytes moved, not 160
+
+
 class CompareTarget(unittest.TestCase):
     """Niels restored folders himself: the run's selection against a target by name and size, nothing written."""
     def test_local_target_counts_same_missing_and_other_size_and_writes_nothing(self):
