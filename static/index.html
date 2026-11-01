@@ -342,7 +342,7 @@ $('#aboutClose').onclick=()=>$('#dlgAbout').close();
 const UPD={st:null,timer:null};
 // Release notes are Markdown from the release body (anyone with release access can edit it): escape everything, then headings,
 // bullets, **bold** and `code` only. Links stay text ("label (address)"): in an update dialog a crafted link would look trustworthy.
-function mdLite(s){return esc(s||'').split(/\n{2,}/).map(b=>{const L=b.split('\n');
+function mdLite(s){return esc(s||'').split(/\n{2,}/).filter(b=>b.trim()).map(b=>{const L=b.split('\n').filter(l=>l.trim());   // a trailing newline must not turn a list into a paragraph
   const inl=x=>x.replace(/\*\*(.+?)\*\*/g,'<b>$1</b>').replace(/`([^`]+)`/g,'<code>$1</code>').replace(/\[([^\]]+)\]\(([^)\s]+)\)/g,'$1 ($2)');
   if(L.every(l=>/^\s*[*-] /.test(l)))return '<ul style="margin:4px 0;padding-left:20px">'+L.map(l=>'<li>'+inl(l.replace(/^\s*[*-] /,''))+'</li>').join('')+'</ul>';
   const m=/^(#{1,4}) (.*)$/.exec(L[0]);if(m&&L.length===1)return `<p style="margin:8px 0 4px"><b>${inl(m[2])}</b></p>`;
@@ -455,7 +455,7 @@ function progressHtml(job,rich,extra){const stoppedEarly=!!(job.result&&job.resu
   // Fixed slots that never disappear once the job runs: phase | done of total | speed | time left | elapsed. The "still working"
   // note has its own small line under the bar, so the main line keeps its shape from poll to poll.
   const slots=[];
-  if(dlDone)slots.push(`${human(job.total_bytes)} downloaded · ${pct}%`);else if(job.total_bytes)slots.push(`${human(job.done_bytes||0)} of ${human(job.total_bytes)} (${pct}%)`);else slots.push(`${pct}%`);
+  if(dlDone)slots.push(String(job.label||'').startsWith('restore')?`${human(job.total_bytes)} · ${pct}%`:`${human(job.total_bytes)} downloaded · ${pct}%`);   // a restore from a local backup downloads nothingelse if(job.total_bytes)slots.push(`${human(job.done_bytes||0)} of ${human(job.total_bytes)} (${pct}%)`);else slots.push(`${pct}%`);
   if(running&&job.total_bytes&&!dlDone)slots.push(speedText(job.id));
   if(running)slots.push(eta||'time left: estimating…');
   if(running)slots.push(`${sinceText(job.started)} elapsed`);
