@@ -318,9 +318,10 @@ $('#about').onclick=async()=>{$('#dlgAbout').showModal();try{const a=await api('
 $('#aboutClose').onclick=()=>$('#dlgAbout').close();
 // ---------- updates (server: /api/update, PR #178). Background polls use fetch directly, so the header's activity pill stays quiet.
 const UPD={st:null,timer:null};
-// Release notes are Markdown: escape everything, then headings, bullets, **bold**, `code` and [links](https://…) only.
+// Release notes are Markdown from the release body (anyone with release access can edit it): escape everything, then headings,
+// bullets, **bold** and `code` only. Links stay text ("label (address)"): in an update dialog a crafted link would look trustworthy.
 function mdLite(s){return esc(s||'').split(/\n{2,}/).map(b=>{const L=b.split('\n');
-  const inl=x=>x.replace(/\*\*(.+?)\*\*/g,'<b>$1</b>').replace(/`([^`]+)`/g,'<code>$1</code>').replace(/\[([^\]]+)\]\((https:\/\/[^)\s]+)\)/g,'<a href="$2" target="_blank" rel="noopener">$1</a>');
+  const inl=x=>x.replace(/\*\*(.+?)\*\*/g,'<b>$1</b>').replace(/`([^`]+)`/g,'<code>$1</code>').replace(/\[([^\]]+)\]\(([^)\s]+)\)/g,'$1 ($2)');
   if(L.every(l=>/^\s*[*-] /.test(l)))return '<ul style="margin:4px 0;padding-left:20px">'+L.map(l=>'<li>'+inl(l.replace(/^\s*[*-] /,''))+'</li>').join('')+'</ul>';
   const m=/^(#{1,4}) (.*)$/.exec(L[0]);if(m&&L.length===1)return `<p style="margin:8px 0 4px"><b>${inl(m[2])}</b></p>`;
   return '<p style="margin:4px 0">'+L.map(inl).join('<br>')+'</p>'}).join('')}
