@@ -409,7 +409,12 @@ async function setCache(){const el=$('#setCache');let c;try{c=await api('/api/ca
   el.innerHTML=`<p class="help" style="margin:0 0 6px">Downloaded backup data the app keeps so it does not fetch it twice. Everything here is downloaded again when needed; clearing it never undoes the file lists or the preparation.</p>
     <div class="row" style="gap:8px"><span>In use: <b>${human(c.bytes)}</b></span><span class="mono help">${esc(c.path)}</span><button class="small" id="setClear" ${c.bytes?'':'disabled'}>Clear the cache</button><span id="setCacheMsg" class="status"></span></div>
     ${c.parts.filter(p=>p.bytes).length>1?`<table style="margin-top:4px">${c.parts.filter(p=>p.bytes).map(p=>`<tr><td>${esc(p.label)}</td><td class="num">${human(p.bytes)}</td></tr>`).join('')}</table>`:''}`;
-  const b=$('#setClear');b.onclick=async()=>{b.disabled=true;$('#setCacheMsg').innerHTML='<span class="spin"></span> Clearing…';
+  // Two steps: the cache can hold hours of downloads (the index files of a backup without its own chunk table), so the first
+  // click says what goes and what it costs, the second clears.
+  const b=$('#setClear');b.onclick=async()=>{if(!b.dataset.sure){b.dataset.sure='1';b.textContent=`Clear ${human(c.bytes)}`;b.classList.add('primary');
+      $('#setCacheMsg').innerHTML=`<span style="color:var(--warn)">This deletes ${human(c.bytes)} of downloaded data. It is downloaded again when needed, which can take hours on a slow line.</span> <button class="small ghost" id="setClearNo">Cancel</button>`;
+      $('#setClearNo').onclick=()=>setCache();return}
+    b.disabled=true;$('#setCacheMsg').innerHTML='<span class="spin"></span> Clearing…';
     try{const r=await post('/api/cache/clear',{});toast(`Cleared ${human(r.freed)}${r.left?` (${human(r.left)} still in use)`:''}.`,{kind:'ok'});setCache()}catch(e){$('#setCacheMsg').textContent=e.message;b.disabled=false}}}
 function openSettings(){$('#dlgSettings').showModal();SET.editing=null;setConns();setTheme();setCache();updPoll(false).then(setUpdates)}
 $('#setUpdCheck').onclick=async()=>{$('#setUpdState').innerHTML='<span class="spin"></span> checking…';const st=await updPoll(true);setUpdates();if(!st)$('#setUpdState').textContent='updates are not available in this version'};
