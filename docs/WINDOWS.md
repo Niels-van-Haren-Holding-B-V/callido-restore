@@ -24,7 +24,7 @@ embedded. Install, upgrade and uninstall never touch the user's data in `%USERPR
 The window is pywebview on Edge WebView2. Windows 11 ships the WebView2 runtime; Windows 10 gets it with Edge updates. Without
 it the app falls back to the default browser (`run_window` failure path in `callido_restore/app/main.py`).
 
-## Code changes needed (PR A)
+## Code changes (done in #112 unless noted)
 
 Found by reading the code; each is a small, guarded change that leaves macOS unchanged.
 
@@ -46,11 +46,16 @@ Found by reading the code; each is a small, guarded change that leaves macOS unc
    placeholders say `/Volumes/...`. Server paths come back as the server sees them; the UI follows (coordinated with hbk-3).
 8. `_exit_app` skips `pkill -P` on Windows; the rclone daemon is stopped explicitly, mapper groups by (4).
 
-## Not done yet
+## Status (2026-11-01)
 
-* **Code signing.** The MSI and exe are unsigned, so SmartScreen shows "Windows protected your PC" (More info → Run anyway).
-  A code-signing certificate (OV/EV, or Azure Trusted Signing) is needed to remove that; `signtool` hooks into `build_msi.py`
-  after PyInstaller and after `wix build`.
-* **Releases.** On a `v*` tag, `build-windows` attaches `CallidoRestore-x64.msi` and its `.sha256` to the release that
-  `build-macos` publishes (from 0.4.0 on). Unsigned until there is a certificate.
-* **Real-machine test** on Windows 10 and 11 with a real backup (Drive source, local NAS share as `\\nas\share` or `Z:\`).
+Done: the MSI (#108) and the code changes above (#112), the MSI in every release from 0.4.0 (#116), a real-machine test on
+Windows 10 and 11 by Niels (install, Drive source, SMB connect to the NAS, restore to the NAS), SMB connect feedback and
+plain errors found in that test (#138, #139, #141, #143), restore errors in the UI and app.log (#160).
+
+Open:
+
+* **Code signing**: not wanted for now (Niels, 2026-10-31). The MSI and exe are unsigned, so SmartScreen shows "Windows
+  protected your PC" (More info → Run anyway); the README and release notes say so. If it is wanted later: Azure Artifact
+  Signing or SignPath Foundation; `signtool` hooks into `build_msi.py` after PyInstaller and after `wix build`.
+* **Orphan cleanup** (item 6 above) is still a no-op on Windows: rclone or mapper processes left by a crashed app are not
+  ended at the next start. Port to CIM `Win32_Process` with the parent's liveness instead of ppid 1.
