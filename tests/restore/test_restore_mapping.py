@@ -13,7 +13,7 @@ from urllib.request import Request, urlopen
 from callido_restore import paths
 from callido_restore.restore.backup import Backup
 from callido_restore.restore.destination import file_target, restore_roots
-from callido_restore.server.api import BACKUPS, H, job_file
+from callido_restore.server.api import BACKUPS, H, JOBS, job_file
 from callido_restore.sources.source import SOURCES, Source
 
 
@@ -251,6 +251,21 @@ class RestoreApiTests(_Fixture):
             return e.code, json.loads(e.read())
     def get(self, path):
         with urlopen(f"http://127.0.0.1:{self.srv.server_address[1]}{path}") as r: return json.loads(r.read())
+
+    def test_a_restore_is_listed_to_resume_once_and_not_while_it_runs(self):
+        # Niels: "restores you can resume ... 2 now"; "we always restore the current restore that is still busy"
+        items = [dict(self.items[0], dest=self.dA), dict(self.items[1], dest=self.dB)]
+        stopped = {"id": "0123456789", "src": "t8", "items": items, "dest": "", "state": "paused", "label": "restore", "started": 0}
+        other = dict(stopped, id="0123456780", items=items[:1])                       # another restore: stays
+        paths.JOBS_DIR.mkdir(parents=True, exist_ok=True)
+        for d in (stopped, other): (paths.JOBS_DIR / f"{d['id']}.json").write_text(json.dumps(d))
+        code, j = self.post("/api/restore", {"src": "t8", "dest": "", "items": items})
+        self.assertEqual((code, j["replaced"]), (200, 1))                                 # the same restore, started again, replaces the saved one
+        ids = [x["id"] for x in self.get("/api/jobs/saved")]
+        self.assertNotIn("0123456789", ids); self.assertIn("0123456780", ids)
+        JOBS[j["id"]]["state"] = "running"                                                # while it runs it is not "to resume"
+        try: self.assertNotIn(j["id"], [x["id"] for x in self.get("/api/jobs/saved")])
+        finally: JOBS[j["id"]]["state"] = "done"
 
     def test_mapped_target_inside_backup_is_refused(self):
         bad = [dict(self.items[0]), dict(self.items[1], dest=os.path.join(self.src.local, "Pool"))]

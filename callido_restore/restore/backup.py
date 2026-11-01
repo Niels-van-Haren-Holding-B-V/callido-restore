@@ -757,10 +757,15 @@ class Backup:
             job["cache_bytes"] = dl_size[0]
         prof = transfer.profile("restore")                     # sources/transfer.py: 8 bucket files in flight, 16 queued ahead
         ex = concurrent.futures.ThreadPoolExecutor(max_workers=prof.workers); pending = {}
+        def is_there(f):
+            """a file with this name is at the target already (one listing of a NAS target at the start; a local one is looked
+            at): nothing is downloaded for it, it is skipped or reported by its size below"""
+            root, rel = file_target(f, items, dest)
+            return rel in existing[root] if is_remote_path(root) else os.path.lexists(os.path.join(root, rel))
         def prefetch_from(i):
             w = []; order = []
             for j, f in enumerate(files[i:i + 40], i):
-                if f["off"] is None or f["off"] < 0: continue
+                if f["off"] is None or f["off"] < 0 or is_there(f): continue
                 try: locs, _ = pool.plan(f["off"])
                 except Exception: continue
                 bks = sorted({bk for bk, _ in locs}); w.append((j, f, bks))
@@ -895,7 +900,7 @@ class Backup:
             (a Stop during the check resumes with the check)"""
             if not again:
                 with lock: cur[0] = i; publish_tx()
-            if f["off"] is not None and f["off"] >= 0:
+            if f["off"] is not None and f["off"] >= 0 and not is_there(f):   # a file already at the target needs no backup data
                 try:
                     for bk, _ in pool.plan(f["off"])[0]:
                         fut = pending.get(bk)

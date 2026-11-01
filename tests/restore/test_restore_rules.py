@@ -467,6 +467,30 @@ class DownloadBars(unittest.TestCase):
         self.assertIn({"kind": "bucket", "name": "1.bucket.1", "done": 50, "total": 100, "rate": 25}, seen[0])
         self.assertEqual(job["transfers"], [])                                    # cleared at the end
 
+class AlreadyThereNeedsNoDownload(unittest.TestCase):
+    def test_files_at_the_target_are_skipped_without_fetching_their_data(self):
+        # Niels: "the check on what's restored already ... can't that be quicker by a listing": a file already at the target
+        # (name and size) is skipped before anything of the backup is downloaded for it
+        d = Path(tempfile.mkdtemp()); self.addCleanup(shutil.rmtree, d, True)
+        dest = d / "dest"; (dest / "share").mkdir(parents=True); (dest / "share" / "f0.txt").write_bytes(b"xxxx")
+        p = mock.patch.object(paths, "JOBS_DIR", d / "jobs"); p.start(); self.addCleanup(p.stop)
+        fetched = []
+        class Src:
+            id = "there"; cache_dir = d / "cache"
+            def in_cache(self, q): return True
+            def locate(self, rel): return None
+            def listdir(self, rel): return {}
+            def ensure(self, rel, progress=None, **kw):
+                fetched.append(rel); q = d / "cache" / rel; q.parent.mkdir(parents=True, exist_ok=True); q.write_bytes(b"b"); return q
+        class Pool(_FakePool):
+            def plan(self, off): return [(off, 0)], None
+            def bucket_name(self, b, kind): return f"Pool/0/0/{b}.bucket.1"
+        b = _Backup.__new__(_Backup); b.src = Src(); b._fake_pool = Pool(str(dest))
+        b.restore_plan = lambda items, skip_meta=True: [{"share": "share", "path": f"f{n}.txt", "off": n, "size": 4, "mtime": 0} for n in range(2)]
+        res = b.restore([{"share": "share", "ver": 1, "path": "", "is_dir": True}], str(dest), {"id": "th", "label": "restore", "started": 0.0})
+        self.assertEqual((res["restored"], res["skipped"]), (1, 1))
+        self.assertEqual(fetched, ["Pool/0/0/1.bucket.1"])                      # nothing fetched for f0.txt
+
 class UploadWatchdog(unittest.TestCase):
     def test_kill_uploads_ends_running_upload_processes(self):
         import sys, threading as th, time as _t
