@@ -180,9 +180,32 @@ class ChunkIndexPath(unittest.TestCase):
         finally:
             shutil.rmtree(work, ignore_errors=True)
 
+    def test_records_with_an_attribute_tlv_in_front(self):
+        """#161/#162: some records carry a 28-byte attribute TLV (0xa93b0186) in front of the chunk list, pointer A = B + 36
+        (photos on the real backup). Through the chunk table they restore like any other file."""
+        self.check(self.run_flow(6, 1024, attr_photos=True))
+
     @unittest.skipUnless(os.environ.get("HBK_E2E_STRESS") == "1", "HBK_E2E_STRESS=1: large files over many buckets (E5 layout)")
     def test_large_files_over_many_buckets(self):                                       # E5 layout
         self.check(self.run_flow(20, 1024))
+
+
+
+class AttributeRecordsOnTheMap(unittest.TestCase):
+    """The same records on a backup without its own chunk table (the inferred map)."""
+    def test_records_with_an_attribute_tlv_are_placed(self):
+        """E8 (fixed in #194): core.pool.parse_record_stream reported a record at its list header (p - 4), which is B + 24 for a
+        record with the attribute TLV; recmeta and the restore key records by virtual-file pointer B. The records lose their
+        size and tag (no anchor) and their placements land under a key the restore never asks for: every Photos file is
+        "not placed yet", and their large neighbours on the same writer go with them (scale 1 / 256 KiB: 11 of 24 placed;
+        without the TLVs 24 of 24)."""
+        work = tempfile.mkdtemp(prefix="hbk-e2e-attr-")
+        try:
+            rep = flow.run_inprocess(work, scale=1, bucket_kb=256, attr_photos=True)
+            for ver, r in rep["restores"].items():
+                self.assertEqual(r["wrong_bytes"], [], ver); self.assertEqual(r["missing"], [], f"v{ver}: " + flow.summary(rep))
+        finally:
+            shutil.rmtree(work, ignore_errors=True)
 
 
 if __name__ == "__main__":

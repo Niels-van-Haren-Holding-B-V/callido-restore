@@ -32,6 +32,8 @@ except ImportError:                                                     # pragma
 ROOT_PARENT = bytes.fromhex("5058F1AF5058F1AF8388633F609CADB75A75DC9D")
 BLOCK = 2260
 REC_MAGIC = 0xa93b0200
+ATTR_MAGIC = 0xa93b0186                         # 28-byte attribute TLV some records carry in front of the chunk list (photos)
+ATTR_BODY = bytes.fromhex("000000c9" "01000000" "12000000" "01000000" "08000000" "ffffffff" "00000000")   # last word = the list header's flags
 TAGK = 9
 SLICE = 8 * 1024 * 1024                         # every sliced stream (*.idx) is cut at 8 MiB
 SET_OF_WRITER = {0: 4, 1: 3, 2: 1, 3: 2}
@@ -131,7 +133,7 @@ class Pool:
     def close_all(self):
         for w in range(4): self.close(w)
 
-    def store_file(self, w, data, mtime, phantom_ok=True):
+    def store_file(self, w, data, mtime, phantom_ok=True, attr=False):
         """Back up one file through writer w. Returns (off_virtual_file, tag, info)."""
         if len(data) < FILE_POOL_MAX:
             n = self.next_fp; self.next_fp += 1; self.stats["file_pool"] += 1
@@ -156,8 +158,14 @@ class Pool:
         s = SET_OF_WRITER[w]; st = self.recs[s]
         refs = b"".join(struct.pack(">Q", 64 + 29 * g) for g in ids)
         body = refs + struct.pack(">II", 0x74000000, zlib.crc32(refs))
-        rec_off = len(st); st += struct.pack(">III", 0, REC_MAGIC, len(body)) + body
-        a = rec_off + 12; off = len(self.vf)
+        if attr:                   # docs/FORMAT.md "Attribute record before a chunk list": B -> the TLV body, A = B + 36
+            rec_off = len(st) + 8
+            st += struct.pack(">II", ATTR_MAGIC, 28) + ATTR_BODY + struct.pack(">II", REC_MAGIC, len(body)) + body
+            a = rec_off + 36
+        else:
+            rec_off = len(st); st += struct.pack(">III", 0, REC_MAGIC, len(body)) + body
+            a = rec_off + 12
+        off = len(self.vf)
         f = [0] * 14
         f[0], f[1] = (s << 16) | (a >> 32), a & 0xffffffff
         f[2], f[3], f[4] = self.rev, 0x402, 0x64
@@ -167,7 +175,7 @@ class Pool:
         self.vf += struct.pack(">14I", *f)
         K = min(len(chs), TAGK)
         tag = hashlib.md5(b"".join(hashlib.md5(c).digest() for c in chs[:K])).digest() + struct.pack(">I", sum(len(c) for c in chs[:K]))
-        return off, tag, {"kind": kind, "chunks": len(chs), "set": s, "rec_off": rec_off, "writer": w, "ids": ids, "src_ids": src_ids}
+        return off, tag, {"kind": kind, "chunks": len(chs), "set": s, "rec_off": rec_off, "writer": w, "ids": ids, "src_ids": src_ids, "attr": attr}
 
     def chunk_index(self, rev):
         """Pool/chunk_index/<k>.idx.<rev> (hbk-1, after woutervanranst/synology-hyperbackup-reverse-engineering §2): 64-byte header,
@@ -225,7 +233,7 @@ def plan(scale):
     return run1, run2, run3_lock
 
 
-def build(root, scale=1.0, bucket_cap=256 * 1024, versions=(101, 102, 103), rotate=False, rotate_copy=True, chunk_index=False, id_base_blocks=0):
+def build(root, scale=1.0, bucket_cap=256 * 1024, versions=(101, 102, 103), rotate=False, rotate_copy=True, chunk_index=False, id_base_blocks=0, attr_photos=False):
     """Write the backup at `root`; returns the manifest {"versions": {ver: {share: {path: {...}}}}, ...}.
 
     rotate=True adds version rotation (hbk-1, 2026-10-31): a run before the first kept one whose files are gone from every
@@ -236,7 +244,10 @@ def build(root, scale=1.0, bucket_cap=256 * 1024, versions=(101, 102, 103), rota
 
     chunk_index=True writes the backup's own chunk table (Pool/chunk_index, real Hyper Backup always has it; off by default so
     the tests of the inferred map keep exercising the map). id_base_blocks starts the chunk ids that many 2260-id blocks up;
-    128 puts ids around 289,000, where a 29-byte record straddles the first 8 MiB slice boundary of the table."""
+    128 puts ids around 289,000, where a 29-byte record straddles the first 8 MiB slice boundary of the table.
+
+    attr_photos=True gives every pooled Photos file the 28-byte attribute TLV in front of its chunk list (as photos on the real
+    backup have: 4,421 of 349,914 files), so virtual-file pointer A = B + 36 instead of B + 12."""
     root = os.path.abspath(root); os.makedirs(root, exist_ok=True)
     if os.listdir(root): raise FileExistsError(f"{root} is not empty")
     run1, run2, lock = plan(scale)
@@ -247,7 +258,7 @@ def build(root, scale=1.0, bucket_cap=256 * 1024, versions=(101, 102, 103), rota
     rr = [0]
     def put(share, path, data, ver, mtime, status):
         w = rr[0] % 4; rr[0] += 1
-        off, tag, info = pool.store_file(w, data, mtime)
+        off, tag, info = pool.store_file(w, data, mtime, attr=attr_photos and share == "Photos")
         state[(share, path)] = {"data": data, "mtime": mtime, "off": off, "tag": tag, "status": status, "info": info, "ctime": mtime}
     rotated = {}
     if rotate:                     # run v1-1: backed up, then rotated away (no snapshot, no version_info row)
@@ -302,7 +313,7 @@ def build(root, scale=1.0, bucket_cap=256 * 1024, versions=(101, 102, 103), rota
              "copies": sorted([g, g0] for g, g0 in pool.alias.items())}       # phantom id -> the stored id it copies       # used ids whose 29-byte record crosses an 8 MiB slice boundary
     manifest = {"format": "hbkgen-1", "truth": truth, "root": root, "last_clean": v2, "incident": v3, "bucket_cap": bucket_cap, "stats": pool.stats,
                 "versions": {str(v): {sh: {p: {"sha256": hashlib.sha256(e["data"]).hexdigest(), "size": len(e["data"]), "mtime": e["mtime"],
-                                               "kind": e["info"]["kind"], "status": e["status"], "writer": e["info"].get("writer"),
+                                               "kind": e["info"]["kind"], "status": e["status"], "writer": e["info"].get("writer"), "attr": bool(e["info"].get("attr")),
                                                "buckets": sorted({pool.where[g][0] for g in (e["info"].get("src_ids") or e["info"].get("ids") or []) if g in pool.where})}
                                            for (s, p), e in sorted(snaps[v].items()) if s == sh} for sh in shares} for v in versions}}
     return manifest
@@ -358,9 +369,10 @@ def main(argv):
     ap.add_argument("--bucket-kb", type=int, default=256, help="bucket size in KiB (real backups: ~52 MB)")
     ap.add_argument("--chunk-index", action="store_true", help="write Pool/chunk_index (the backup's own chunk table)")
     ap.add_argument("--id-base-blocks", type=int, default=0, help="start chunk ids this many 2260-id blocks up (128: a record straddles the 8 MiB slice)")
+    ap.add_argument("--attr-photos", action="store_true", help="pooled Photos files get the attribute TLV in front of their chunk list")
     ap.add_argument("--rotate", action="store_true", help="add a rotated-away run: purged buckets, reused bucket ids, copy of an untagged original")
     a = ap.parse_args(argv)
-    m = build(a.out, a.scale, a.bucket_kb * 1024, rotate=a.rotate, chunk_index=a.chunk_index, id_base_blocks=a.id_base_blocks)
+    m = build(a.out, a.scale, a.bucket_kb * 1024, rotate=a.rotate, chunk_index=a.chunk_index, id_base_blocks=a.id_base_blocks, attr_photos=a.attr_photos)
     mp = a.out.rstrip("/\\") + ".manifest.json"
     with open(mp, "w") as f: json.dump(m, f, indent=1)
     print(f"{a.out}: {m['stats']}; manifest {mp}")
