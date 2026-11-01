@@ -83,3 +83,23 @@ def list_destination(dest):
     except rclone.RcloneError as e:
         raise RuntimeError(f"cannot list the destination {dest}: {e}; nothing was written")
     return {e["Path"] for e in entries}
+
+def remote_stat(path):
+    """lsjson entry of one file at a remote target, or None"""
+    return rclone.stat(path)
+
+def move_no_replace(src, dst):
+    """rename on the target, never over an existing file (T8): True when moved"""
+    return rclone.move_no_replace(src, dst)
+
+def delete_own(path):
+    """delete a file this app created at a target: only its temporary upload names (``<name>.callido-restore.part``)"""
+    if not path.endswith(".callido-restore.part"): raise ValueError(f"refusing to delete {path}: not a temporary upload name")
+    rclone.deletefile(path)
+
+def destination_sizes(dest):
+    """Every file at a remote destination with its size, {path: size} (recursive); raises like list_destination."""
+    try: entries = rclone.ls(dest, recurse=True, files_only=True)
+    except rclone.RcloneError as e:
+        raise RuntimeError(f"cannot list the destination {dest}: {e}")
+    return {e["Path"]: e.get("Size") for e in entries}

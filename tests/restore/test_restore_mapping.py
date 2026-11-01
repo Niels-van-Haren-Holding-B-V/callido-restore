@@ -54,7 +54,7 @@ class FakePool:
     def bucket_name(self, bk, kind): return f"{bk}.bucket"
     def extract(self, off, out, size=0, mtime=0, job=None, fh_cache=None):
         self.extracted.append(out)
-        with open(out, "w") as fh: fh.write(f"content {off}")
+        with open(out, "w") as fh: fh.write(f"content {off}".ljust(size)[:size] if size else f"content {off}")   # the plan's size: the final check compares it
         os.utime(out, (mtime, mtime))
 
 
@@ -119,11 +119,11 @@ class MappedRestoreTests(_Fixture):
         self.assertEqual(int(os.stat(os.path.join(self.dB, "docs", "deeper", "w.txt")).st_mtime), 1700000003)
 
     def test_existing_file_is_skipped_per_root(self):
-        os.makedirs(os.path.join(self.dB, "docs", "deeper")); open(os.path.join(self.dB, "docs", "deeper", "w.txt"), "w").write("mine")
+        os.makedirs(os.path.join(self.dB, "docs", "deeper")); open(os.path.join(self.dB, "docs", "deeper", "w.txt"), "w").write("mine12345")   # the backup's size (9): skipped
         res = self.b.restore(self.items, "", self.job())
         self.assertEqual((res["restored"], res["skipped"]), (3, 1))                      # restored = written files; skipped ones are not restored
         self.assertEqual(len(self.b.pool.extracted), 3)
-        self.assertEqual(open(os.path.join(self.dB, "docs", "deeper", "w.txt")).read(), "mine")
+        self.assertEqual(open(os.path.join(self.dB, "docs", "deeper", "w.txt")).read(), "mine12345")
 
     def test_mapping_persisted_and_resumed(self):
         job = self.job(); job["cancel"] = True                                               # pause before the first file
@@ -190,8 +190,9 @@ class ResumeCountsTests(_Fixture):
         # resume the way /api/restore/resume does: seed the counts from the file, start at next_index
         job2 = self.job("res"); job2.update({k: saved[k] for k in ("done_files", "skipped", "errors", "verified", "identical_copy", "unverified")})
         res2 = FakeBackup(self.src, FILES).restore(saved["items"], saved["dest"], job2, start_at=saved["next_index"])
-        self.assertEqual((res2["restored"], res2["skipped"], res2["errors"]), (3, 0, 1))
-        self.assertEqual([e["path"] for e in job2["errors"]], ["A/sub/y.txt"])
+        # the final check finds y.txt missing and restores it again (this pool reads it): no error left
+        self.assertEqual((res2["restored"], res2["skipped"], res2["errors"]), (4, 0, 0))
+        self.assertEqual((job2["errors"], res2["check"]["restored_again"], res2["check"]["ok"]), ([], 1, 4))
 
     def test_error_total_survives_the_capped_list(self):                     # the saved file keeps the last 200 errors; the total must not restart from 200
         job = self.job("cap"); job["cancel"] = True
@@ -205,7 +206,9 @@ class ResumeCountsTests(_Fixture):
                 super().extract(off, out, **kw)
         b2 = FakeBackup(self.src, FILES); b2.pool = Pool()
         res = b2.restore(saved["items"], saved["dest"], job2, start_at=saved["next_index"])
-        self.assertEqual(res["errors"], 251); self.assertEqual(len(job2["errors"]), 201)
+        # after the final check the errors are the files still wrong (y.txt, retried and failing), counted by the check itself;
+        # errors of files that are fine now (here: the 250 from before) are gone
+        self.assertEqual(res["errors"], 1); self.assertEqual([e["path"] for e in job2["errors"]], ["A/sub/y.txt"])
 
     def test_failed_file_is_written_to_the_log(self):                        # app.log: Niels saw 109 errors in the UI and none in the log
         import io

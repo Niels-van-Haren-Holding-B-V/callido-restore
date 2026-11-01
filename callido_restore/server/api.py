@@ -466,7 +466,7 @@ class H(BaseHTTPRequestHandler):
                 err = restore_target_error(b.src, d["items"], dest, create=False)     # source check again, roots still there
                 if err: return self._json({"error": err}, 400)                        # the job file stays, so it can be resumed later
                 jf.unlink()
-                seed = {k: d[k] for k in ("done_files", "skipped", "errors", "errors_total", "verified", "identical_copy", "unverified", "unverified_total") if k in d}   # counts and lists from before the pause
+                seed = {k: d[k] for k in ("done_files", "skipped", "errors", "errors_total", "verified", "identical_copy", "unverified", "unverified_total", "done_ahead") if k in d}   # counts and lists from before the pause
                 if "errors_total" not in seed and "errors" in seed: seed["errors_total"] = len(seed["errors"])        # a job file from before the counters
                 if "unverified_total" not in seed and "unverified" in seed: seed["unverified_total"] = len(seed["unverified"])
                 def resumed(job):

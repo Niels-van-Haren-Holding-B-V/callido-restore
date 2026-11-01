@@ -62,11 +62,17 @@ The pictures show synthetic backups with made-up names; `scripts/guide_screensho
 Encrypted (`.L0CK3D`) copies are detected and reported as unreadable.
 
 ## A restore to the NAS that was interrupted
-Each file is uploaded to the NAS under a temporary name, `<name>.<code>.partial`, and renamed when it is complete, so a file
-under its real name on the NAS is always whole. An upload that was cut off (Stop, a dropped connection, a closed app, or one the
-app ended because nothing moved for 10 minutes) can leave such a `.partial` file next to where the file belongs. The app never
-deletes anything on the NAS, so remove leftover `.partial` files yourself once the restore is complete (in File Station, search
-for `.partial`). Resuming the restore uploads the file again under its real name.
+Each file is uploaded to the NAS under a temporary name, `<name>.callido-restore.part`, and renamed on the NAS only when it is
+complete, never over a file that is there. So a file under its real name is always whole, also on NAS connections that write
+in place (WebDAV, for example). An upload that was cut off (Stop, a dropped connection, a closed app, or one the app ended
+because nothing moved for 10 minutes) leaves only that temporary name. Resume uploads the file again, and the check at the end
+of the restore deletes the app's own `.callido-restore.part` files of the restored folders. It deletes nothing else on the NAS.
+rclone's own `<name>.<code>.partial` files (from version 1.2.0 and older) are counted in the result line; remove them yourself
+in File Station (search for `.partial`).
+
+A file that is already at the target with the size the backup gives is skipped. A file with another size is kept as it is
+and listed under Errors: it may be the start of an interrupted copy made by another tool or an older version. Delete it if it
+is incomplete, and restore again.
 
 ## Settings
 
@@ -107,5 +113,13 @@ computer together with the sign-in token.
 Nothing is ever written to the backup. What the app downloads goes into its own cache folder (`~/.hbk-explorer/cache`):
 the backup's chunk table (`Pool/chunk_index`, read in 8 MB slices as a restore needs them; up to the table's full size,
 6.8 GB for a 1.5 TB backup, and kept for later restores), the snapshot file lists you load, and the bucket files a restore
-reads (removed again once the cache holds more than 20 GB of them). You can delete the cache folder when the app is closed;
-it is filled again on demand.
+reads. Bucket files only pass through: once the cache holds more than 5 GB of them, the ones the next files do not need are
+deleted, and a finished restore deletes them all (a stopped one keeps them for Resume). You can delete the cache folder when
+the app is closed; it is filled again on demand.
+
+## The check at the end of a restore
+When a restore has gone through all files, the app checks the target: every file of the restore must be there with the size
+the backup gives. Files that are missing are restored again (twice at most; when the NAS refused an upload, after waiting two
+minutes, because the NAS had the file in use). The result line says how many files are at the target, how many were
+restored again and how many are still missing or have another size; those stay in the error list. A Stop during the check
+resumes with the check.
