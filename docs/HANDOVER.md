@@ -1,86 +1,76 @@
-## RULE (owner, 2026-10-31 00:35 CET): no personal data in the repo (H18)
+# Handover (state as of 2026-11-01, v1.0.0)
 
-The repo is public. Never put real share, folder or file names, family names, the NAS hostname, IP addresses, local paths
-(`/Users/...`), session ids or version numbers of the real backup in code, tests, UI text, examples, PR descriptions or committed
-docs. Use neutral examples: shares "Documents", "Photos", "Projects", "homes"; users "alice"/"bob"; host "nas"; backup folder
-"backup_1.hbk"; IPs from 192.0.2.0/24; version 1234. `scripts/check_private.sh` runs in CI with a denylist from the
-`PRIVATE_DENYLIST` repository secret (locally: a gitignored `.private-denylist`); keep triage notes with real names uncommitted.
-History is not rewritten.
+Read this first, then `docs/FORMAT.md` (the reverse-engineered format), `docs/ARCHITECTURE.md` and `docs/TASKS.md` (open work).
+Per-session details are in `docs/handovers/` (the newest ones are the most useful: `2026-10-31-1800-claude-hbk-1.md` for the
+chunk table, `2026-10-31-1530-claude-hbk6.md` for the end-to-end tests).
 
-## T13 App name + footer (owner, 2026-10-30 22:31 CET) — claim in docs/TASKS.md first
+## Rules (owner)
 
-- App name: **Callido Restore** (window title, .app/.dmg name, About, README; keep it in one constant). Subtitle/tagline: "Restore Synology Hyper Backup (.hbk) files". About screen + README: "Not affiliated with or endorsed by Synology. Hyper Backup is a trademark of Synology Inc." Never use "Hyper Backup"/"HyperBackup" as (part of) our product name or logo, and no Synology logos/look.
-- Footer (subtle, part of the T12 clean design): small Callido raccoon logo (the one used on https://callido.nl; get the file from the owner or the site, store as assets/callido-raccoon.svg/png) + "Made by Callido · callido.nl · callido.dev", both clickable links (https://callido.nl, https://callido.dev) opening in the default browser.
+* **No personal data in the repo (H18, 2026-10-31).** The repo is public. Never put real share, folder or file names, family
+  names, the NAS hostname, IP addresses, local paths (`/Users/...`), session ids or version numbers of the real backup in code,
+  tests, UI text, examples, PR descriptions or committed docs. Use neutral examples: shares "Documents", "Photos", "Projects",
+  "homes"; users "alice"/"bob"; host "nas"; backup folder "backup_1.hbk"; IPs from 192.0.2.0/24; version 1234.
+  `scripts/check_private.sh` runs in CI (`private-check`) with a denylist from the `PRIVATE_DENYLIST` secret (locally a
+  gitignored `.private-denylist`); run it before pushing. Triage notes with real names stay uncommitted. History is not rewritten.
+* **Never push to main.** Every change is a PR; the reviewer session (hbk-4) reviews, posts the verdict as a PR comment and
+  merges what it approves (squash). Niels may merge himself too.
+* **Releases only when Niels asks.** A version PR (`callido_restore/about.py`, `pyproject.toml`, `.github/RELEASE_NOTES.md`)
+  is merged, then the session that opened it tags `vX.Y.Z` on the merge commit and builds the local DMG. CI (`build.yml`)
+  publishes the GitHub release with both DMGs; `build-windows.yml` attaches the MSI to it. Don't wait on or babysit CI.
+* **One team.** Ownership in `docs/TASKS.md` is coordination, not a fence: fix what blocks the user, note it for the owner.
+* **Local smoke tests** use `HBK_SMOKE_PORT` (a free random port); 8765 is Niels's running app. Never kill `rclone rcd`
+  processes while his app runs, and never copy a new DMG over one that is mounted.
 
-## T12 UI design (owner, 2026-10-30 22:28 CET) — claim in docs/TASKS.md first
+## Team (Claude Code sessions, addressed by name)
 
-The app must look like a clean 2026 macOS app, not an 80s app, and stay simple for beginners:
-- Native macOS feel: system font (-apple-system / SF Pro), generous spacing, rounded corners, subtle shadows, light + dark mode (prefers-color-scheme).
-- Colours from the logo (purple to coral) as accent only; neutral background.
-- One clear step at a time (wizard style), plain-language labels, one primary button per screen, helpful empty states and progress bars with ETA.
-- Hide advanced options behind "Advanced"; no jargon on the main path.
-- No heavy framework needed; plain CSS variables are fine. Keep it accessible (contrast, keyboard focus).
+| Session | Role |
+| --- | --- |
+| hbk-1 | pool format and reader: chunk table, inferred map (placer), record parsing |
+| hbk-2 | preparation, sources, rclone daemon, packaging, releases |
+| hbk-3 | UI (`static/index.html`) and the restore engine |
+| hbk-4 | PR reviewer: reviews, comments and merges |
+| hbk-5 | Windows port and MSI, SMB connect |
+| hbk-6 | end-to-end tests on a synthetic backup (`tests/e2e/`) |
 
-## New tasks from the owner (2026-10-30 22:20 CET) — pick one, claim it in docs/TASKS.md first ("IN PROGRESS (hbk-N): ...")
+## State
 
-- **T10 Logo**: use `assets/logo-source.jpg` (original design, no Synology look) everywhere needed: crop white margin to a transparent PNG, generate `assets/AppIcon.icns` (all macOS sizes via iconutil), use it in build_app.sh / the PyInstaller .app and the .dmg, add favicon + header logo in static/index.html, put it at the top of README.md.
-- **T11 Desktop window**: the app must run as a real desktop app, not open a browser. Use pywebview to show static/index.html (local server on 127.0.0.1 only) in a native macOS window with the app name and logo. Remove webbrowser.open, stop the server when the window closes, bundle pywebview in the .app via build_app.sh, add a smoke test.
-- Note: "Hyper Backup" is Synology's product name; consider an own app name before v0.1.0 (owner to decide).
+**v1.0.0 (2026-11-01)**: restores from a real Synology Hyper Backup on Google Drive to a NAS work end to end, on macOS
+(Apple silicon and Intel) and Windows 10/11 x64. Niels has run partial real restores (Mac, and Windows 10 and 11 machines); a full restore of one share is T2 in `docs/TASKS.md`.
 
-# Handover (state as of 2026-10-30 evening)
-
-## Cloud agent handover, 2026-10-30 (review)
-
-Wrong-size bucket indexes are not treated as complete, and `Backup.build_pool` does not start the mapper while any required index is missing or the wrong size. Remotes and configured source folders (the `.hbk` itself, extra roots, and a user-made mirror) are read-only: nothing in this change writes, renames, or deletes there.
-
-New downloads go to `~/.hbk-explorer/cache/<source-id>/` (same relative paths as in the backup). `index/<src>/pool/*` is unchanged. Indexes already on disk in the configured local path or an extra root — including the ~7 GB download in progress — are **read from that path and not fetched again**, and they are not moved or linked. That is the migration: the old location stays valid. If that local path was only a mirror you created for the tool, it is handled the same way (still read-only from now on; new files join the app cache, existing files are reused in place). A wrong-size file **in the app cache** is renamed to `<name>.mismatch` inside the cache and fetched again. A wrong-size file **in a source/mirror folder** is left byte-for-byte untouched; a correct copy is fetched into the cache instead. `indexes_local` counts only files whose size matches the listing, in the cache or in a source folder.
-
-T6 here is parser and fetch tests only. Flag-heuristic noise (mode 711, whitelist by share) is still open and not in this PR. T1/T2 still need the real backup.
-
-How to test: `python -m unittest discover -s tests -t . -v`. On the real backup, quit mid-fetch, reopen, Continue: finished indexes in the old folder must be unchanged and not downloaded again, and that folder must gain no new files.
-
-
-
-## Situation
-A NAS was hit by L0CK3D ransomware and has since been wiped and reinstalled. The Hyper Backup target on Google Drive
-(`gdrive:Synology/backup_1.hbk`, over a TB, thousands of daily runs over several years) is intact; the last run before the incident
-(version 1234 in the examples below) is the last clean one. Goal: restore all user files of that run to the new NAS with this tool
-(Synology's own restore is slow and opaque).
-
-## What works (tested)
-* Explorer: versions chart, changes, timeline, browse, search/flags, compare, file details, download of single files.
-* Pool decoding: file_pool files and chunked files reconstruct byte-exact with md5 verification (tested on buckets 0–5).
-* Restore job to a local folder and to an rclone remote (`nas:`), with prefetch, LRU cache, retries, persisted/pausable/resumable jobs.
-* Source wizard (Drive OAuth via `rclone config create`, SMB, existing remote, local).
-* Pool-map index fetch resumes. A file already at the listing size (in `~/.hbk-explorer/cache/<source>/` or in a configured source/mirror folder) is skipped. rclone only copies from the remote into the app cache (`--ignore-existing`, no delete). Stop cancels that copy. Source folders are not modified. `index/<src>/pool/` is unchanged.
-
-## In progress / to verify
-1. **Full pool map.** Needs every bucket index (tens of thousands of files, several GB). A background download into `<mirror>/backup_1.hbk/Pool/0/<d>/`
-   was at directory 10/18 at 21:15; a chained job then runs `pool.poolmap.build_poolmap`. The mapper was fixed to prefer the writer
-   with an exact size match (`strong` candidates) — re-verify it completes without exhausting the backtrack budget. If it gets stuck,
-   run `Mapper.run(verbose=True)` to see the first bucket with no candidate and inspect that writer's piece (see `docs/FORMAT.md`).
-   The in-app "Build pool map" / "Continue pool map" button does the same (bulk index fetch + mapping). The fetch skips finished
-   directories and can be stopped; this has unit tests but has not been run against the live download (see below).
-2. A 3-file restore test to `nas:Restore/restore-test` was interrupted by a server restart; rerun it from the wizard.
-3. Packaging (`.app` + `.dmg` via PyInstaller, GitHub Actions `build.yml`) is written but not yet run end to end.
-4. rclone's shared Google client id is being retired in 2026: users should enter their own client id/secret in the Drive step.
+* **Locating data.** A backup carries its own chunk table, `Pool/chunk_index` (#152, #156, #157; format in `docs/FORMAT.md`).
+  `PoolReader.plan()` reads it, so every chunk is located exactly and a backup with the table needs no preparation
+  (`/api/pool` reports `chunk_index`, `complete`; no auto-start). For a backup without the table the inferred map
+  (`callido_restore/pool/anchor.py`, `place.py`; 86.4 % of the bytes on the real backup) is the fallback; its preparation
+  starts by itself and can be paused.
+* **Records.** A file's chunk list is read through virtual-file pointer A; some records (photos) have an attribute TLV
+  (`0xa93b0186`) in front of the chunk-list header (#161, #162).
+* **Restore.** Never overwrites or deletes: anything already at a target is skipped, and a target inside the backup is refused.
+  Pause/Continue survives a closed app (saved jobs in `~/.hbk-explorer/jobs/`). Every restored file is reported as verified,
+  identical copy or unverified, and every chunk's md5 is checked on read. Errors are shown while a restore runs and go to `app.log`.
+* **Sources and targets.** Google Drive (own OAuth client id/secret), SMB (connect with live progress and plain error messages,
+  a saved connection can be edited), any rclone remote, local folders. One persistent `rclone rcd` serves listings and downloads
+  (one backend per connection); the bucket-index download, writes to a NAS target and connection setup still run as separate
+  rclone processes.
+* **Packaging.** `./build_app.sh` (PyInstaller + hdiutil, unsigned, not notarized) and `packaging/windows/build_msi.py`
+  (WiX 5 MSI, unsigned). CI: `test.yml` (unit tests on ubuntu and windows), `build.yml` (two DMGs, release on `v*` tags),
+  `build-windows.yml` (MSI, attached to the release).
+* **Tests.** `python -m unittest discover -s tests -t .`: unit tests per layer plus `tests/e2e/` on a synthetic backup with
+  a real pool and ground truth (`HBK_E2E=1` runs the app over HTTP, `HBK_E2E_STRESS=1` the large layouts,
+  `HBK_E2E_CHUNK_INDEX=1` the chunk-table path; `tests/e2e/ui_drive.py` drives the UI in headless Chrome).
 
 ## Known limitations
-* Files whose chunks fall outside the mapped buckets fail with "not covered"; map must be complete.
-* Dedup references to chunks in buckets not yet mapped are skipped in size checks (fine) but required for extraction.
-* Record sizes for files that only exist in old versions are unknown → weaker checks there; map still works via other files.
-* macOS TCC: a server started from a sandboxed process cannot read `/Volumes/*`; start the app from Terminal/Finder.
-* A wrong-size index in a source folder is left untouched and does not count. One in the app cache is renamed to `*.mismatch` inside the cache. The build fails before mapping until a correct-sized copy is readable.
-* Stop is honored between pool-map stages and while the bucket-index rclone copy is running. It does not interrupt the chunk-record
-  parse or the mapper once that stage has started.
-* Parser tests (T6) assume the current code where the format note is ambiguous: bucket-index crc32 is not checked; virtual-file `set`
-  is taken from pointer B (word 12) and `mtime` is word 9 only, not the u64 in words 9..10; pointer B is not required to be pointer A
-  minus 12. The pure-python LZ4 fallback does not check the uncompressed size; the `lz4` package does.
+
+* Not signed: macOS Gatekeeper ("Open Anyway") and Windows SmartScreen ("Run anyway") on first start. Signing is parked by Niels.
+* Client-side-encrypted backup tasks are not supported (T5).
+* Chunk-table slices a restore reads are kept in the app cache (up to about 6.8 GB for a 1.5 TB backup); the user guide says so.
+* Orphaned helper processes (rclone, mapper) are cleaned up at start on macOS only; on Windows that cleanup is a no-op.
+* A backup without `Pool/chunk_index` depends on the inferred map; files it cannot place are reported as errors.
+* What `Pool/chunk_index` holds for unused or purged chunk ids is not checked yet.
+* On a slow line a restore is download-bound and fetches whole buckets (see "Restore speed" in `docs/TASKS.md`).
 
 ## How to test quickly
 ```
-.venv/bin/python -m callido_restore --no-window   # then open http://127.0.0.1:8765
-curl 'localhost:8765/api/open?src=<id>' ; curl 'localhost:8765/api/pool?src=<id>'
-python -m unittest discover -s tests -t . -v      # parser + index-fetch tests (no real backup)
+.venv/bin/python -m callido_restore --no-window --port "$HBK_SMOKE_PORT"   # then open http://127.0.0.1:$HBK_SMOKE_PORT
+python -m unittest discover -s tests -t . -v
+HBK_E2E=1 HBK_SMOKE_PORT=<free port> python -m unittest tests.e2e.test_app
 ```
-Analysis scripts used during reverse engineering are not part of the repo; `pool.poolmap.build_models` prints per-writer statistics.
