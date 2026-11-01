@@ -45,9 +45,13 @@
      **Continue**. When it ends, one line sums it up: restored, skipped (already at the target), errors, size, and how many files were
      **checked** (the file's place in the backup was confirmed and every block's checksum matched while it was read). Files that
      **couldn't be verified** were restored, but check them before you rely on them; files that could not be restored at all are
-     listed under **Errors**.
+     listed under **Errors**. From a backup made by Hyper Backup every file is checked:
 
-     <img src="screenshots/guide-5-result.png" alt="Restore finished: 24 restored, 2 errors, 22 checked, 2 couldn't be verified, with both lists">
+     <img src="screenshots/guide-5-result-ready.png" alt="Restore finished: 18 restored, 0 errors, 18 checked">
+
+     A backup restored through the preparation's map can leave some files unverified or unrestored; both are listed:
+
+     <img src="screenshots/guide-6-result-older.png" alt="Restore finished: 24 restored, 2 errors, 22 checked, 2 couldn't be verified, with both lists">
 
    Files already at the target are never overwritten or deleted. During a restore to a local folder, files are staged in a hidden
    `.hbk-restore-<job id>-…` folder inside the target and moved into place one by one; it is removed when the job ends or is resumed.
