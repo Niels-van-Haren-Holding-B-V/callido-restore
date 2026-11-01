@@ -373,6 +373,19 @@ $('#updAuto').onchange=async()=>{const a=$('#updAuto');try{updRender(await post(
 $('#updCheck').onclick=async()=>{$('#updState').innerHTML='<span class="spin"></span> checking…';const st=await updPoll(true);if(!st)$('#updState').textContent='updates are not available in this version'};
 // ---------- settings (⚙): connections, backups, updates, cache in one place
 const SET={editing:null};
+// A NAS connection is saved before it is tested (so a NAS that only answers elsewhere, over Tailscale for example, can be set up).
+// When the test fails, read back what is saved: if the connection changed, say "saved, but the NAS did not answer" and offer to
+// put the previous address and user back; if nothing changed, it really was "not saved" (hbk-6's U9).
+async function smbAfterFail(name,before,err,el,typedPass,onUndone){let now=null;
+  try{CACHE.clear();const r=await (await fetch('/api/remotes')).json();now=(r.smb||{})[name+':']||null}catch(e){}
+  const addr=s=>s.host+(s.port&&String(s.port)!=='445'?':'+s.port:'');
+  if(!now){el.textContent='Not saved: '+err;return}
+  if(!before){el.innerHTML=`<span style="color:var(--warn)">The connection “${esc(name)}” was saved, but the NAS did not answer: ${esc(err)} Check the address and save again.</span>`;return}
+  if(addr(now)===addr(before)&&(now.user||'')===(before.user||'')&&!typedPass){el.textContent='Not saved: '+err;return}
+  el.innerHTML=`<span style="color:var(--warn)">Saved, but the NAS did not answer: ${esc(err)}${typedPass?' The new password is saved too.':''}</span> <button class="small" data-undo>Put back ${esc(addr(before))}</button>`;
+  el.querySelector('[data-undo]').onclick=async e=>{const b=e.target;b.disabled=true;b.textContent='Putting it back and testing it…';
+    try{const j=await post('/api/rclone/connect',{kind:'smb',name,host:addr(before),user:before.user||'',password:''});await waitJob(j.id);
+      el.textContent=`${name} points at ${addr(before)} again${typedPass?' (the password you typed stays)':''}.`;onUndone&&onUndone()}catch(e2){el.textContent='Could not put it back: '+e2.message;b.disabled=false}}}
 async function setConns(){const nas=$('#setNas'),drv=$('#setDrive');let r;try{r=await api('/api/remotes')}catch(e){nas.textContent='Could not list the connections: '+e.message;return}
   const names=r.remotes.map(n=>n.replace(/:$/,'')),smb=names.filter(n=>r.types[n+':']==='smb'),drive=names.filter(n=>r.types[n+':']==='drive');
   nas.innerHTML=smb.length?`<table>${smb.map(nm=>{const s=r.smb[nm+':']||{};
@@ -382,7 +395,7 @@ async function setConns(){const nas=$('#setNas'),drv=$('#setDrive');let r;try{r=
   drv.innerHTML=drive.length?`<table>${drive.map(nm=>{const own=r.keys[nm+':'];
     return `<tr><td class="mono">${esc(nm)}</td><td class="help">${own?'your own Google key is in use':'the shared rclone key (slower)'}</td><td style="text-align:right;white-space:nowrap"><button class="small" data-key="${esc(nm)}">${own?'Replace key':'Add your own key'}</button> <button class="small ghost" data-signin="${esc(nm)}">Sign in again</button></td></tr><tr><td colspan="3"><div class="status" data-msg="${esc(nm)}"></div></td></tr>`}).join('')}</table>`:
     '<p class="help">No Google Drive connection yet; <b>+ Add backup</b> creates one.</p>';
-  $$('#setNas [data-edit]').forEach(b=>b.onclick=()=>{SET.editing=SET.editing===b.dataset.edit?null:b.dataset.edit;setConns()});
+  $$('#setNas [data-edit]').forEach(b=>b.onclick=()=>{SET.editing=SET.editing===b.dataset.edit?null:b.dataset.edit;SET.before=SET.editing?{...(r.smb[SET.editing+':']||{})}:null;setConns()});
   $$('#setDrive [data-key]').forEach(b=>b.onclick=()=>{$('#dlgSettings').close();openAddBackup({remote:b.dataset.key+':',key:true})});
   $$('#setDrive [data-signin]').forEach(b=>b.onclick=async()=>{const nm=b.dataset.signin,msg=$(`#setDrive [data-msg="${CSS.escape(nm)}"]`);b.disabled=true;
     msg.innerHTML='<span class="spin"></span> Signing in…';
@@ -391,10 +404,10 @@ async function setConns(){const nas=$('#setNas'),drv=$('#setDrive');let r;try{r=
   const c=$('#setCancel');if(c)c.onclick=()=>{SET.editing=null;setConns()};
   const sv=$('#setSave');if(sv)sv.onclick=async()=>{const host=$('#setHost').value.trim(),port=$('#setPort').value.trim(),msg=$('#setMsg');
     if(!host){msg.textContent='Fill in the NAS address.';return}
-    const q={kind:'smb',name:SET.editing,host:host+(port&&port!=='445'?':'+port:''),user:$('#setUser').value.trim(),password:$('#setPass').value};
+    const q={kind:'smb',name:SET.editing,host:host+(port&&port!=='445'?':'+port:''),user:$('#setUser').value.trim(),password:$('#setPass').value};const before=SET.before;
     sv.disabled=true;msg.innerHTML='<span class="spin"></span> Connecting…';
     try{const j=await post('/api/rclone/connect',q);const job=await waitJob(j.id,m=>{msg.innerHTML='<span class="spin"></span> '+esc(m||'Connecting…')});
-      if(job.state==='error'){msg.textContent='Not saved: '+job.error;sv.disabled=false;return}
+      if(job.state==='error'){sv.disabled=false;await smbAfterFail(q.name,before,job.error,msg,!!q.password,()=>{if(S.tab==='restore')tabRestore()});return}
       const sh=(job.result&&job.result.shares)||[];SET.editing=null;await setConns();
       toast(`Saved ${q.name}: connected, ${sh.length} share${sh.length===1?'':'s'}.`,{kind:'ok'});if(S.tab==='restore')tabRestore()}
     catch(e){msg.textContent='Not saved: '+e.message;sv.disabled=false}}}
@@ -420,6 +433,24 @@ function openSettings(){$('#dlgSettings').showModal();SET.editing=null;setConns(
 $('#setUpdCheck').onclick=async()=>{$('#setUpdState').innerHTML='<span class="spin"></span> checking…';const st=await updPoll(true);setUpdates();if(!st)$('#setUpdState').textContent='updates are not available in this version'};
 $('#settingsBtn').onclick=openSettings;$('#settingsClose').onclick=()=>$('#dlgSettings').close();
 updPoll(false);
+// Automatic updates (hbk-2's #197): after the verified download the "update" job counts down to the restart (restart_at, epoch s).
+// A notice that stays until the job ends shows the countdown and "Later" (cancel: that version is not installed automatically
+// again in this run; the next start offers it again, About installs it at any time). Polled every 5 s only in automatic mode.
+const UPDW={el:null,timer:null,tick:null,job:null};
+function updWarnHide(){if(UPDW.el){UPDW.el.remove();UPDW.el=null}clearInterval(UPDW.tick);UPDW.tick=null;UPDW.job=null}
+function updWarnShow(j){UPDW.job=j;if(!UPDW.el){const el=document.createElement('div');el.className='toast warn';el.style.maxWidth='460px';
+    el.innerHTML='<span id="updWarnText"></span><span class="acts"><button class="small" id="updWarnLater">Later</button></span>';$('#toasts').appendChild(el);UPDW.el=el;
+    el.querySelector('#updWarnLater').onclick=async e=>{const b=e.target;b.disabled=true;b.textContent='…';const v=UPDW.job&&UPDW.job.version;
+      try{await fetch('/api/job/cancel?id='+encodeURIComponent(UPDW.job.id))}catch(e2){}updWarnHide();
+      toast(`Version ${v||''} is installed later: at the next start of the app, or now with Install in About.`,{ms:8000})}}
+  const paint=()=>{const j=UPDW.job;if(!j||!UPDW.el)return;const s=j.restart_at?Math.max(0,Math.round(j.restart_at-Date.now()/1000)):null;
+    $('#updWarnText').textContent=s!=null?`Version ${j.version} is ready: the app closes and starts again in ${s} s.`:`Downloading version ${j.version||''} to install it automatically…`};
+  paint();if(!UPDW.tick)UPDW.tick=setInterval(paint,1000)}
+async function updWatch(){clearTimeout(UPDW.timer);let next=60000;
+  try{if(UPD.st&&UPD.st.auto){next=5000;const r=await fetch('/api/jobs');const js=r.ok?await r.json():[];
+      const j=js.find(x=>x.label==='update'&&x.state==='running');if(j&&(j.restart_at||j.version))updWarnShow(j);else updWarnHide()}else updWarnHide()}catch(e){}
+  UPDW.timer=setTimeout(updWatch,next)}
+updWatch();
 $('#quit').onclick=async()=>{if(!confirm('Stop Callido Restore? Running restore jobs are saved and can be resumed later.'))return;try{await api('/api/quit')}catch(e){}document.body.innerHTML='<p style="padding:30px;font-family:sans-serif">Callido Restore has stopped. You can close this tab.</p>'};
 const dd=t=>t?new Date(t*1000).toISOString().slice(0,10):'';
 // ---------- flow bar (1 backup → 2 run → 3 files → 4 restore)
@@ -848,7 +879,7 @@ async function tabRestore(){const el=$('#tab-restore');
     // targets and saved restores that use it keep working. The form below does it; the password may stay empty to keep it.
     const smb=r.smb||{};const editBtn=()=>{const b=$('#wzEdit');if(b)b.style.display=smb[rem()]?'':'none'};editBtn();
     $('#wzEdit').onclick=()=>{const c=smb[rem()];if(!c)return;const d=$('#wzPrep');d.open=true;
-      WD.editing=rem().replace(/:$/,'');WD.host=c.host+(c.port&&c.port!=='445'?':'+c.port:'');WD.user=c.user||'';$('#wdName').value=WD.editing;$('#wdHost').value=WD.host;$('#wdUser').value=WD.user;$('#wdPass').value='';$('#wdPass').placeholder='unchanged';
+      WD.editing=rem().replace(/:$/,'');WD.before={host:c.host,port:c.port,user:c.user||''};WD.host=c.host+(c.port&&c.port!=='445'?':'+c.port:'');WD.user=c.user||'';$('#wdName').value=WD.editing;$('#wdHost').value=WD.host;$('#wdUser').value=WD.user;$('#wdPass').value='';$('#wdPass').placeholder='unchanged';
       $('#wdConnect').textContent='Save and test';wdShow(`Editing ${rem()}: change the address, user or password (leave the password empty to keep it), then Save and test.`,'');d.scrollIntoView({block:'nearest'});$('#wdHost').focus()};
     $('#wzRem').onchange=()=>{MAP._rem=rem();saveMap();editBtn();loadShares()};
     loadShares()   // not awaited: listing an unreachable NAS takes up to 60 s, and the form's handlers below must work meanwhile
@@ -877,7 +908,7 @@ async function tabRestore(){const el=$('#tab-restore');
     if(!q.host||(!q.user&&!editing)){wdShow('Fill in the NAS address and the user.','bad');return}
     $('#wdConnect').disabled=true;wdShow('Connecting…','',true);
     try{const j=await post('/api/rclone/connect',q);const job=await waitJob(j.id,m=>wdShow(m||'Connecting…','',true));
-      if(job.state==='error'){wdShow('Not connected: '+job.error,'bad');$('#wdConnect').disabled=false;return}
+      if(job.state==='error'){$('#wdConnect').disabled=false;const el=$('#wdConn');if(el){setCls(el,'');await smbAfterFail(q.name,editing?WD.before:null,job.error,el,editing&&!!q.password,()=>setTimeout(tabRestore,800))}else wdShow('Not connected: '+job.error,'bad');return}
       MAP._rem=job.result.remote;saveMap();const sh=job.result.shares||[];WD.editing=null;   // saved: the form is a new-connection form again
       wdShow(`Connected to ${job.result.remote} · ${sh.length} share${sh.length===1?'':'s'}${sh.length?': '+sh.join(', '):''}. Pick the share for each folder below.`,'ok');setTimeout(tabRestore,800)}
     catch(e){wdShow('Not connected: '+e.message,'bad');$('#wdConnect').disabled=false}};
