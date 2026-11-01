@@ -193,9 +193,8 @@ class ChunkIndexPath(unittest.TestCase):
 
 class AttributeRecordsOnTheMap(unittest.TestCase):
     """The same records on a backup without its own chunk table (the inferred map)."""
-    @unittest.expectedFailure
     def test_records_with_an_attribute_tlv_are_placed(self):
-        """hbk-6 finding E8: core.pool.parse_record_stream reports a record at its list header (p - 4), which is B + 24 for a
+        """E8 (fixed in #194): core.pool.parse_record_stream reported a record at its list header (p - 4), which is B + 24 for a
         record with the attribute TLV; recmeta and the restore key records by virtual-file pointer B. The records lose their
         size and tag (no anchor) and their placements land under a key the restore never asks for: every Photos file is
         "not placed yet", and their large neighbours on the same writer go with them (scale 1 / 256 KiB: 11 of 24 placed;
