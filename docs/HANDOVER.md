@@ -77,8 +77,12 @@ HBK_E2E=1 HBK_SMOKE_PORT=<free port> python -m unittest tests.e2e.test_app
 
 ## Release signing and updates
 
-The app checks GitHub for a newer release once a day (`callido_restore/update.py`, off with a switch in the app or
-`HBK_NO_UPDATE_CHECK=1`) and installs it only when the release is signed with the Callido release key:
+The app checks GitHub for a newer release once a day (`callido_restore/update.py`) and installs it only when the release is
+signed with the Callido release key. The setting in the app: "only mention" (default: shown, installed on a click), "install
+automatically" (the same download and checks without a click, started every 10 minutes by `server/api.py` `auto_update_tick`
+only when no restore or preparation runs, and asked again right before the app closes; a failed automatic install is not
+retried for that release and stays offered for a click; on macOS it never opens the disk image unasked) or "don't check" (also
+`HBK_NO_UPDATE_CHECK=1`).
 
 * **Who holds the key.** An Ed25519 key pair. The private key exists only as the GitHub Actions secret `RELEASE_SIGNING_KEY`
   (Niels adds it; nobody else keeps a copy, the local file is deleted after adding it). The public key is in

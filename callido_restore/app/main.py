@@ -7,7 +7,7 @@ from callido_restore import paths
 from callido_restore.about import APP_NAME, VERSION
 from callido_restore.paths import RCLONE, _bundled, _resource_roots
 from callido_restore.restore.jobs import JOBS
-from callido_restore.server.api import H, _exit_app
+from callido_restore.server.api import H, _exit_app, start_auto_update
 from callido_restore.sources import rclone
 from callido_restore.sources.source import load_sources
 
@@ -108,6 +108,7 @@ def main():
             return
         raise SystemExit(f"cannot listen on 127.0.0.1:{a.port}: {e} (another program uses this port; try --port)")
     _log(f"{APP_NAME} {VERSION} on http://127.0.0.1:{a.port}  (config: {paths.CONF_DIR})")
+    if not a.smoke: start_auto_update()                         # the automatic update setting (and the daily check)
     if not windowed:
         if not a.no_window: threading.Timer(0.6, lambda: _open_browser(a.port)).start()
         try: srv.serve_forever()

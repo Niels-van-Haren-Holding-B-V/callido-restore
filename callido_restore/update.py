@@ -11,8 +11,11 @@ Security model (docs/HANDOVER.md, "Release signing"):
 * HTTPS only, certificates verified (Python's default context), to ``api.github.com`` for the release and to GitHub's
   release-asset hosts for the files; the repository is ``about.REPO``.
 
-``status()`` answers at once from a state file and checks in the background at most once a day; network errors are silent; the
-check can be turned off (``set_check(False)`` or ``HBK_NO_UPDATE_CHECK=1``). ``install(job, exit_app)`` downloads, verifies and
+``status()`` answers at once from a state file and checks in the background at most once a day; network errors are silent. The
+setting (``set_mode``) is ``"mention"`` (the default: check daily, show it, install on a click), ``"auto"`` (also install a
+newer signed release by itself, through the same checks, once no restore or preparation runs: ``auto_due`` plus the server's
+``auto_update_tick``) or ``"off"`` (no check; also ``HBK_NO_UPDATE_CHECK=1``). An automatic install that fails is not
+retried for that release (``auto_failed``); it stays offered for a click. ``install(job, exit_app)`` downloads, verifies and
 installs: on macOS it replaces the app bundle in place (files this app downloads carry no quarantine flag) and restarts through
 a helper that waits for this process to end; when the bundle is not writable or anything fails it opens the verified disk image
 for a manual drag. On Windows it hands over to ``update_windows`` (msiexec upgrade in place, then restart).
@@ -60,13 +63,39 @@ def version_tuple(v):
 def newer(tag, current=VERSION): return version_tuple(tag) > version_tuple(current)
 
 
-def check_enabled():
-    if os.environ.get("HBK_NO_UPDATE_CHECK") == "1": return False
-    return _read().get("check", True)
+MODES = ("auto", "mention", "off")
+
+
+def mode():
+    """The update setting; a state file from before the setting (only ``check``) reads as mention or off."""
+    if os.environ.get("HBK_NO_UPDATE_CHECK") == "1": return "off"
+    d = _read()
+    if d.get("mode") in MODES: return d["mode"]
+    return "mention" if d.get("check", True) else "off"
+
+
+def check_enabled(): return mode() != "off"
+
+
+def set_mode(m):
+    if m not in MODES: raise ValueError(f"unknown update setting {m!r} (one of {', '.join(MODES)})")
+    d = _read(); d["mode"] = m; d["check"] = m != "off"; _write(d); log(f"setting: {m}"); return status()
 
 
 def set_check(on):
-    d = _read(); d["check"] = bool(on); _write(d); return status()
+    """The older on/off switch: on keeps an automatic setting, off turns checking off."""
+    return set_mode(("auto" if mode() == "auto" else "mention") if on else "off")
+
+
+class Postponed(RuntimeError):
+    """An automatic install waits: a restore or preparation started while the update downloaded (the download is kept)."""
+
+
+def auto_due(st=None):
+    """An automatic install should start now: the setting is auto, a newer signed release is installable, and it has not
+    failed automatically before. Whether a job runs is the caller's (the server's) to check."""
+    st = st or status()
+    return st["mode"] == "auto" and st["installable"] and _read().get("auto_failed") != st["latest"]
 
 
 def platform_asset():
@@ -134,7 +163,7 @@ def status(force=False):
         if (force or (due and check_enabled())) and not _checking[0]:
             _checking[0] = True; threading.Thread(target=_check_now, daemon=True, name="update-check").start()
     rel = d.get("release") or {}; tag = rel.get("tag_name") or ""; avail = bool(tag) and newer(tag); asset = platform_asset()
-    return {"current": VERSION, "check": check_enabled(), "checking": _checking[0], "checked": d.get("checked"),
+    return {"current": VERSION, "check": check_enabled(), "mode": mode(), "auto": mode() == "auto", "checking": _checking[0], "checked": d.get("checked"),
             "available": avail, "latest": tag.lstrip("v"), "name": rel.get("name") or tag, "notes": rel.get("body") or "",
             "url": rel.get("html_url") or f"https://github.com/{REPO}/releases/latest", "asset": asset,
             "signed_updates": bool(UPDATE_PUBLIC_KEYS),
@@ -249,13 +278,17 @@ def mac_swap_script(app, new_app, pid):
             f"open {q(app)}")
 
 
-def install_mac(dmg, exit_app):
+def install_mac(dmg, exit_app, open_fallback=True):
     """Replace this app with the verified disk image's app and restart; returns {'opened': dmg} when it falls back to a
-    manual drag (not the frozen app, the bundle's folder not writable, or a step failed)."""
+    manual drag (not the frozen app, the bundle's folder not writable, or a step failed). Without ``open_fallback`` (an
+    automatic install) the disk image is not opened unasked: {'manual': dmg}."""
+    def fallback():
+        if not open_fallback: return {"manual": str(dmg)}
+        subprocess.run(["open", str(dmg)], capture_output=True); return {"opened": str(dmg)}
     app = current_bundle()
     if not app or not os.access(os.path.dirname(app), os.W_OK):
-        log("in-place update not possible here; opening the verified disk image instead")
-        subprocess.run(["open", str(dmg)], capture_output=True); return {"opened": str(dmg)}
+        log("in-place update not possible here; " + ("opening the verified disk image instead" if open_fallback else "leaving it for a manual install"))
+        return fallback()
     mnt = tempfile.mkdtemp(prefix="callido-update-"); new_app = os.path.join(os.path.dirname(app), "." + os.path.basename(app) + ".new")
     try:
         subprocess.run(["hdiutil", "attach", "-nobrowse", "-readonly", "-mountpoint", mnt, str(dmg)], check=True, capture_output=True, timeout=120)
@@ -264,9 +297,8 @@ def install_mac(dmg, exit_app):
         shutil.rmtree(new_app, ignore_errors=True)
         subprocess.run(["ditto", src, new_app], check=True, capture_output=True, timeout=600)
     except (subprocess.SubprocessError, OSError, RuntimeError) as e:
-        log(f"in-place update failed ({str(e)[:200]}); opening the verified disk image instead")
-        shutil.rmtree(new_app, ignore_errors=True); subprocess.run(["open", str(dmg)], capture_output=True)
-        return {"opened": str(dmg)}
+        log(f"in-place update failed ({str(e)[:200]})")
+        shutil.rmtree(new_app, ignore_errors=True); return fallback()
     finally:
         subprocess.run(["hdiutil", "detach", mnt], capture_output=True); shutil.rmtree(mnt, ignore_errors=True)
     log(f"new app staged next to {app}; restarting")
@@ -276,8 +308,26 @@ def install_mac(dmg, exit_app):
     return {"restarting": app}
 
 
-def install(job, exit_app):
-    """A job: fetch, verify and install the known newer release on this computer."""
+def install(job, exit_app, auto=False, may_install=None):
+    """A job: fetch, verify and install the known newer release on this computer. ``auto``: started by the automatic setting,
+    without a click; ``may_install()`` is asked again right before the app closes (Postponed when a job started meanwhile).
+    An automatic install that fails is remembered, so it is not retried for that release."""
+    if not auto: return _install(job, exit_app, False, may_install)
+    tag = ((_read().get("release") or {}).get("tag_name") or "").lstrip("v")
+    try:
+        out = _install(job, exit_app, True, may_install)
+    except Postponed as e:
+        log(str(e)); raise
+    except BaseException as e:
+        d = _read(); d["auto_failed"] = tag; _write(d); log(f"automatic install of {tag} failed ({str(e)[:200]}); offered for a click instead"); raise
+    if "manual" in out:
+        d = _read(); d["auto_failed"] = tag; _write(d)
+    return out
+
+
+def _install(job, exit_app, auto, may_install):
+    def check_may():
+        if may_install and not may_install(): raise Postponed("update downloaded; it installs when the restore or preparation has finished")
     rel = _read().get("release")
     if not rel or not newer(rel.get("tag_name", "")): raise RuntimeError("no newer version is known; check for updates first")
     asset = platform_asset()
@@ -285,15 +335,18 @@ def install(job, exit_app):
     prog = lambda done, total: (job.__setitem__("done_bytes", done), job.__setitem__("total_bytes", total or None),
                                 job.__setitem__("progress", done / total if total else 0.0))
     cancelled = lambda: bool(job.get("cancel"))
-    job["message"] = f"downloading version {rel['tag_name'].lstrip('v')}"; log(f"install {rel['tag_name']} ({asset})")
+    job["message"] = f"downloading version {rel['tag_name'].lstrip('v')}"; log(f"install {rel['tag_name']} ({asset}){' automatically' if auto else ''}")
     if paths.WINDOWS:
         from callido_restore import update_windows                    # hbk-5: msiexec upgrade in place and restart
         msi = update_windows.download(rel, progress=prog, cancelled=cancelled)
+        check_may()
         job["message"] = "installing; the app closes and starts again"
         update_windows.install_and_relaunch(msi)
         return {"installing": str(msi)}
     dmg = download_verified(rel, asset, progress=prog, cancelled=cancelled)
+    check_may()
     job["message"] = "installing; the app closes and starts again"
-    out = install_mac(dmg, exit_app)
+    out = install_mac(dmg, exit_app, open_fallback=not auto)
+    if "manual" in out: job["message"] = "this app cannot replace itself here: install the new version with the button in About"
     if "opened" in out: job["message"] = "opened the new version: quit this app, drag Callido Restore to Applications, then open it"
     return out
