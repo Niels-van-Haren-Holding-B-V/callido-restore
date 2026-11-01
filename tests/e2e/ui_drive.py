@@ -275,9 +275,10 @@ def upload_flow(b, base, notes, shot):
     time.sleep(1)
     b.js("""(()=>{const o=document.querySelector('#wzOne');if(!o.checked){o.checked=true;o.dispatchEvent(new Event('change',{bubbles:true}))}
              const p=document.querySelector('#wzOnePath');p.value='e2enas:restore';p.dispatchEvent(new Event('input',{bubbles:true}))})()""")
-    time.sleep(1); b.js("document.querySelector('#rsGo').click()"); t0 = time.time(); seen = []; most = 0
-    while time.time() - t0 < 120:
-        if restores() and not any(j["state"] == "running" for j in restores()): break
+    time.sleep(1); b.js("document.querySelector('#rsGo').click()"); t0 = time.time(); seen = []; most = 0; jid = None
+    while time.time() - t0 < 300:                       # until this restore job itself has ended (a slow runner takes minutes)
+        if jid is None: jid = next((j["id"] for j in restores()), None)
+        elif shots.api(base, "/api/job", id=jid).get("state") != "running": time.sleep(2.5); break     # the page polls every ~2 s
         bars = b.js("[...document.querySelectorAll('#rsXfers .xf')].map(x=>x.innerText.replace(/\\n/g,' '))") or []
         if len(bars) > most: most = len(bars); seen = bars; head = b.text("#rsXfers").split("\n")[0]
         if len(bars) >= 2 and not getattr(b, "_shot", None): shot(b, "upload-bars"); b._shot = True
