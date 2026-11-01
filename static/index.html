@@ -956,7 +956,9 @@ async function tabRestore(){const el=$('#tab-restore');
   const cmpHtml=r=>{const n=(x,w)=>`${(x||0).toLocaleString()} ${w}${x===1?'':'s'}`;
     const head=`<p style="margin:6px 0"><b>${(r.same||0).toLocaleString()} of ${n(r.files,'file')} are already there</b>`+
       (r.missing?` · <span style="color:var(--warn)"><b>${(r.missing).toLocaleString()} missing</b> (${human(r.missing_bytes||0)})</span>`:' · nothing missing')+
-      (r.differs?` · ${n(r.differs,'file')} with another size`:'')+`</p>`;
+      (r.differs?` · ${n(r.differs,'file')} with another size`:'')+`</p>`+
+      // a target folder that does not exist yet counts as empty (hbk-1's #220: result.missing_targets)
+      (r.missing_targets||[]).map(t=>`<p class="help" style="margin:0 0 6px"><span class="mono">${esc(t)}</span> is not there yet: all its files count as missing, and a restore creates it.</p>`).join('');
     const go=r.missing&&!$('#rsGo').disabled?`<div class="row" style="margin:0 0 6px"><button class="small primary" id="rsCmpGo">Restore the missing files</button><span class="help">Starts the restore to these targets; files already there are skipped and nothing is overwritten.</span></div>`:'';
     const byFolder=(r.missing_by_folder||[]).length?`<div class="tablewrap"><table><tr><th>Folder</th><th class="num">missing files</th><th class="num">size</th></tr>${r.missing_by_folder.map(f=>`<tr><td class="mono">${esc(f.folder)}</td><td class="num">${(f.files||0).toLocaleString()}</td><td class="num">${human(f.bytes||0)}</td></tr>`).join('')}</table></div>`:'';
     const ml=(r.missing_list||[]).length?`<details class="adv"><summary>Missing files${r.missing>r.missing_list.length?` (first ${r.missing_list.length.toLocaleString()} of ${r.missing.toLocaleString()})`:''}</summary><div class="tablewrap"><table>${r.missing_list.map(f=>`<tr><td class="mono">${esc(f.path)}</td><td class="num">${human(f.size||0)}</td></tr>`).join('')}</table></div></details>`:'';
