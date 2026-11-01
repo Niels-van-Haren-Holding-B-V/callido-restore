@@ -20,6 +20,11 @@ class Refusal(unittest.TestCase):
         self.assertIsNotNone(r("127.0.0.1:8765", None, "cross-site"))                       # cross-site <img src=/api/quit>
         self.assertIsNotNone(r("127.0.0.1:8765", "http://127.0.0.1:9999"))
         self.assertIsNotNone(r(None))
+        self.assertIsNotNone(r("127.0.0.1:8765", "null"))                                  # sandboxed iframe / data: page, older engine
+        self.assertIsNotNone(r("127.0.0.1:8765", "null", "cross-site"))
+        self.assertIsNone(r("127.0.0.1:8765", "null", "same-origin"))                       # only when the browser says same-origin
+        # what the real pywebview window sends (probed): GET without Origin, POST with our origin, both same-origin
+        self.assertIsNone(r("127.0.0.1:8765", None, "same-origin")); self.assertIsNone(r("127.0.0.1:8765", "http://127.0.0.1:8765", "same-origin"))
 
 
 class OverHttp(unittest.TestCase):

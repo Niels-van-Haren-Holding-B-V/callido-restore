@@ -94,7 +94,12 @@ def request_refusal(host, origin, fetch_site, server_port):
         return f"refused: Host {host!r} is not this app"
     if fetch_site and fetch_site.lower() not in ("same-origin", "none"):
         return f"refused: a {fetch_site} request from another site"
-    if origin and origin.lower() != "null":
+    if origin and origin.lower() == "null":
+        # a sandboxed iframe or a data:/file: page sends "Origin: null"; the app's own window never does (checked in a real
+        # pywebview window: GETs carry no Origin, POSTs carry http://127.0.0.1:<port>), so null passes only when the browser
+        # itself says same-origin, never on an older engine that sends no Sec-Fetch-Site
+        if (fetch_site or "").lower() not in ("same-origin", "none"): return "refused: a request from an opaque origin (sandboxed or local page)"
+    elif origin:
         o = origin.lower().rstrip("/")
         if o not in {f"http://{n}:{server_port}" for n in LOCAL_HOSTS}: return f"refused: Origin {origin!r} is not this app"
     return None
