@@ -653,7 +653,7 @@ async function tabRestore(){const el=$('#tab-restore');
      <div class="tree" id="rsTree"></div>
      <details class="adv"><summary>Advanced</summary><div class="row"><label><input type="checkbox" id="rsMeta" checked> skip Synology metadata (@eaDir thumbnails, @SynoResource, .DS_Store)</label><label><input type="checkbox" id="rsFiles" ${localStorage.getItem('rsFiles')==='1'?'checked':''}> show single files in the tree</label></div></details>`,S.basket.length>0)+
   step(3,'Where should the files go?',`<p class="help" style="margin:0">Each shared folder you selected from is restored into a folder of your choice on the NAS, usually the shared folder with the same name. Selected subfolders keep their place under it (<code>Documents/Invoices/2025</code> → <code>&lt;target&gt;/Invoices/2025</code>), with no version or source folder in between. Nothing at a target is ever overwritten or deleted; files keep their original modification times.</p>
-     <div class="row" style="margin:6px 0"><label>NAS connection <select id="wzRem"></select></label><span class="help" id="wzRemHelp"></span></div>
+     <div class="row" style="margin:6px 0"><label>NAS connection <select id="wzRem"></select></label><button class="small ghost" id="wzEdit" style="display:none" title="Change the NAS address, user or password of this connection">Edit</button><span class="help" id="wzRemHelp"></span></div>
      <table id="wzMap" style="margin:0 0 6px"><thead><tr><th>Folder from backup</th><th>Restore to</th><th></th></tr></thead><tbody>${shareRows().map((b,i)=>`<tr><td class="mono">${esc(b.share)}<div class="muted" style="font-size:11.5px">${b.paths.map(p=>p?esc(p):'(whole share)').join(' · ')}</div></td><td><span class="mapRemote"><select class="mapShare" data-i="${i}"><option value="">(loading…)</option></select> / <input class="mapSub" data-i="${i}" placeholder="(share root)" style="width:200px"></span><span class="mapLocal" style="display:none"><input class="mapPath" data-i="${i}" placeholder="${LOCAL_EG}/share/folder" style="width:380px"></span><div class="mono muted mapTo" data-i="${i}"></div></td><td class="status mapStat" data-i="${i}"></td></tr>`).join('')||'<tr><td colspan="3" class="muted">Select folders in step 2 first.</td></tr>'}</tbody></table>
      <div class="row" style="margin:6px 0"><button class="small" id="wzCheck">Check targets and preview</button><span id="wzCheckOut" class="status"></span></div>
      <details class="adv" id="wzPrep"><summary>No NAS connection yet? Prepare the NAS and connect</summary>
@@ -719,7 +719,13 @@ async function tabRestore(){const el=$('#tab-restore');
     const types=r.types||{};const nasLike=['smb','sftp','webdav','ftp'].map(t=>r.remotes.find(x=>types[x]===t)).find(Boolean);
     const pref=MAP._rem!=null?MAP._rem:(nasLike||r.remotes.find(x=>!srcRems.includes(x))||r.remotes[0]||'');
     $('#wzRem').innerHTML=r.remotes.map(x=>`<option ${x===pref?'selected':''}>${esc(x)}</option>`).join('')+`<option value="" ${pref===''?'selected':''}>a mounted share / local path</option>`;
-    $('#wzRem').onchange=()=>{MAP._rem=rem();saveMap();loadShares()};await loadShares()}catch(e){$('#wzRem').innerHTML='<option value="">a mounted share / local path</option>';fillRows()}
+    // Edit: an SMB connection's address, user and password can change (a VPN address, a new user); the name stays, so the
+    // targets and saved restores that use it keep working. The form below does it; the password may stay empty to keep it.
+    const smb=r.smb||{};const editBtn=()=>{const b=$('#wzEdit');if(b)b.style.display=smb[rem()]?'':'none'};editBtn();
+    $('#wzEdit').onclick=()=>{const c=smb[rem()];if(!c)return;const d=$('#wzPrep');d.open=true;
+      $('#wdName').value=rem().replace(/:$/,'');$('#wdHost').value=c.host+(c.port&&c.port!=='445'?':'+c.port:'');$('#wdUser').value=c.user||'';$('#wdPass').value='';$('#wdPass').placeholder='unchanged';
+      $('#wdConnect').textContent='Save and test';wdShow(`Editing ${rem()}: change the address, user or password (leave the password empty to keep it), then Save and test.`,'');d.scrollIntoView({block:'nearest'});$('#wdHost').focus()};
+    $('#wzRem').onchange=()=>{MAP._rem=rem();saveMap();editBtn();loadShares()};await loadShares()}catch(e){$('#wzRem').innerHTML='<option value="">a mounted share / local path</option>';fillRows()}
   const setCls=(el,c)=>{el.classList.remove('bad','ok');if(c)el.classList.add(c)};
   const showCheck=(st,r)=>{st.textContent=r.inside_source?`✗ ${r.conflict||r.dest} is the backup itself, a folder inside it, or the folder around it`:r.error?'? '+r.error:!r.exists?'✓ new folder, it will be created':r.empty?'✓ empty folder':`! already has ${r.files} entries: files already there are skipped, nothing is deleted`;setCls(st,r.inside_source||r.error?'bad':'ok');return!(r.inside_source||r.error)};
   let reason='';
@@ -740,7 +746,8 @@ async function tabRestore(){const el=$('#tab-restore');
   // The outcome is kept in WD so it survives the re-render of the tab that follows a successful connect (it used to vanish after 0.8 s).
   const wdShow=(msg,cls,busy)=>{WD.msg=msg;WD.cls=cls||'';const el=$('#wdConn');if(!el)return;setCls(el,cls);el.innerHTML=(busy?'<span class="spin"></span> ':'')+esc(msg)};
   $('#wdConnect').onclick=async()=>{const q={kind:'smb',name:$('#wdName').value.trim()||'nas',host:$('#wdHost').value.trim(),user:$('#wdUser').value.trim(),password:$('#wdPass').value};
-    if(!q.host||!q.user){wdShow('Fill in the NAS address and the user.','bad');return}
+    const editing=$('#wdPass').placeholder==='unchanged'&&!!(q.name);
+    if(!q.host||(!q.user&&!editing)){wdShow('Fill in the NAS address and the user.','bad');return}
     $('#wdConnect').disabled=true;wdShow('Connecting…','',true);
     try{const j=await post('/api/rclone/connect',q);const job=await waitJob(j.id,m=>wdShow(m||'Connecting…','',true));
       if(job.state==='error'){wdShow('Not connected: '+job.error,'bad');$('#wdConnect').disabled=false;return}

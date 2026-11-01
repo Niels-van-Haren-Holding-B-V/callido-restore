@@ -460,12 +460,20 @@ def remote_info(cache=False):
                 try: cfg = DAEMON.rc("config/get", name=n) or {}
                 except DaemonGone: raise
                 except RcloneError: cfg = {}
-                out[n + ":"] = {"type": cfg.get("type", ""), "own_key": bool(cfg.get("client_id"))}
+                out[n + ":"] = _info(cfg)
             return out
         except DaemonGone: pass
     try: dump = json.loads(_run(["config", "dump"]) or "{}")
     except ValueError: dump = {}
-    return {n + ":": {"type": (c or {}).get("type", ""), "own_key": bool((c or {}).get("client_id"))} for n, c in dump.items()}
+    return {n + ":": _info(c or {}) for n, c in dump.items()}
+
+
+def _info(cfg):
+    """What the UI may know about one connection: its type, whether it has an own Google key, and for an SMB connection the
+    address and user it connects with (for the Edit form). Never a password, secret or token."""
+    out = {"type": cfg.get("type", ""), "own_key": bool(cfg.get("client_id"))}
+    if out["type"] == "smb": out.update(host=cfg.get("host", ""), port=cfg.get("port", ""), user=cfg.get("user", ""))
+    return out
 
 
 def version():
