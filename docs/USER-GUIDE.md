@@ -61,6 +61,17 @@ The pictures show synthetic backups with made-up names; `scripts/guide_screensho
 
 Encrypted (`.L0CK3D`) copies are detected and reported as unreadable.
 
+## Settings
+
+**⚙ Settings** in the header gathers what used to be spread over the app:
+* **Connections**: every connection with its kind and address. *Edit* on a NAS changes its address, port, user or password and
+  tests it; the name stays, so backups and restore targets keep working (for example the NAS's local address at home and its
+  Tailscale address elsewhere). *Add your own key* on Google Drive opens the steps below.
+* **Backups**: the backups in the list; *Remove* forgets one here and never touches the backup itself.
+* **Updates**: the daily check on or off, and *Check for updates*.
+* **Download cache**: where it is, how much it holds, and *Clear the cache* (not while a restore or a preparation runs). Clearing
+  never undoes the file lists or the preparation; whatever is needed is downloaded again.
+
 ## Google Drive: a key of your own (optional, recommended)
 
 Google does not limit how fast you download, it limits how many *requests* an app may make per second. Without a key of your own
