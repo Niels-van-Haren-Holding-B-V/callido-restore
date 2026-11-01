@@ -42,6 +42,19 @@ jobs:
           else
             echo "HBK_CHROME=/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" >> "$GITHUB_ENV"
           fi
+      - name: Startup timing (why the app starts slowly on macOS runners)
+        run: |
+          python - <<'PY'
+          import socket, time, subprocess, os
+          def t(label, fn):
+              t0 = time.time(); fn(); print(f"{label}: {time.time() - t0:.2f}s", flush=True)
+          t("socket.gethostname()", socket.gethostname)
+          t("socket.getfqdn('127.0.0.1')", lambda: socket.getfqdn("127.0.0.1"))
+          from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
+          t("ThreadingHTTPServer(('127.0.0.1', 0)) (calls getfqdn)", lambda: ThreadingHTTPServer(("127.0.0.1", 0), BaseHTTPRequestHandler).server_close())
+          t("import callido_restore.app.main", lambda: __import__("callido_restore.app.main"))
+          t("rclone version", lambda: subprocess.run(["rclone", "version"], capture_output=True))
+          PY
       - name: Engine flows incl. the stress layouts
         run: HBK_E2E_STRESS=1 python -m unittest tests.e2e.test_e2e -v
       - name: The app over HTTP (local backup, rclone remotes as Drive and NAS, damaged bucket, API guard)
