@@ -89,6 +89,14 @@ def set_check(on):
     return set_mode(("auto" if mode() == "auto" else "mention") if on else "off")
 
 
+AUTO_WARNING = 60                                                  # seconds between "ready" and an automatic restart
+_later = set()                                                     # versions put off with "Later" in this app run
+
+
+class Later(Exception):
+    """The update job was cancelled ("Later") during an automatic install: not a failure."""
+
+
 class Postponed(RuntimeError):
     """An automatic install waits: a restore or preparation started while the update downloaded (the download is kept)."""
 
@@ -97,7 +105,8 @@ def auto_due(st=None):
     """An automatic install should start now: the setting is auto, a newer signed release is installable, and it has not
     failed automatically before. Whether a job runs is the caller's (the server's) to check."""
     st = st or status()
-    return st["mode"] == "auto" and st["installable"] and _read().get("auto_failed") != st["latest"]
+    return (st["mode"] == "auto" and st["installable"] and _read().get("auto_failed") != st["latest"]
+            and st["latest"] not in _later)
 
 
 def platform_asset():
@@ -313,13 +322,23 @@ def install_mac(dmg, exit_app, open_fallback=True):
 def install(job, exit_app, auto=False, may_install=None):
     """A job: fetch, verify and install the known newer release on this computer. ``auto``: started by the automatic setting,
     without a click; ``may_install()`` is asked again right before the app closes (Postponed when a job started meanwhile).
-    An automatic install that fails is remembered, so it is not retried for that release."""
+    An automatic install that fails is remembered, so it is not retried for that release. Before an automatic restart the job
+    counts down ``AUTO_WARNING`` seconds (``restart_at``, ``version`` on the job); cancelling the job then, or during the
+    download, is "Later": no automatic install of that version until the app starts again (the verified download is kept,
+    and a click in About still installs it)."""
     if not auto: return _install(job, exit_app, False, may_install)
     tag = ((_read().get("release") or {}).get("tag_name") or "").lstrip("v")
     try:
         out = _install(job, exit_app, True, may_install)
     except Postponed as e:
         log(str(e)); raise
+    except Later:
+        _later.add(tag); job["message"] = f"version {tag} installs the next time the app starts, or now from About"
+        log(f"automatic install of {tag} put off until the next start"); return {"later": tag}
+    except RuntimeError:
+        if job.get("cancel"):                                         # Later during the download
+            _later.add(tag); log(f"automatic install of {tag} put off during the download"); return {"later": tag}
+        d = _read(); d["auto_failed"] = tag; _write(d); raise
     except BaseException as e:
         d = _read(); d["auto_failed"] = tag; _write(d); log(f"automatic install of {tag} failed ({str(e)[:200]}); offered for a click instead"); raise
     if "manual" in out:
@@ -330,6 +349,17 @@ def install(job, exit_app, auto=False, may_install=None):
 def _install(job, exit_app, auto, may_install):
     def check_may():
         if may_install and not may_install(): raise Postponed("update downloaded; it installs when the restore or preparation has finished")
+    def countdown(version):
+        """The automatic path's warning: the UI shows "restarts in N s · Later" from ``restart_at``."""
+        if not auto: return
+        job["version"] = version; job["restart_at"] = time.time() + AUTO_WARNING; job["progress"] = 1.0
+        while (left := job["restart_at"] - time.time()) > 0:
+            if job.get("cancel"): raise Later()
+            check_may()
+            job["message"] = f"Version {version} is ready: the app restarts in {int(left + 0.999)} s"
+            time.sleep(min(0.5, left))
+        if job.get("cancel"): raise Later()
+        check_may()
     rel = _read().get("release")
     if not rel or not newer(rel.get("tag_name", "")): raise RuntimeError("no newer version is known; check for updates first")
     asset = platform_asset()
@@ -341,12 +371,12 @@ def _install(job, exit_app, auto, may_install):
     if paths.WINDOWS:
         from callido_restore import update_windows                    # hbk-5: msiexec upgrade in place and restart
         msi = update_windows.download(rel, progress=prog, cancelled=cancelled)
-        check_may()
+        check_may(); countdown(rel["tag_name"].lstrip("v"))
         job["message"] = "installing; the app closes and starts again"
         update_windows.install_and_relaunch(msi)
         return {"installing": str(msi)}
     dmg = download_verified(rel, asset, progress=prog, cancelled=cancelled)
-    check_may()
+    check_may(); countdown(rel["tag_name"].lstrip("v"))
     job["message"] = "installing; the app closes and starts again"
     out = install_mac(dmg, exit_app, open_fallback=not auto)
     if "manual" in out: job["message"] = "this app cannot replace itself here: install the new version with the button in About"

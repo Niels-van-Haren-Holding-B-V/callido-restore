@@ -245,3 +245,45 @@ class Modes(Fixture):
              mock.patch.object(update.subprocess, "run") as run:
             self.assertEqual(update.install_mac("x.dmg", lambda c: None, open_fallback=False), {"manual": "x.dmg"})
             run.assert_not_called()
+
+
+class Later_(Fixture):
+    """The automatic restart's warning: a countdown on the job, and cancelling it is "Later", not a failure."""
+    def setUp(self):
+        super().setUp()
+        for k, v in (("_checking", [True]), ("_later", set()), ("AUTO_WARNING", 0.6)):
+            p = mock.patch.object(update, k, v); p.start(); self.addCleanup(p.stop)
+        update.set_mode("auto"); d = update._read(); d.update(checked=__import__("time").time(), release=self.rel); update._write(d)
+
+    def run_job(self, job, cancel_after=None):
+        import threading
+        if cancel_after is not None: threading.Timer(cancel_after, lambda: job.__setitem__("cancel", True)).start()
+        with mock.patch.object(update.urllib.request, "urlopen", side_effect=self.fake_open), \
+             mock.patch.object(update, "install_mac", return_value={"restarting": "x"}) as inst:
+            out = update.install(job, lambda c: None, auto=True, may_install=lambda: True)
+        return out, inst
+
+    def test_countdown_then_restart(self):
+        job = {}; out, inst = self.run_job(job)
+        self.assertEqual(out, {"restarting": "x"}); self.assertEqual(job["version"], "1.2.0"); self.assertIn("restart_at", job)
+        self.assertGreater(job["restart_at"], 0)
+
+    def test_later_during_the_countdown(self):
+        job = {}; out, inst = self.run_job(job, cancel_after=0.2)
+        self.assertEqual(out, {"later": "1.2.0"}); inst.assert_not_called()
+        self.assertFalse(update.auto_due())                                         # not again in this app run
+        self.assertTrue(update.status()["installable"])                             # a click still installs it
+        self.assertNotEqual(update._read().get("auto_failed"), "1.2.0")             # and it is not a failure
+        update._later.clear(); self.assertTrue(update.auto_due())                   # the next app start
+        self.assertTrue(os.path.isfile(os.path.join(self.d, "cache", "updates", "1.2.0", "CallidoRestore-arm64.dmg")))
+
+    def test_later_during_the_download(self):
+        job = {"cancel": True}; out, inst = self.run_job(job)
+        self.assertEqual(out, {"later": "1.2.0"}); inst.assert_not_called(); self.assertNotEqual(update._read().get("auto_failed"), "1.2.0")
+
+    def test_a_click_has_no_countdown(self):
+        job = {}
+        with mock.patch.object(update.urllib.request, "urlopen", side_effect=self.fake_open), \
+             mock.patch.object(update, "install_mac", return_value={"restarting": "x"}):
+            update.install(job, lambda c: None)
+        self.assertNotIn("restart_at", job)

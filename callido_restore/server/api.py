@@ -251,7 +251,7 @@ class H(BaseHTTPRequestHandler):
                 if j: j["cancel"] = True
                 return self._json({"ok": bool(j)})
             if u.path == "/api/jobs":
-                return self._json([{k: v for k, v in j.items() if k in ("id", "label", "state", "progress", "message", "started", "done_files", "total_files", "done_bytes", "total_bytes")} for j in JOBS.values() if j["state"] == "running" or time.time() - j["started"] < 120])
+                return self._json([{k: v for k, v in j.items() if k in ("id", "label", "state", "progress", "message", "started", "done_files", "total_files", "done_bytes", "total_bytes", "version", "restart_at")} for j in JOBS.values() if j["state"] == "running" or time.time() - j["started"] < 120])
             if u.path == "/api/job":
                 j = JOBS.get(q.get("id")); return self._json(j or {"error": "no such job"})
             if u.path == "/api/open":
