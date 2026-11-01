@@ -72,6 +72,9 @@ def main():
     if len(sys.argv) > 1 and sys.argv[1] == "--mapper":           # child process of the pool preparation (pool/poolmap.py)
         from callido_restore.pool import poolmap
         return poolmap.mapper_main(sys.argv[2:])
+    if len(sys.argv) == 3 and sys.argv[1] == "--helper-smoke":     # build check (smoke_windows): start the update helper's way
+        from callido_restore import update_windows
+        return update_windows.helper_smoke(sys.argv[2])
     if len(sys.argv) == 4 and sys.argv[1] == "--scan-worker":      # one of the mapper's anchor-scan workers (pool/anchor.py)
         from callido_restore.pool import anchor
         return anchor._worker_main(sys.argv[2:])

@@ -11,6 +11,9 @@ from callido_restore import oscompat, paths
 MSI_NAME = "CallidoRestore-x64.msi"
 DETACHED_PROCESS = 0x00000008
 CREATE_NEW_PROCESS_GROUP = 0x00000200
+CREATE_NO_WINDOW = 0x08000000
+CREATE_BREAKAWAY_FROM_JOB = 0x01000000
+HELPER_START_WAIT = 20                                       # seconds for the helper to say "helper started" before the app quits
 
 
 class UpdateError(RuntimeError):
@@ -65,9 +68,68 @@ def _sha256_of(path):
     return h.hexdigest()
 
 
+def _log(msg):
+    try:
+        from callido_restore import update
+        update.log(msg)
+    except Exception: pass
+
+
+def start_helper(cmd, result, wait=HELPER_START_WAIT):
+    """Start the helper hidden and return its process once it has written "helper started" to ``result``. Raises UpdateError
+    (and ends the helper) when it exits or stays silent: then the app must not quit, or nothing would bring it back.
+
+    CREATE_NO_WINDOW, not DETACHED_PROCESS: powershell.exe is a console program and gets a hidden console this way. Started
+    detached from the windowed app (v1.2.0), the helper never wrote its first line on Niels's PC, and the app quit anyway;
+    the CI test had started it attached. Out of the app's job, when there is one that allows it, so it survives the app."""
+    result = Path(result)
+    try: result.unlink()
+    except OSError: pass
+    kw = dict(close_fds=True, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    flags = CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP
+    try: proc = subprocess.Popen(cmd, creationflags=flags | CREATE_BREAKAWAY_FROM_JOB, **kw)
+    except OSError: proc = subprocess.Popen(cmd, creationflags=flags, **kw)     # a job that forbids breaking away
+    deadline = time.time() + wait
+    while time.time() < deadline:
+        try:
+            if "helper started" in result.read_text(errors="replace"): return proc
+        except OSError: pass
+        if proc.poll() is not None:
+            raise UpdateError(f"the update helper (PowerShell) ended at once with code {proc.returncode}; nothing was installed. "
+                              "Install the new version from the release page.")
+        time.sleep(0.2)
+    try: proc.kill()
+    except OSError: pass
+    raise UpdateError(f"the update helper (PowerShell) did not start within {wait} s; a virus scanner may have blocked it. Nothing was "
+                      "installed: install the new version from the release page.")
+
+
+def helper_smoke(result):
+    """``--helper-smoke <file>`` (packaging/windows/smoke_windows.py): from the windowed exe, start a hidden PowerShell exactly
+    like the update helper, confirm it runs, and exit at once; the helper writes "helper done" 3 s later, so the smoke test
+    sees that it outlives the app. Exit code 0 when it started, 1 with the reason in ``result`` otherwise."""
+    q = _ps_quote(result)
+    cmd = ["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-Command",
+           f"Add-Content -LiteralPath {q} -Value 'helper started'; Start-Sleep -Seconds 3; Add-Content -LiteralPath {q} -Value 'helper done'"]
+    try: start_helper(cmd, result)
+    except UpdateError as e:
+        Path(result).write_text(f"failed: {e}\n"); return 1
+    return 0
+
+
+def _allow_foreground():
+    """Let the helper's windows (msiexec's progress, the UAC prompt) come to the front after the app has gone: a prompt a
+    background process asks for otherwise only blinks in the taskbar, and the app looks closed for good."""
+    try:
+        import ctypes
+        ctypes.windll.user32.AllowSetForegroundWindow(0xFFFFFFFF)          # ASFW_ANY
+    except Exception: pass
+
+
 def install_and_relaunch(msi, exit_app=None, sha256=None):
-    """Start the helper and quit the app (``exit_app(0)``, by default the server's ``_exit_app``, which also stops rclone, so
-    no file of the installed app is in use when msiexec replaces it). Only from the installed, packaged app."""
+    """Start the helper, wait until it runs, then quit the app (``exit_app(0)``, by default the server's ``_exit_app``, which also
+    stops rclone, so no file of the installed app is in use when msiexec replaces it). Only from the installed, packaged app.
+    When the helper does not start, UpdateError is raised and the app stays open."""
     if not oscompat.WINDOWS: raise UpdateError("the MSI update runs on Windows only")
     if not getattr(sys, "frozen", False): raise UpdateError("updates install only into the packaged app (this runs from source)")
     msi = Path(msi)
@@ -76,9 +138,12 @@ def install_and_relaunch(msi, exit_app=None, sha256=None):
     # ``sha256``: the value download() verified against the signed list; otherwise the file is hashed now, right after that
     # verification, and the helper refuses to install anything else.
     cmd = helper_command(msi, sys.executable, os.getpid(), log, sha256 or _sha256_of(msi))
-    subprocess.Popen(cmd, creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP, close_fds=True,
-                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    _log(f"starting the install helper (result in {log}.result)"); t0 = time.time()
+    try: proc = start_helper(cmd, str(log) + ".result")
+    except UpdateError as e:
+        _log(f"install helper failed: {e}"); raise
+    _log(f"install helper running (pid {proc.pid}, started in {time.time() - t0:.1f} s); the app quits for msiexec")
+    _allow_foreground()
     if exit_app is None:
         from callido_restore.server.api import _exit_app as exit_app
-    time.sleep(0.5)                                          # let the helper start before this process goes away
     exit_app(0)
