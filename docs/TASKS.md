@@ -18,6 +18,16 @@ Google Drive is the first source; other sources come later. macOS (Apple silicon
 
 ## Open
 
+### T2 — Full restore of one share to the NAS (real backup)
+IN PROGRESS (Niels, with hbk-1): a complete restore of one share to the NAS on the chunk-table path, with the verified / error
+counts. Niels has restored parts of the real backup (on Windows; a third of his photos failed on 0.4.1 until #161); the photo
+share is 624 GB at about 1-6 MB/s, so a full run takes a while.
+
+### Restore speed
+On a slow line the downloads are the limit. #172 raises the restore to 32 parallel bucket downloads (measured 8 → 3.6,
+16 → 5.0, 32 → 6.1 MB/s). Still open: download only the byte ranges a restore needs instead of whole ~52 MB buckets (a photo
+restore fetched 619 MB for 334 MB written).
+
 ### T5 — Encrypted Hyper Backup tasks (client-side encryption)
 Not supported. Investigate the encryption of `.db`/index files when `enable_data_encrypt=true` (password-derived key).
 Serves the goal: client-side-encrypted backups are the same restore, once someone needs it.
@@ -43,8 +53,8 @@ Open: orphan cleanup on Windows (`kill_orphans`, `kill_orphan_helpers`, `kill_st
 * **T1 Locating data** (hbk-1): the backup's own chunk table `Pool/chunk_index` (#152, #156, #157) locates every chunk exactly,
   so no preparation is needed. The inferred map (anchor-first scan + placer v3, #99–#151) is the fallback for backups without
   the table: 86.4 % of the bytes on the real backup.
-* **T2 End-to-end restore** to a NAS: done by Niels on the real backup (v0.4.x/v1.0.0); fixes from it: chunk lists via pointer A
-  for records with an attribute TLV (#161, #162), errors shown live and in `app.log` (#160).
+* **Partial real restores** (Niels, v0.4.x/v1.0.0) led to: chunk lists via pointer A for records with an attribute TLV
+  (#161, #162), errors shown live and in `app.log` (#160). The full-share run is T2 under Open.
 * **T3 Packaging**: `.app`/`.dmg` (`build_app.sh`, CI `build.yml`), releases v0.1.0 … v1.0.0.
 * **T4 Resumable preparation**: index fetch resumes, Stop/Pause, auto-start with a persisted pause (#105/#106).
 * **T7 NAS preparation wizard**, **T8 never overwrite**, **T10 logo**, **T11 desktop window**, **T12 UI design**,

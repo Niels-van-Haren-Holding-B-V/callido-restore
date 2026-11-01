@@ -35,7 +35,7 @@ chunk table, `2026-10-31-1530-claude-hbk6.md` for the end-to-end tests).
 ## State
 
 **v1.0.0 (2026-11-01)**: restores from a real Synology Hyper Backup on Google Drive to a NAS work end to end, on macOS
-(Apple silicon and Intel) and Windows 10/11 x64. Niels has run real restores on the Mac and on Windows 10 and 11 machines.
+(Apple silicon and Intel) and Windows 10/11 x64. Niels has run partial real restores (Mac, and Windows 10 and 11 machines); a full restore of one share is T2 in `docs/TASKS.md`.
 
 * **Locating data.** A backup carries its own chunk table, `Pool/chunk_index` (#152, #156, #157; format in `docs/FORMAT.md`).
   `PoolReader.plan()` reads it, so every chunk is located exactly and a backup with the table needs no preparation
@@ -64,6 +64,8 @@ chunk table, `2026-10-31-1530-claude-hbk6.md` for the end-to-end tests).
 * Chunk-table slices a restore reads are kept in the app cache (up to about 6.8 GB for a 1.5 TB backup); the user guide says so.
 * Orphaned helper processes (rclone, mapper) are cleaned up at start on macOS only; on Windows that cleanup is a no-op.
 * A backup without `Pool/chunk_index` depends on the inferred map; files it cannot place are reported as errors.
+* What `Pool/chunk_index` holds for unused or purged chunk ids is not checked yet.
+* On a slow line a restore is download-bound and fetches whole buckets (see "Restore speed" in `docs/TASKS.md`).
 
 ## How to test quickly
 ```
