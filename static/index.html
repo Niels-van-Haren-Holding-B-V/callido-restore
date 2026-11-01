@@ -157,11 +157,18 @@ footer.madeBy img{width:18px;height:18px;border-radius:5px;vertical-align:middle
   <span id="srcStatus" class="status"></span><span id="activity"><span class="spin"></span><span id="activityText">Loading…</span></span><span id="prepPill" style="display:none;align-items:center;gap:8px;font-size:12px;color:var(--muted);padding:4px 10px;border-radius:999px;background:color-mix(in srgb,var(--accent,#7c3aed) 10%,transparent)"><span class="spin" id="prepSpin"></span><span id="prepText"></span><button class="small ghost" id="prepBtn" style="padding:1px 8px"></button></span>
   <div id="basketPanel" aria-label="Restore selection"><div class="row" style="justify-content:space-between;margin-bottom:6px"><b>Restore selection</b><span id="basketSum" class="muted"></span></div><div id="basketRows"></div><div class="row" style="justify-content:flex-end;gap:8px;margin-top:10px"><button class="small ghost" id="basketClear">Clear all</button><button class="small primary" id="basketGo">Continue to restore</button></div></div>
   <span id="jobs" class="row" style="flex:1 1 0;min-width:0;justify-content:flex-end;gap:14px;overflow:hidden;white-space:nowrap"></span>
+  <span id="updNote" style="display:none;flex-shrink:0;align-items:center;gap:6px;font-size:12px;padding:3px 4px 3px 10px;border-radius:999px;background:color-mix(in srgb,var(--accent,#7c3aed) 12%,transparent)"><span id="updText"></span><button id="updMore" class="small ghost">What's new</button></span>
   <button id="basketBtn" class="small ghost" title="What you have selected for the restore">Restore selection · 0 items</button>
   <button id="about" class="small ghost" title="Version and bundled tools">About</button>
   <button id="quit" class="small ghost" title="Stop the app">Quit</button>
 </header>
+<dialog id="dlgUpd" style="max-width:620px;width:90vw"><h3 style="margin-top:0" id="updTitle">A new version is available</h3>
+  <div id="updNotes" class="help" style="max-height:45vh;overflow:auto;border:1px solid var(--line,#ddd);border-radius:8px;padding:8px 10px"></div>
+  <p class="help" id="updHow" style="margin:8px 0 0"></p><div id="updJob" style="margin-top:8px"></div>
+  <div class="row" style="justify-content:flex-end;gap:8px;margin-top:10px"><button id="updLater" class="small ghost">Later</button><a id="updDl" target="_blank" rel="noopener" style="display:none"><button class="small" id="updDlBtn" tabindex="-1">Download</button></a><button id="updGo" class="small primary" style="display:none">Install now</button></div></dialog>
 <dialog id="dlgAbout" style="max-width:520px"><h3 style="margin-top:0">Callido Restore</h3><div id="aboutBody" class="help">loading…</div>
+  <div id="aboutUpd" class="help" style="border-top:1px solid var(--line,#ddd);padding-top:8px;margin-top:8px"><label><input type="checkbox" id="updAuto"> Check for updates automatically (once a day)</label>
+    <div class="row" style="margin-top:6px"><button id="updCheck" class="small">Check for updates</button><span id="updState"></span></div></div>
   <div class="row" style="justify-content:flex-end;margin-top:10px"><button id="aboutClose" class="small">Close</button></div></dialog>
 <main>
   <ol id="flow" class="flow" aria-label="Steps"><li data-s="1"><i>1</i>Backup</li><li data-s="2"><i>2</i>Backup run</li><li data-s="3"><i>3</i>Files</li><li data-s="4"><i>4</i>Restore</li></ol><div id="toasts"></div>
@@ -309,6 +316,40 @@ const human=n=>{if(n==null)return'';const u=['B','KB','MB','GB','TB'];let i=0;wh
 const dt=t=>t?new Date(t*1000).toISOString().replace('T',' ').slice(0,19):'';
 $('#about').onclick=async()=>{$('#dlgAbout').showModal();try{const a=await api('/api/about');$('#aboutBody').innerHTML=`<p>${esc(a.tagline)}</p><p>Version <b>${esc(a.version)}</b></p><p>rclone: <code>${esc(a.rclone)}</code></p><p>Settings and caches: <code>${esc(a.config)}</code></p><p>Explore a Synology Hyper Backup (.hbk) on a timeline and restore files from it without Hyper Backup. Only read access to the backup is ever used.</p><p class="muted">${esc(a.notice)}</p>`}catch(e){$('#aboutBody').textContent='error: '+e.message}};
 $('#aboutClose').onclick=()=>$('#dlgAbout').close();
+// ---------- updates (server: /api/update, PR #178). Background polls use fetch directly, so the header's activity pill stays quiet.
+const UPD={st:null,timer:null};
+// Release notes are Markdown: escape everything, then headings, bullets, **bold**, `code` and [links](https://…) only.
+function mdLite(s){return esc(s||'').split(/\n{2,}/).map(b=>{const L=b.split('\n');
+  const inl=x=>x.replace(/\*\*(.+?)\*\*/g,'<b>$1</b>').replace(/`([^`]+)`/g,'<code>$1</code>').replace(/\[([^\]]+)\]\((https:\/\/[^)\s]+)\)/g,'<a href="$2" target="_blank" rel="noopener">$1</a>');
+  if(L.every(l=>/^\s*[*-] /.test(l)))return '<ul style="margin:4px 0;padding-left:20px">'+L.map(l=>'<li>'+inl(l.replace(/^\s*[*-] /,''))+'</li>').join('')+'</ul>';
+  const m=/^(#{1,4}) (.*)$/.exec(L[0]);if(m&&L.length===1)return `<p style="margin:8px 0 4px"><b>${inl(m[2])}</b></p>`;
+  return '<p style="margin:4px 0">'+L.map(inl).join('<br>')+'</p>'}).join('')}
+async function updFetch(check){try{const r=await fetch('/api/update'+(check?'?check=1':''));if(!r.ok)return null;const j=await r.json();return j&&!j.error?j:null}catch(e){return null}}
+function updRender(st){UPD.st=st;const n=$('#updNote');if(!n)return;
+  if(!st||!st.available){n.style.display='none'}else{n.style.display='inline-flex';$('#updText').textContent=`Version ${st.latest} is available`;
+    $('#updMore').textContent=st.installable?"What's new · Update now":"What's new · Download"}
+  const s=$('#updState');if(s)s.textContent=!st?'':st.checking?'checking…':st.available?`version ${st.latest} is available`:`this is the newest version (${st.current})`;
+  const a=$('#updAuto');if(a&&st)a.checked=!!st.check}
+async function updPoll(check){const st=await updFetch(check);if(st)updRender(st);clearTimeout(UPD.timer);UPD.timer=setTimeout(()=>updPoll(false),st&&st.checking?4000:3600*1000);return st}
+function updOpen(){const st=UPD.st;if(!st)return;$('#updTitle').textContent=`Version ${st.latest} is available (you have ${st.current})`;
+  $('#updNotes').innerHTML=st.notes?mdLite(st.notes):'No release notes.';$('#updJob').innerHTML='';
+  const dl=$('#updDl');dl.href=st.url||'#';dl.style.display=st.url?'':'none';$('#updDlBtn').classList.toggle('primary',!st.installable);
+  const go=$('#updGo');go.style.display=st.installable?'':'none';go.disabled=false;go.textContent=`Install ${st.latest} now`;
+  $('#updHow').textContent=st.installable?'Installing downloads the new version, checks its signature, and then the app closes and starts again'+(navigator.platform.startsWith('Win')?' (Windows asks for permission first)':'')+'. A paused restore continues after the update.':
+    'Download the new version from the release page and install it the same way as this one. Your backups, settings and paused restores are kept.';
+  $('#dlgUpd').showModal()}
+$('#updMore').onclick=updOpen;$('#updLater').onclick=()=>$('#dlgUpd').close();
+$('#updGo').onclick=async()=>{const go=$('#updGo');go.disabled=true;go.textContent='Starting…';let j;
+  try{j=await post('/api/update/install',{})}catch(e){$('#updJob').innerHTML=`<p style="color:var(--bad)">${esc(e.message)}</p>`;go.disabled=false;go.textContent=`Install ${UPD.st.latest} now`;return}
+  go.textContent='Installing…';$('#updLater').disabled=true;
+  pollJob(j.id,$('#updJob'),job=>{$('#updLater').disabled=false;const r=job.result||{};
+    if(job.state==='error'){go.disabled=false;go.textContent='Try again';return}
+    if(r.opened){$('#updJob').innerHTML+=`<p><b>The new version is open in Finder.</b> Quit this app, drag Callido Restore to Applications (replace the old one), then open it.</p>`;go.style.display='none'}
+    else $('#updJob').innerHTML+='<p><b>The app closes and starts again with the new version.</b></p>'},true)};
+$('#updAuto').onchange=async()=>{const a=$('#updAuto');try{updRender(await post('/api/update/settings',{check:a.checked}))}catch(e){a.checked=!a.checked;toastError(e)}};
+$('#updCheck').onclick=async()=>{$('#updState').innerHTML='<span class="spin"></span> checking…';const st=await updPoll(true);if(!st)$('#updState').textContent='updates are not available in this version'};
+$('#about').addEventListener('click',()=>updPoll(false));
+updPoll(false);
 $('#quit').onclick=async()=>{if(!confirm('Stop Callido Restore? Running restore jobs are saved and can be resumed later.'))return;try{await api('/api/quit')}catch(e){}document.body.innerHTML='<p style="padding:30px;font-family:sans-serif">Callido Restore has stopped. You can close this tab.</p>'};
 const dd=t=>t?new Date(t*1000).toISOString().slice(0,10):'';
 // ---------- flow bar (1 backup → 2 run → 3 files → 4 restore)
