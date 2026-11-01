@@ -61,6 +61,14 @@ class UiScenarios(unittest.TestCase):
         notes = self.drive("stop", "--stop", "--chunk-index", scale=40, bucket_kb=2048)
         self.assertIn("stop: verdict OK", notes, notes)
 
+    def test_uploads_to_a_nas_show_a_bar_per_file(self):          # #201/#202: a WebDAV "NAS" via rclone, uploads held to 1 MB/s
+        notes = self.drive("upload", "--upload", "--chunk-index", scale=10, bucket_kb=2048)
+        most = int(re.search(r"upload: most bars at once (\d+)", notes).group(1))
+        self.assertGreaterEqual(most, 2, notes)
+        self.assertIn("files at the same time", notes)
+        self.assertIn("Done: 25 restored · 0 skipped · 0 errors", notes)
+        self.assertIn("upload: bars after the restore: 0", notes)
+
     def test_hostile_update_notes_and_a_cross_site_page(self):   # #179/#181 and #182/#184 with a real browser
         notes = self.drive("security", "--update", "--csrf", scale=1, bucket_kb=256)
         self.assertIn("update: verdict OK", notes, notes)

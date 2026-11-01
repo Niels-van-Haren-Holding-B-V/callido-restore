@@ -34,9 +34,13 @@ class App:
         self.log = open(self.log_path, "w")
         self.p = subprocess.Popen([sys.executable, "-m", "callido_restore", "--no-window", "--port", str(self.port)], cwd=str(ROOT), env=self.env,
                                   stdout=self.log, stderr=subprocess.STDOUT)
-        for _ in range(200):
-            try: self.get("/api/about"); return self
-            except OSError: time.sleep(0.1)
+        t0 = time.time()
+        for _ in range(600):
+            try: self.get("/api/about")
+            except OSError: time.sleep(0.1); continue
+            up = time.time() - t0; t1 = time.time(); self.get("/api/sources"); rq = time.time() - t1
+            print(f"[apprun] app up after {up:.1f}s, a request then took {rq * 1000:.0f} ms", file=sys.stderr, flush=True)   # CI timing (macOS runners)
+            return self
         raise RuntimeError("the app did not start: " + self.log_path.read_text()[-2000:])
 
     def stop(self):
