@@ -6,7 +6,7 @@ TAGLINE = "Restore Synology Hyper Backup (.hbk) files"
 
 NOTICE = "Not affiliated with or endorsed by Synology. Hyper Backup is a trademark of Synology Inc."
 
-VERSION = "1.2.0"
+VERSION = "1.2.1"
 
 REPO = "Niels-van-Haren-Holding-B-V/callido-restore"   # the only place updates come from (GitHub releases of this repository)
 
