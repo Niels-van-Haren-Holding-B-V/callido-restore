@@ -32,20 +32,20 @@
      folder, user and SMB settings and connects from there. "Check targets and preview" tells you per row whether the folder is new,
      empty or already has files, and shows one sample file with its final path; a folder inside the backup itself (or around it) is
      refused.
-   * **Check and start.** "Count files and size" shows what will be restored and where. A backup made by Hyper Backup records where
-     every piece of every file is stored, so it is ready to restore at once:
+   * **Check and start.** "Count files and size" shows what will be restored and where. A backup that carries its own chunk table (the
+     usual case) records where every piece of every file is stored, so it is ready to restore at once:
 
      <img src="screenshots/guide-4-ready.png" alt="Step 4: Start restore, 'Ready to restore', 18 files and where they go">
 
      A backup without that record needs a one-time preparation first (the app downloads the backup's index files and builds a
      map; it starts by itself and shows its progress on one line). You can press **Start when the backup is prepared**: the
      restore then starts by itself as soon as the preparation is done.
-   * **The result.** The bar shows the restore while it runs. Under it, "Earlier restores you can continue" lists the restore with
-     **Pause**; a paused restore, or one cut short by a closed app, a crash or a restart, keeps its progress and goes on with
-     **Continue**. When it ends, one line sums it up: restored, skipped (already at the target), errors, size, and how many files were
+   * **The result.** The bar shows the restore while it runs, with **Stop**: the restore stops within seconds and keeps its
+     progress, and **Resume** goes on with the next file. A restore cut short by a closed app, a crash or a restart is listed under
+     "Restores you can resume" with the same **Resume** button. When it ends, one line sums it up: restored, skipped (already at the target), errors, size, and how many files were
      **checked** (the file's place in the backup was confirmed and every block's checksum matched while it was read). Files that
      **couldn't be verified** were restored, but check them before you rely on them; files that could not be restored at all are
-     listed under **Errors**. From a backup made by Hyper Backup every file is checked:
+     listed under **Errors**. From a backup that carries its own chunk table, every file is checked:
 
      <img src="screenshots/guide-5-result-ready.png" alt="Restore finished: 18 restored, 0 errors, 18 checked">
 
