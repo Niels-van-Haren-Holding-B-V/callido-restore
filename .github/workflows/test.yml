@@ -7,7 +7,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, windows-latest]   # windows: T14 portability (tests/test_windows_compat.py runs its real Windows cases there)
+        os: [ubuntu-latest, windows-latest]   # windows: T14 portability (tests/test_windows_compat.py runs its real Windows cases there)
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (node24)
