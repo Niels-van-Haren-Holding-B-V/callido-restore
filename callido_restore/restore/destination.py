@@ -45,10 +45,11 @@ def file_target(f, items, dest):
     if not d: return dest, f"{f['share']}/{f['path']}"
     return d.rstrip("/"), f["path"]
 
-def restore_target_error(src, items, dest, create):
+def restore_target_error(src, items, dest, create, missing_ok=False):
     """Why a restore into these items/dest must not start, or None. The source stays read-only: every mapped root and the
     common dest are checked against it. Remote roots are created (rclone mkdir); a local root is created when the folder
-    above it exists, or, on a resume (create=False), must already exist (the share may not be mounted any more)."""
+    above it exists, or, on a resume (create=False), must already exist (the share may not be mounted any more). missing_ok
+    (a comparison, which writes nothing): a target that is not there is fine, all its files count as missing."""
     if not items: return "nothing selected"
     unmapped = sorted({it["share"] for it in items if not it.get("dest")})
     if unmapped and not dest: return "no destination for " + ", ".join(unmapped)
@@ -58,6 +59,7 @@ def restore_target_error(src, items, dest, create):
         if it.get("dest") and src.contains_root(it["dest"]): bad = it["dest"]
     if bad: return f"refusing to write {bad}: it is the backup itself, lies inside it, or the backup lies inside it (the source is read-only)"
     for root in restore_roots(items, dest):
+        if missing_ok: break
         if is_remote_path(root):
             if not create: continue                                   # listed (and refused on failure) when the restore starts
             r = subprocess.run([RCLONE, "mkdir", root], capture_output=True, text=True, **popen_kw())

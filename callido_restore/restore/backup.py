@@ -612,14 +612,19 @@ class Backup:
         return {"files": len(files), "bytes": sum(f["size"] for f in files), "mappings": out, "sample": [f"{f['share']}/{f['path']}" for f in files[:20]]}
     def compare_target(self, items, dest, job, skip_meta=True):
         """Compare the selected items of a backup run with what is at their targets (the same mapping as a restore: H8), by
-        name and size, reading nothing but listings. For a folder restored some other way (Niels restored folders from the NAS
-        himself): which files of the backup are not there, which are there with another size. One recursive listing per NAS
+        name and size, reading nothing but listings. For a folder restored some other way (copied by hand from a NAS, for
+        example): which files of the backup are not there, which are there with another size. A target that is not there
+        counts as empty (all missing; "missing_targets" names it). One recursive listing per NAS
         target; a local target is looked at file by file. Nothing is written anywhere."""
-        files = self.restore_plan(items, skip_meta); roots = restore_roots(items, dest); sizes = {}
+        files = self.restore_plan(items, skip_meta); roots = restore_roots(items, dest); sizes = {}; gone = []
         for root in roots:
             if is_remote_path(root):
                 job["message"] = f"listing {root}"
-                sizes[root] = destination_sizes(root)
+                try: sizes[root] = destination_sizes(root)
+                except Exception as e:
+                    if "not found" not in str(e).lower(): raise                  # an unreadable target is an error, a missing one is empty
+                    sizes[root] = {}; gone.append(root)
+            elif not os.path.isdir(root): gone.append(root)
         job["message"] = "comparing"; same = same_b = 0; missing = []; differs = []; folders = collections.Counter(); fbytes = collections.Counter()
         for n, f in enumerate(files):
             root, rel = file_target(f, items, dest)
@@ -637,7 +642,7 @@ class Backup:
                 "missing": len(missing), "missing_bytes": sum(m["size"] for m in missing), "differs": len(differs),
                 "missing_list": missing[:COMPARE_LIST_MAX], "differs_list": differs[:COMPARE_LIST_MAX],
                 "missing_by_folder": [{"folder": k, "files": v, "bytes": fbytes[k]} for k, v in folders.most_common(50)],
-                "roots": roots}
+                "roots": roots, "missing_targets": gone}
     def restore(self, items, dest, job, skip_meta=True, start_at=0):
         """Restore the selected items. An item with its own 'dest' gets its contents there (H8: one target per folder);
         the others go under dest as <share>/<path>. A file already at a destination is kept, whatever its date: with the
