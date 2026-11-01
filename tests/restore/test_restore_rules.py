@@ -285,7 +285,17 @@ class RestoreLoopRemote(unittest.TestCase):
         self.assertEqual(self.uploads(), [f"nas:Restore/share/b.txt{self.PART}", f"nas:Restore/share/c.txt{self.PART}"])
         self.assertEqual(self.nas, {"share/a.txt": 3, "share/b.txt": 4, "share/c.txt": 3})        # no temporary name left
         self.assertEqual((res["files"], res["restored"], res["skipped"], res["errors"]), (3, 1, 2, 0))
-        self.assertEqual(b.pool.calls, ["b.txt", "c.txt"])
+        self.assertEqual(b.pool.calls, ["1", "2"])                  # staged by plan index: b.txt and c.txt extracted, a.txt not
+
+    def test_a_mac_name_is_staged_under_a_plain_name_and_arrives_under_its_own(self):
+        # "Icon\r" (a Mac folder icon) or "a:b" cannot exist on Windows: the local staging file must not carry the backup's name
+        # (Niels, Windows: "[Errno 22] Invalid argument: ...hbk-stage-...\\0\\Kreta sep 2019/Icon\r.part"); the NAS gets it unchanged
+        res, job, b = self.restore([("Kreta sep 2019/Icon\r", 2, 1), ("Kreta sep 2019/a:b?.txt", 4, 2)], "tmac")
+        self.assertEqual(self.uploads(), [f"nas:Restore/share/Kreta sep 2019/Icon\r{self.PART}", f"nas:Restore/share/Kreta sep 2019/a:b?.txt{self.PART}"])
+        staged = [c[2] for c in self.calls if c[1] == "moveto" and not c[-2].startswith(self.ROOT)]
+        for p in staged: self.assertRegex(os.path.basename(p), r"^\d+$")
+        self.assertEqual(self.nas, {"share/a.txt": 3, "share/Kreta sep 2019/Icon\r": 2, "share/Kreta sep 2019/a:b?.txt": 4})
+        self.assertEqual((res["restored"], res["errors"]), (2, 0))
 
     def test_a_file_appearing_between_the_check_and_the_rename_is_kept(self):
         self.at_move = {"share/b.txt": 9}
