@@ -43,8 +43,31 @@ jobs:
         run: |
           $env:PATH = "C:\Program Files\Git\usr\bin;$env:PATH"   # gpg for the rclone signature check
           python packaging/windows/build_msi.py
-      - name: Smoke test (install, run, uninstall)
-        run: python packaging/windows/smoke_windows.py --msi dist/CallidoRestore-x64.msi
+      - name: Previous release's MSI (for the auto-update check)
+        id: prev
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # the newest release older than this build that has an MSI (on a PR the latest release usually has the same version)
+          cur=$(sed -n 's/^VERSION = "\([^"]*\)".*/\1/p' callido_restore/about.py)
+          gh release list -R "$GITHUB_REPOSITORY" --limit 30 --json tagName --jq '.[].tagName' > tags.txt || true
+          tag=$(python - "$cur" <<'PY'
+          import re, sys
+          cur = tuple(map(int, sys.argv[1].split(".")))
+          vs = [t.strip() for t in open("tags.txt") if re.fullmatch(r"v\d+\.\d+\.\d+", t.strip())]
+          older = sorted((tuple(map(int, t[1:].split("."))), t) for t in vs if tuple(map(int, t[1:].split("."))) < cur)
+          print(older[-1][1] if older else "")
+          PY
+          )
+          if [ -n "$tag" ] && gh release download "$tag" -R "$GITHUB_REPOSITORY" -p CallidoRestore-x64.msi -D prev 2>/dev/null; then
+            echo "previous release with an MSI: $tag"
+            echo "args=--upgrade-from prev/CallidoRestore-x64.msi --upgrade-from-version ${tag#v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "no older release with an MSI; the auto-update check is skipped"
+          fi
+      - name: Smoke test (auto-update from the previous release, install, run, uninstall)
+        run: python packaging/windows/smoke_windows.py --msi dist/CallidoRestore-x64.msi ${{ steps.prev.outputs.args }}
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: CallidoRestore-windows-x64
