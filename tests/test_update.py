@@ -29,7 +29,8 @@ class Resp(io.BytesIO):
     def __exit__(self, *a): self.close()
 
 
-class UpdateTests(unittest.TestCase):
+class Fixture(unittest.TestCase):
+    """Fake releases and a temp settings folder; no tests of its own."""
     def setUp(self):
         self.d = tempfile.mkdtemp(); self.addCleanup(shutil.rmtree, self.d, True)
         for k, v in (("CONF_DIR", self.d), ("CACHE_DIR", os.path.join(self.d, "cache"))):
@@ -64,6 +65,8 @@ class UpdateTests(unittest.TestCase):
         left = [f for _, _, fs in os.walk(folder) for f in fs] if os.path.isdir(folder) else []
         self.assertEqual(left, [])
 
+
+class UpdateTests(Fixture):
     # ------------------------------------------------------------------ the good path
     def test_signed_and_matching_is_kept(self):
         p = self.download()
@@ -185,3 +188,60 @@ class UpdateTests(unittest.TestCase):
         self.addCleanup(os.chmod, os.path.join(app + ".old", "locked"), stat.S_IRWXU)
         run(update.mac_swap_script(app, new, 999999))
         self.assertEqual(os.listdir(app), ["v2"]); self.assertNotIn("X.app", os.listdir(app + ".old"))   # nothing moved into .old
+
+
+class Modes(Fixture):
+    """The setting auto / mention / off, and the automatic install: same checks, waits for jobs, no retry after a failure."""
+    def setUp(self):
+        super().setUp()
+        p = mock.patch.object(update, "_checking", [True]); p.start(); self.addCleanup(p.stop)   # no background check here
+    def known(self):
+        d = update._read(); d.update(checked=__import__("time").time(), release=self.rel); update._write(d)
+
+    def test_setting(self):
+        self.assertEqual(update.mode(), "mention")                                  # the default
+        open(os.path.join(self.d, "update.json"), "w").write(json.dumps({"check": False}))
+        self.assertEqual(update.mode(), "off")                                      # a state file from before the setting
+        self.assertEqual(update.set_mode("auto")["mode"], "auto"); self.assertTrue(update.check_enabled())
+        self.assertEqual(update.set_check(True)["mode"], "auto")                    # the old switch keeps auto
+        self.assertEqual(update.set_check(False)["mode"], "off"); self.assertFalse(update.check_enabled())
+        with self.assertRaises(ValueError): update.set_mode("always")
+        with mock.patch.dict(os.environ, {"HBK_NO_UPDATE_CHECK": "1"}): update.set_mode("auto"); self.assertEqual(update.mode(), "off")
+
+    def test_auto_due_only_with_auto_and_an_installable_release(self):
+        self.known()
+        self.assertFalse(update.auto_due())                                         # mention: only shown
+        update.set_mode("auto")
+        self.assertTrue(update.auto_due())
+        with mock.patch.object(update, "UPDATE_PUBLIC_KEYS", []): self.assertFalse(update.auto_due())   # unsigned: never automatic
+        self.set_release("v1.1.0", self.payload); self.known(); self.assertFalse(update.auto_due())     # not newer
+
+    def run_install(self, **kw):
+        job = {}
+        with mock.patch.object(update.urllib.request, "urlopen", side_effect=self.fake_open), \
+             mock.patch.object(update, "install_mac", return_value={"restarting": "x"}) as inst:
+            out = update.install(job, lambda c: None, **kw)
+        return out, inst
+
+    def test_auto_install_uses_the_same_checks_and_never_opens_the_image_unasked(self):
+        update.set_mode("auto"); self.known()
+        out, inst = self.run_install(auto=True, may_install=lambda: True)
+        self.assertEqual(out, {"restarting": "x"}); self.assertFalse(inst.call_args.kwargs["open_fallback"])
+
+    def test_auto_install_waits_when_a_job_started_meanwhile(self):
+        update.set_mode("auto"); self.known()
+        with self.assertRaises(update.Postponed): self.run_install(auto=True, may_install=lambda: False)
+        self.assertTrue(update.auto_due())                                          # postponed, not failed: tried again later
+        self.assertTrue(os.path.isfile(os.path.join(self.d, "cache", "updates", "1.2.0", "CallidoRestore-arm64.dmg")))  # kept
+
+    def test_failed_auto_install_is_not_retried(self):
+        update.set_mode("auto"); self.set_release("v1.2.0", self.payload, sig=b"\0" * 64); self.known()
+        with self.assertRaises(RuntimeError): self.run_install(auto=True, may_install=lambda: True)
+        self.assertFalse(update.auto_due()); self.assertTrue(update.status()["installable"])   # still offered for a click
+        self.assertNothingKept()
+
+    def test_manual_fallback_without_opening(self):
+        with mock.patch.object(update, "current_bundle", return_value=None), \
+             mock.patch.object(update.subprocess, "run") as run:
+            self.assertEqual(update.install_mac("x.dmg", lambda c: None, open_fallback=False), {"manual": "x.dmg"})
+            run.assert_not_called()

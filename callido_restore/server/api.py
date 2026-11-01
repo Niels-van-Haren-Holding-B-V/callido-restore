@@ -114,6 +114,39 @@ def request_refusal(host, origin, fetch_site, server_port, path=None, fetch_mode
     return None
 
 
+def update_busy(include_update=True):
+    """What an update must wait for: 'restore', 'preparation' or (``include_update``) 'update' while one runs, else None.
+    A paused restore does not count; it continues after the update."""
+    for j in list(JOBS.values()):
+        if j["state"] != "running": continue
+        if j["label"].startswith("restore"): return "restore"
+        if j["label"] == "build pool map": return "preparation"
+        if include_update and j["label"] == "update": return "update"
+    return None
+
+
+def auto_update_tick():
+    """With the automatic update setting: start the install job when a newer signed release is known and nothing runs; it
+    asks again before the app closes. Returns the job id or None. Called every few minutes by ``start_auto_update``."""
+    from callido_restore import update
+    try:
+        if not update.auto_due() or update_busy(): return None
+    except Exception as e:
+        update.log(f"automatic check skipped: {e}"); return None
+    update.log("starting the automatic install")
+    return start_job(lambda job: update.install(job, _exit_app, auto=True, may_install=lambda: update_busy(include_update=False) is None),
+                     "update")["id"]
+
+
+def start_auto_update(every=600, first=90):
+    """The background loop for the automatic setting (also runs the daily check through ``update.status``)."""
+    def loop():
+        time.sleep(first)
+        while True:
+            auto_update_tick(); time.sleep(every)
+    threading.Thread(target=loop, daemon=True, name="auto-update").start()
+
+
 class H(BaseHTTPRequestHandler):
     def log_message(self, *a): pass
     def _refused(self):
@@ -144,6 +177,9 @@ class H(BaseHTTPRequestHandler):
                 try: line = rclone.version() or "rclone not found"
                 except (rclone.RcloneError, OSError): line = "rclone not found"
                 return self._json({"name": APP_NAME, "tagline": TAGLINE, "notice": NOTICE, "version": VERSION, "rclone": line, "rclone_path": RCLONE, "config": str(paths.CONF_DIR)})
+            if u.path == "/api/cache":                             # Settings: where the download cache is and what it holds
+                from callido_restore import cachedir
+                return self._json(cachedir.usage({sid: s.name for sid, s in SOURCES.items()}))
             if u.path == "/api/quit":
                 threading.Timer(0.3, _exit_app).start(); return self._json({"ok": True})
             if u.path == "/api/ls":   # directory picker helper
@@ -290,13 +326,24 @@ class H(BaseHTTPRequestHandler):
         u = urlparse(self.path); n = int(self.headers.get("Content-Length") or 0)
         body = json.loads(self.rfile.read(n) or b"{}")
         try:
-            if u.path == "/api/update/settings":                   # {check: bool}: the daily check on or off
+            if u.path == "/api/cache/clear":                       # {part?}: a backup's id or "updates"; all when absent
+                from callido_restore import cachedir
+                busy = [j for j in JOBS.values() if j["state"] == "running"]
+                if busy: return self._json({"error": f"Wait until '{busy[0]['label']}' has finished: it may be reading from the cache."}, 409)
+                try: return self._json(cachedir.clear(body.get("part") or None))
+                except ValueError as e: return self._json({"error": str(e)}, 400)
+            if u.path == "/api/update/settings":                   # {mode: auto|mention|off}, or {check: bool, auto: bool} (the UI)
                 from callido_restore import update
+                if "auto" in body and "mode" not in body:
+                    body["mode"] = "off" if not body.get("check", True) else "auto" if body["auto"] else "mention"
+                if "mode" in body:
+                    try: return self._json(update.set_mode(body["mode"]))
+                    except ValueError as e: return self._json({"error": str(e)}, 400)
                 return self._json(update.set_check(bool(body.get("check", True))))
             if u.path == "/api/update/install":                    # a job: download, verify the signed checksum, install, restart
                 from callido_restore import update
-                busy = [j for j in JOBS.values() if j["state"] == "running" and (j["label"].startswith("restore") or j["label"] == "build pool map" or j["label"] == "update")]
-                if busy: return self._json({"error": f"Wait until the {'restore' if busy[0]['label'].startswith('restore') else 'preparation' if busy[0]['label'] == 'build pool map' else 'update'} has finished or is paused; a paused restore continues after the update."}, 409)
+                busy = update_busy()
+                if busy: return self._json({"error": f"Wait until the {busy} has finished or is paused; a paused restore continues after the update."}, 409)
                 st = update.status()
                 if not st["installable"]: return self._json({"error": ("This version cannot install updates itself: download the new version from the release page." if st["available"] else "No update to install: this is already the newest version.")}, 409)
                 return self._json(start_job(lambda job: update.install(job, _exit_app), "update"))
@@ -328,6 +375,8 @@ class H(BaseHTTPRequestHandler):
                     return self._json({"error": f"“{name}” is a {existing} connection, not {want}. Pick that connection, or use a new name."}, 400)
                 if kind == "drive":
                     cid, csec = (body.get("client_id") or "").strip(), (body.get("client_secret") or "").strip()
+                    if not cid and body.get("keep_key"):            # sign in again with the connection's own key (Settings), never drop it
+                        cid, csec = rclone.drive_key(name)
                     if cid and google.client_id_error(cid): return self._json({"error": google.client_id_error(cid)}, 400)
                     if cid and not csec: return self._json({"error": "the client secret is missing"}, 400)
                     args = None
@@ -406,6 +455,8 @@ class H(BaseHTTPRequestHandler):
             if u.path == "/api/restore/resume":
                 jf = job_file(body.get("id"))
                 if jf is None: return self._json({"error": "not a job id"}, 400)
+                running = [j for j in JOBS.values() if j["state"] == "running" and (j["id"] == body.get("id") or j["label"].startswith("restore"))]
+                if running: return self._json({"error": "A restore is already running: stop it first, or wait until it has finished."}, 409)
                 if not jf.is_file(): return self._json({"error": "no such saved job"}, 404)
                 d = json.loads(jf.read_text()); b = backup_for(d["src"]); dest = d.get("dest") or ""
                 err = restore_target_error(b.src, d["items"], dest, create=False)     # source check again, roots still there
