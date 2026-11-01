@@ -949,9 +949,13 @@ async function tabRestore(){const el=$('#tab-restore');
 const sleepOrWake=ms=>new Promise(res=>{let t=null;const done=()=>{clearTimeout(t);document.removeEventListener('visibilitychange',done);window.removeEventListener('focus',done);res()};t=setTimeout(done,ms);document.addEventListener('visibilitychange',done);window.addEventListener('focus',done)});
 // Wait for a job to leave the running state. A failed poll (network hiccup, throttled view) is retried, never left hanging;
 // an unknown job id ends the wait with an error result.
-async function waitJob(id,onMsg,ms=1000,onJob){for(let miss=0;;){let x=null;try{x=await api('/api/job',{id});miss=0}catch(e){if(/no such job/i.test(e.message)||++miss>60)return{state:'error',error:e.message}}
+// A job's state, never thrown away: api() throws on any reply with an "error" field, and a failed job always has one, so the
+// waits treated every failed job as a network miss and reported it a minute late (hbk-6's U10). Only "no such job" (a reply
+// without a state) and network errors throw here.
+async function jobGet(id){const r=await fetch('/api/job?id='+encodeURIComponent(id));const j=await r.json();if(j&&!j.state)throw new Error(j.error||'no such job');return j}
+async function waitJob(id,onMsg,ms=1000,onJob){for(let miss=0;;){let x=null;try{x=await jobGet(id);miss=0}catch(e){if(/no such job/i.test(e.message)||++miss>60)return{state:'error',error:e.message}}
   if(x&&onJob)onJob(x);if(x&&x.state!=='running')return x;if(x&&onMsg)onMsg(x.message||'');await sleepOrWake(ms)}}
-function pollJob(id,el,done,rich,stopLabel,onTick){let stopping=false;const t=async()=>{if(!el.isConnected)return;let job;try{job=await api('/api/job',{id})}catch(e){if(/no such job/i.test(e.message)){el.innerHTML+=`<p style="color:var(--bad)">${esc(e.message)}</p>`;return}await sleepOrWake(2000);return t()}
+function pollJob(id,el,done,rich,stopLabel,onTick){let stopping=false;const t=async()=>{if(!el.isConnected)return;let job;try{job=await jobGet(id)}catch(e){if(/no such job/i.test(e.message)){el.innerHTML+=`<p style="color:var(--bad)">${esc(e.message)}</p>`;return}await sleepOrWake(2000);return t()}
   const stop=stopLabel&&job.state==='running'?`<button class="small" id="jobStop" ${stopping?'disabled':''}>${stopping?'Stopping…':stopLabel}</button>`:'';
   el.innerHTML=progressHtml(job,rich,stop);if(onTick)onTick(job);   // e.g. the restore's error list, shown while it runs
   const b=$('#jobStop');if(b)b.onclick=async()=>{stopping=true;b.disabled=true;b.textContent=stopLabel==='Pause'?'Pausing…':'Stopping…';if(stopLabel==='Pause')await prepPause(id);else await api('/api/job/cancel',{id})};
