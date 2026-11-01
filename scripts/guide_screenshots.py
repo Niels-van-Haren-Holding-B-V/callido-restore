@@ -78,6 +78,11 @@ def capture(b, base, out, dest):
     b.js("$('#rsPlan').click()"); b.wait("/files/.test($('#rsPlanOut').textContent)", 60); sleep(800); clear_toasts()
     b.js("{const s=$('#rsGo').closest('.step'); s.id='shotStep4'; s.scrollIntoView()}"); sleep()
     save(b, out, "guide-4-ready", ["#shotStep4"])
+    # 4b. ...and its result: what most restores look like (every file located through the chunk table, all checked)
+    b.js("$('#rsGo').click()")
+    b.wait("/Restore (finished|paused|failed)/.test(($('#rsProg h4')||{}).textContent||'')", 600); sleep(1500); clear_toasts()
+    b.js("$('#rsProg').scrollIntoView()"); sleep()
+    save(b, out, "guide-5-result-ready", ["#rsProg", "#rsUnverified", "#rsErrors"])
 
     # 5. The result of a restore from a backup without the chunk table: checked, could not be verified, errors
     b.js("$('#srcSel').value='older'; openSource()")
@@ -94,7 +99,7 @@ def capture(b, base, out, dest):
     b.js("$('#rsGo').click()")
     b.wait("/Restore (finished|paused|failed)/.test(($('#rsProg h4')||{}).textContent||'')", 600); sleep(1500); clear_toasts()
     b.js("$('#rsProg').scrollIntoView()"); sleep()
-    save(b, out, "guide-5-result", ["#rsProg", "#rsUnverified", "#rsErrors"])
+    save(b, out, "guide-6-result-older", ["#rsProg", "#rsUnverified", "#rsErrors"])
 
 
 def main():
