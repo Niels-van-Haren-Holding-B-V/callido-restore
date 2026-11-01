@@ -59,7 +59,7 @@ entry (or, for a copy that stored nothing, the record it shares); the bucket's `
   record sizes and tags, the bucket indexes (5-7 GB on a real backup, resumable), then the inferred map in a child process
   (anchor scan with four workers, then the placer); Stop ends the child and its workers at once.
 * **Restore** (`POST /api/restore`, a job): `restore_plan` (rows) → `PoolReader` per file (chunk table, or the inferred map) →
-  bucket data fetched 8 at a time ahead of the writer, LZ4 decoded, every chunk md5-checked → a per-root staging folder →
+  bucket data fetched ahead of the writer, several at a time (the `restore` profile in `transfer.py`), LZ4 decoded, every chunk md5-checked → a per-root staging folder →
   `place_file` (local) or `rclone moveto --ignore-existing` (NAS). Buckets are evicted LRU (≤ `HBK_CACHE_GB`, default 20). The job is
   persisted as it goes; pause is a cancel flag; `/api/restore/resume` restarts at `next_index`, carries the counts forward and skips
   files already at the target.

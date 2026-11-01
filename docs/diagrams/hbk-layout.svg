@@ -89,6 +89,6 @@
 <text class="h" x="540" y="424" text-anchor="start">the data</text>
 <text class="s" x="540" y="442" text-anchor="start">the .bucket bytes at that offset, LZ4-decompressed, md5-checked</text>
 <rect class="warn" x="506" y="492" width="450" height="44" rx="8"/>
-<text class="s" x="518" y="510" text-anchor="start">No Pool/chunk_index (older backups): step 4 comes from</text>
+<text class="s" x="518" y="510" text-anchor="start">A backup without Pool/chunk_index: step 4 comes from</text>
 <text class="s" x="518" y="526" text-anchor="start">the inferred map (pool/), built once in the background.</text>
 </svg>

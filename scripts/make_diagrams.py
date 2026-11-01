@@ -119,7 +119,7 @@ def restore_flow():
     # row 1: the backup and the transfer
     d.box(24, 80, 200, 74, "the backup (.hbk)", ["Google Drive · NAS over SMB ·", "a local or mounted disk"], "ext")
     d.box(304, 80, 240, 74, "rclone daemon", ["one backend per connection,", "throttled, retried (transfer.py)"], "ext")
-    d.box(624, 80, 332, 74, "app cache  ~/.hbk-explorer/cache", ["slices and bucket files on demand;", "LRU ≤ 20 GB, 8 buckets at once"], "box")
+    d.box(624, 80, 332, 74, "app cache  ~/.hbk-explorer/cache", ["slices and bucket files on demand;", "LRU ≤ 20 GB, several buckets at once"], "box")
     d.arrow(224, 117, 304, 117, label="read only", ly=108)
     d.arrow(544, 117, 624, 117, label="copyfile", ly=108)
     # row 2: locating a file's chunks
@@ -191,7 +191,7 @@ def layout():
     for i, (t, s) in enumerate(steps, 1):
         d.num(518, y - 4, i); d.text(540, y, t, "h"); d.text(540, y + 18, s, "s"); y += 64
     d.rect(506, 492, 450, 44, "warn", 8)
-    d.text(518, 510, "No Pool/chunk_index (older backups): step 4 comes from", "s")
+    d.text(518, 510, "A backup without Pool/chunk_index: step 4 comes from", "s")
     d.text(518, 526, "the inferred map (pool/), built once in the background.", "s")
     d.save("hbk-layout.svg")
 
