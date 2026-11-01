@@ -491,6 +491,29 @@ class AlreadyThereNeedsNoDownload(unittest.TestCase):
         self.assertEqual((res["restored"], res["skipped"]), (1, 1))
         self.assertEqual(fetched, ["Pool/0/0/1.bucket.1"])                      # nothing fetched for f0.txt
 
+
+class CompareTarget(unittest.TestCase):
+    """Niels restored folders himself: the run's selection against a target by name and size, nothing written."""
+    def test_local_target_counts_same_missing_and_other_size_and_writes_nothing(self):
+        d = Path(tempfile.mkdtemp()); self.addCleanup(shutil.rmtree, d, True)
+        (d / "share" / "a").mkdir(parents=True); (d / "share" / "a" / "x.txt").write_bytes(b"1234"); (d / "share" / "y.txt").write_bytes(b"12")
+        b = _fake_backup(str(d), [("a/x.txt", 4, 0), ("y.txt", 3, 0), ("a/b/z.txt", 5, 0)])
+        before = sorted(p.as_posix() for p in d.rglob("*"))
+        job = {}; res = b.compare_target([{"share": "share", "ver": 1, "path": "", "is_dir": True}], str(d), job)
+        self.assertEqual((res["files"], res["same"], res["missing"], res["differs"]), (3, 1, 1, 1))
+        self.assertEqual(res["missing_list"], [{"path": "share/a/b/z.txt", "size": 5}])
+        self.assertEqual(res["differs_list"], [{"path": "share/y.txt", "at_target": 2, "in_backup": 3}])
+        self.assertEqual(res["missing_by_folder"], [{"folder": "share/a/b", "files": 1, "bytes": 5}])
+        self.assertEqual(sorted(p.as_posix() for p in d.rglob("*")), before)
+        self.assertEqual(b.pool.calls, [])                                       # nothing read from the backup's data
+
+    def test_nas_target_uses_one_listing(self):
+        b = _fake_backup("nas:R", [("a.txt", 3, 0), ("b.txt", 4, 0)])
+        with mock.patch.object(backup_mod, "destination_sizes", return_value={"share/a.txt": 3}) as ls:
+            res = b.compare_target([{"share": "share", "ver": 1, "path": "", "is_dir": True}], "nas:R", {})
+        ls.assert_called_once_with("nas:R")
+        self.assertEqual((res["same"], res["missing"], res["missing_bytes"]), (1, 1, 4))
+
 class UploadWatchdog(unittest.TestCase):
     def test_kill_uploads_ends_running_upload_processes(self):
         import sys, threading as th, time as _t
