@@ -305,7 +305,7 @@ class H(BaseHTTPRequestHandler):
                             if existing == "smb":
                                 # Edit of a saved NAS connection (a new address, e.g. a VPN one; another user or password): only what
                                 # was given changes, the name stays, so the restore targets and saved restores that use it keep working.
-                                upd = [f"host={host}", *([f"port={port}"] if port else [])]
+                                upd = [f"host={host}", f"port={port or ''}"]          # no port typed: back to the default (445)
                                 if body.get("user"): upd.append(f"user={body['user']}")
                                 if pw: upd.append(f"pass={obs}")
                                 r = subprocess.run([RCLONE, "config", "update", name, *upd, "--obscure=false", "--non-interactive"],
