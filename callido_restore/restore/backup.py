@@ -900,7 +900,8 @@ class Backup:
             (a Stop during the check resumes with the check)"""
             if not again:
                 with lock: cur[0] = i; publish_tx()
-            if f["off"] is not None and f["off"] >= 0 and not is_there(f):   # a file already at the target needs no backup data
+            there = is_there(f)
+            if f["off"] is not None and f["off"] >= 0 and not there:       # a file already at the target needs no backup data
                 try:
                     for bk, _ in pool.plan(f["off"])[0]:
                         fut = pending.get(bk)
@@ -912,7 +913,7 @@ class Backup:
             if again:
                 job["message"] = f"restoring again {again[0] + 1}/{again[1]}: {f['share']}/{f['path']}"; job["progress"] = again[0] / again[1]
             else:
-                job["message"] = f"{i + 1}/{len(files)}: {f['share']}/{f['path']}"; job["progress"] = bytes_done[0] / total_bytes if total_bytes else (i / max(1, len(files)))
+                job["message"] = f"{i + 1}/{len(files)}: " + ("already at the target, skipped: " if there else "") + f"{f['share']}/{f['path']}"; job["progress"] = bytes_done[0] / total_bytes if total_bytes else (i / max(1, len(files)))
                 job["next_index"] = resume_point(i)
                 if i % 50 == 0: persist()
             if remote_dest and rel not in existing[root]:
