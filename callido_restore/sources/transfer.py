@@ -44,7 +44,9 @@ PROFILES = {
     # Config/file_chunk*.index record-set slices (about 8 MB each) through the daemon while the pool is prepared.
     "index_slices": Profile("index_slices", workers=8, why="8 MB slices, one daemon connection each"),
     # Pool/0/<d>/*.bucket.* data files (about 52 MB each) through the daemon while files are restored.
-    "restore": Profile("restore", workers=8, prefetch=16, why="52 MB files, 7 MB/s per stream, 8 streams fill the line"),
+    # 2026-11-01, a home line to Drive (3 MB/s per stream): 8 at a time 3.6 MB/s, 16 at a time 5.0 MB/s, 32 at a time 6.1 MB/s,
+    # no rate-limit errors; on a faster line 8 already filled it (above), more streams cost nothing there.
+    "restore": Profile("restore", workers=32, prefetch=64, why="52 MB files; slow lines need many streams (32: 6.1 MB/s where 8 gave 3.6)"),
 }
 
 

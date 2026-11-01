@@ -9,7 +9,7 @@ from callido_restore.pool import indexfetch
 class Profiles(unittest.TestCase):
     def test_measured_values(self):
         self.assertEqual(transfer.profile("index_files").workers, 64)       # small files: 16 → 33 MB, 64 → 84 MB, 128 → 86 MB per 25 s
-        self.assertEqual(transfer.profile("restore").workers, 8)            # 52 MB files: 4 → 29 MB/s, 8 → 43 MB/s
+        self.assertEqual(transfer.profile("restore").workers, 32)           # 52 MB files; a slow line: 8 → 3.6, 16 → 5.0, 32 → 6.1 MB/s
         self.assertEqual(transfer.profile("index_slices").workers, 8)
 
     def test_common_resilience_everywhere(self):
