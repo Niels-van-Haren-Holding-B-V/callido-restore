@@ -74,3 +74,37 @@ chunk table, `2026-10-31-1530-claude-hbk6.md` for the end-to-end tests).
 python -m unittest discover -s tests -t . -v
 HBK_E2E=1 HBK_SMOKE_PORT=<free port> python -m unittest tests.e2e.test_app
 ```
+
+## Release signing and updates
+
+The app checks GitHub for a newer release once a day (`callido_restore/update.py`, off with a switch in the app or
+`HBK_NO_UPDATE_CHECK=1`) and installs it only when the release is signed with the Callido release key:
+
+* **Who holds the key.** An Ed25519 key pair. The private key exists only as the GitHub Actions secret `RELEASE_SIGNING_KEY`
+  (Niels adds it; nobody else keeps a copy, the local file is deleted after adding it). The public key is in
+  `callido_restore/about.py`, `UPDATE_PUBLIC_KEYS` (hex, 32 bytes).
+* **What is signed.** `build.yml` signs `SHA256SUMS` (the two disk images) and `build-windows.yml` signs
+  `CallidoRestore-x64.msi.sha256`; the signatures are attached to the release as `<list>.sig`. The app verifies the list's
+  signature (`callido_restore/ed25519.py`, pure Python, RFC 8032), then the installer's SHA-256 against the signed list, and
+  refuses a tag that is not strictly newer than its own version or a file that is not this platform's. HTTPS only, to
+  `api.github.com` and GitHub's release-asset hosts. Any failure deletes the download; every step is logged to `app.log`.
+* **Creating the key** (once, by Niels, OpenSSL 3, e.g. `brew install openssl@3`):
+  ```
+  openssl genpkey -algorithm ed25519 -out release-signing.pem
+  gh secret set RELEASE_SIGNING_KEY -R Niels-van-Haren-Holding-B-V/callido-restore < release-signing.pem
+  openssl pkey -in release-signing.pem -pubout -outform DER | tail -c 32 | xxd -p -c 64
+  rm -P release-signing.pem
+  ```
+  The last line but one prints the public key: it goes into `UPDATE_PUBLIC_KEYS` in a PR. Updates become installable from the
+  first release built after that PR, for apps that carry the key.
+* **Rotating the key.** Create a new pair, add its public key to `UPDATE_PUBLIC_KEYS` next to the old one, release that version
+  signed with the old key (installed apps trust it), then replace the secret with the new private key and remove the old public
+  key in a later release. If the private key leaks: remove its public key from `UPDATE_PUBLIC_KEYS` at once and release; apps
+  that still trust it can be updated only from the release page.
+* **macOS install.** The app downloads the disk image itself (no quarantine flag, checked on a real Mac), mounts it, copies the
+  new app next to the running one and restarts through a helper that swaps the bundles after the app has quit (the old one is
+  put back if the swap fails). When the app's folder is not writable it opens the verified disk image for a manual drag.
+  **Windows install** (`update_windows.py`, hbk-5): `msiexec /i … /passive` upgrades in place (same UpgradeCode), then restarts.
+* **Never during work.** `/api/update/install` refuses while a restore, a preparation or another update runs; a paused restore
+  continues after the update.
+
