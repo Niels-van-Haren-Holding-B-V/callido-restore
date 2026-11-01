@@ -4,7 +4,7 @@ version upgrades the installed one in place; msiexec asks for the UAC elevation 
 
 The release check, the signature check, the UI and the "not while a restore runs" rule live in ``callido_restore/update.py``
 (hbk-2); this module adds the MSI install in place and the restart."""
-import os, subprocess, sys, time
+import hashlib, os, re, subprocess, sys, time
 from pathlib import Path
 from callido_restore import oscompat, paths
 
@@ -30,9 +30,14 @@ def _ps_quote(s):
     return "'" + str(s).replace("'", "''") + "'"
 
 
-def helper_command(msi, app_exe, pid, log):
-    """The detached helper: wait for the app (pid) to exit, install the MSI with a progress bar and no questions besides
-    UAC, then start the app again. If the install fails or is declined, the old version is still installed and starts."""
+def helper_command(msi, app_exe, pid, log, sha256):
+    """The detached helper: wait for the app (pid) to exit, check the MSI's SHA-256 once more, install it with a progress bar
+    and no questions besides UAC, then start the app again. If the install fails, is declined, or the file changed since it
+    was verified, the old version is still installed and starts.
+
+    The re-check matters because the MSI waits in the user-writable cache between the app's verification and msiexec (the
+    app's exit plus up to 60 s), and UAC would elevate whatever file is there by then."""
+    if not re.fullmatch(r"[0-9a-fA-F]{64}", sha256 or ""): raise UpdateError("helper needs the verified SHA-256 of the MSI")
     res = _ps_quote(str(log) + ".result")
     # One argument string with the paths in double quotes: Start-Process does not quote array elements, so a path with a space
     # (a Windows user name like "Jan de Vries" in the cache path) would split. Windows paths cannot contain double quotes.
@@ -41,6 +46,8 @@ def helper_command(msi, app_exe, pid, log):
         f"$ErrorActionPreference = 'Stop'; "
         f"try {{ Add-Content -LiteralPath {res} -Value ('helper started ' + (Get-Date -Format o)); "
         f"Wait-Process -Id {int(pid)} -Timeout 60 -ErrorAction SilentlyContinue; "
+        f"$h = (Get-FileHash -LiteralPath {_ps_quote(msi)} -Algorithm SHA256).Hash; "
+        f"if ($h -ne '{sha256.upper()}') {{ throw ('the MSI changed after it was verified (sha256 ' + $h + '); not installing it') }}; "
         f"$p = Start-Process -FilePath 'msiexec.exe' -ArgumentList {msi_args} "
         f"-Wait -PassThru; "
         f"Add-Content -LiteralPath {res} -Value ('msiexec exit ' + $p.ExitCode) }} "
@@ -50,7 +57,14 @@ def helper_command(msi, app_exe, pid, log):
     return ["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-Command", script]
 
 
-def install_and_relaunch(msi, exit_app=None):
+def _sha256_of(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for b in iter(lambda: f.read(1 << 20), b""): h.update(b)
+    return h.hexdigest()
+
+
+def install_and_relaunch(msi, exit_app=None, sha256=None):
     """Start the helper and quit the app (``exit_app(0)``, by default the server's ``_exit_app``, which also stops rclone, so
     no file of the installed app is in use when msiexec replaces it). Only from the installed, packaged app."""
     if not oscompat.WINDOWS: raise UpdateError("the MSI update runs on Windows only")
@@ -58,7 +72,9 @@ def install_and_relaunch(msi, exit_app=None):
     msi = Path(msi)
     if not msi.is_file(): raise UpdateError(f"missing {msi}")
     log = paths.CONF_DIR / f"update-{msi.parent.name}.log"
-    cmd = helper_command(msi, sys.executable, os.getpid(), log)
+    # ``sha256``: the value download() verified against the signed list; otherwise the file is hashed now, right after that
+    # verification, and the helper refuses to install anything else.
+    cmd = helper_command(msi, sys.executable, os.getpid(), log, sha256 or _sha256_of(msi))
     subprocess.Popen(cmd, creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP, close_fds=True,
                      stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     if exit_app is None:

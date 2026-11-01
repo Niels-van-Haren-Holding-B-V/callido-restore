@@ -112,33 +112,47 @@ def check_auto_update(old_msi, old_version, new_msi, app_name, version, folder):
     msiexec("/i", str(old_msi))
     exe = folder / f"{app_name}.exe"
     if not exe.is_file(): die(f"previous release {old_version} did not install {exe}")
-    dummy = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(3)"])     # stands in for the running app
-    log = Path(tempfile.gettempdir()) / "callido-update.log"
-    # Not detached here (the "app" is a dummy): the helper's own output is captured, so a failure can be read in CI.
-    helper = subprocess.Popen(uw.helper_command(Path(new_msi).resolve(), exe, dummy.pid, log), stdout=subprocess.PIPE,
-                              stderr=subprocess.STDOUT, text=True)
-    dummy.wait()
-    try: out, _ = helper.communicate(timeout=600)
-    except subprocess.TimeoutExpired: helper.kill(); out, _ = helper.communicate()
-    print("helper exit", helper.returncode, (out or "").strip()[-1500:])
-    try: print(Path(str(log) + ".result").read_text())
-    except OSError: print("no helper result file")
-    global PORT
-    saved, PORT = PORT, 8765                                                           # the relaunched app uses its default port
-    try:
-        got = None
-        for _ in range(240):
-            try: got = json.loads(get("/api/about")).get("version")
-            except (OSError, ValueError): got = None
-            if got == version: break
-            time.sleep(1)
-        if got != version:
-            try: print(log.read_text(encoding="utf-16", errors="replace")[-4000:])
-            except OSError: pass
-            die(f"after the update the app reports {got!r}, expected {version}")
-        print(f"auto-update: {old_version} -> {got}, app restarted")
-        get("/api/quit"); time.sleep(3)
-    finally: PORT = saved
+    new_msi = Path(new_msi).resolve()
+
+    def run_helper(sha, tag):
+        """One helper run, attached (the "app" is a dummy), its output and result file printed; then wait for the app it
+        restarts on the default port and return the version that app reports (and quit it)."""
+        dummy = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(3)"])     # stands in for the running app
+        log = Path(tempfile.gettempdir()) / f"callido-update-{tag}.log"
+        helper = subprocess.Popen(uw.helper_command(new_msi, exe, dummy.pid, log, sha), stdout=subprocess.PIPE,
+                                  stderr=subprocess.STDOUT, text=True)
+        dummy.wait()
+        try: out, _ = helper.communicate(timeout=600)
+        except subprocess.TimeoutExpired: helper.kill(); out, _ = helper.communicate()
+        print(f"[{tag}] helper exit", helper.returncode, (out or "").strip()[-1500:])
+        try: result = Path(str(log) + ".result").read_text(); print(result)
+        except OSError: result = ""; print("no helper result file")
+        global PORT
+        saved, PORT = PORT, 8765                                                       # the restarted app uses its default port
+        try:
+            got = None
+            for _ in range(240):
+                try: got = json.loads(get("/api/about")).get("version")
+                except (OSError, ValueError): got = None
+                if got: break
+                time.sleep(1)
+            if got:
+                get("/api/quit"); time.sleep(3)
+            elif tag == "upgrade":
+                try: print(log.read_text(encoding="utf-16", errors="replace")[-4000:])
+                except OSError: pass
+            return got, result
+        finally: PORT = saved
+
+    # 1. A file that does not match the verified hash (swapped in the cache) is refused; the old version stays and restarts.
+    got, result = run_helper("0" * 64, "tampered")
+    if "the MSI changed after it was verified" not in result: die(f"a tampered MSI was not refused: {result!r}")
+    if got != old_version: die(f"after a refused update the app reports {got!r}, expected the old {old_version}")
+    print(f"tampered MSI refused, {old_version} restarted")
+    # 2. The real update: the verified hash, an in-place upgrade, the new version restarts.
+    got, result = run_helper(uw._sha256_of(new_msi), "upgrade")
+    if got != version: die(f"after the update the app reports {got!r}, expected {version}")
+    print(f"auto-update: {old_version} -> {got}, app restarted")
     prods = related_products()
     if len(prods) != 1: die(f"expected one installed product after the upgrade, found {prods}")
     print("auto-update check passed (in-place upgrade, one product)")
