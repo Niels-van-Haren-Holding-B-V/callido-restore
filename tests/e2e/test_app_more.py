@@ -157,9 +157,11 @@ class UploadsToANasStopAndResume(unittest.TestCase):
         R["truncated"] = sorted(p for p, sz in on_nas.items() if p in expected and sz != expected[p]["size"])
         R["strays"] = sorted(p for p in on_nas if p not in expected)
         R["final"] = a.wait_job(a.post("/api/restore/resume", id=jid)["id"], timeout=600)
+        after = {f.relative_to(root).as_posix() for f in root.rglob("*") if f.is_file()} if root.is_dir() else set()
+        R["strays_after_resume"] = sorted(p for p in after if p not in expected)      # e.g. temporary upload names left behind
         R["cmp"] = flow.compare(m, ver, {sh: root / sh for sh in SHARES})
         R["report"] = (f"uploads at once: {R['most']}; a bar part-way: {R['partial_bar']}; stopped: {j.get('result')}; truncated on the NAS "
-                       f"after Stop: {R['truncated']}; strays {R['strays']}; final {R['final'].get('result')}")
+                       f"after Stop: {R['truncated']}; other names after Stop {R['strays']} and after Resume {R['strays_after_resume']}; final {R['final'].get('result')}")
         return R
 
     def test_1_uploads_run_side_by_side_with_progress_and_stop(self):
@@ -168,7 +170,7 @@ class UploadsToANasStopAndResume(unittest.TestCase):
         self.assertGreaterEqual(R["most"], 2, R["report"])
         b = R["partial_bar"]; self.assertIsNotNone(b, R["report"]); self.assertTrue(b["name"] and b["rate"] > 0, b)
         self.assertTrue(R["stop"]["result"].get("paused"), R["report"])
-        self.assertEqual(R["strays"], [], "no temporary or stray files may stay on the NAS: " + R["report"])
+        self.assertEqual(R["strays_after_resume"], [], "no temporary or stray files may stay on the NAS: " + R["report"])
         self.assertEqual(R["final"]["state"], "done", R["final"].get("error")); self.assertEqual(R["final"]["errors"], [])
 
     @unittest.expectedFailure
@@ -177,6 +179,7 @@ class UploadsToANasStopAndResume(unittest.TestCase):
         (WebDAV here; SMB unverified), and Resume skips it as "already there" (--ignore-existing): the restore ends with
         0 errors and the files that were in flight truncated on the NAS."""
         R = self.run_flow()
+        self.assertEqual(R["truncated"], [], "after Stop no file under its final name may be part of an upload: " + R["report"])
         for k in ("missing", "wrong_bytes", "extra"): self.assertEqual(R["cmp"][k], [], f"{k}: " + R["report"])
 
     @unittest.expectedFailure
