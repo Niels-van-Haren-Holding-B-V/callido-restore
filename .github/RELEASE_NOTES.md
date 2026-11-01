@@ -1,5 +1,12 @@
 **Callido Restore** restores files from a Synology Hyper Backup (`.hbk`) without Hyper Backup or a working NAS. It reads the backup's own metadata, shows every backup run on a timeline, and restores the folders you pick to a NAS share or a local folder. Files already at the destination are never overwritten or deleted, and the backup source is only read.
 
+## What's new in 1.2.3
+
+- **Compare a backup run with a folder.** In the Restore step, "Compare with the targets" checks the selected files of the run against the target folders by name and size, without downloading or changing anything: how many files are already there, which are missing (with their size, per folder) and which have another size. Useful for folders you copied back some other way. "Restore the missing files" then restores just those; a folder that does not exist yet counts as all missing (#217, #219, #220).
+- The upload speed no longer reads too high after an upload was retried (#218).
+
+On Windows, if you still have 1.2.0 or 1.2.1, install 1.2.2 or this version once by hand (`CallidoRestore-x64.msi` below); from 1.2.2 on, updates install themselves.
+
 ## What's new in 1.2.2
 
 **On Windows, install this version once by hand** (download `CallidoRestore-x64.msi` below): in 1.2.0 and 1.2.1 the update button is the broken part. Later versions then install themselves.
