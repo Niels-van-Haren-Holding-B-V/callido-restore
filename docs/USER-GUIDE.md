@@ -61,6 +61,13 @@ The pictures show synthetic backups with made-up names; `scripts/guide_screensho
 
 Encrypted (`.L0CK3D`) copies are detected and reported as unreadable.
 
+## A restore to the NAS that was interrupted
+Each file is uploaded to the NAS under a temporary name, `<name>.<code>.partial`, and renamed when it is complete, so a file
+under its real name on the NAS is always whole. An upload that was cut off (Stop, a dropped connection, a closed app, or one the
+app ended because nothing moved for 10 minutes) can leave such a `.partial` file next to where the file belongs. The app never
+deletes anything on the NAS, so remove leftover `.partial` files yourself once the restore is complete (in File Station, search
+for `.partial`). Resuming the restore uploads the file again under its real name.
+
 ## Google Drive: a key of your own (optional, recommended)
 
 Google does not limit how fast you download, it limits how many *requests* an app may make per second. Without a key of your own
