@@ -1,5 +1,14 @@
 **Callido Restore** restores files from a Synology Hyper Backup (`.hbk`) without Hyper Backup or a working NAS. It reads the backup's own metadata, shows every backup run on a timeline, and restores the folders you pick to a NAS share or a local folder. Files already at the destination are never overwritten or deleted, and the backup source is only read.
 
+## What's new in 1.2.4
+
+- **Stop works at once, also in the middle of a large file.** Stop used to wait until a big video had been downloaded and unpacked completely; now it ends that file's downloads and its read right away, and the restore pauses at that file. Resume starts it again (#225).
+- **No more false "couldn't be verified".** During a restore to a NAS, a file could be listed as "The check itself failed: record trailer missing" although it was restored correctly: two parts of the app read the backup's file list at the same moment. They now take turns (#223).
+- **Restores from Windows to a NAS handle every file name.** A file whose name Windows does not allow (for example a Mac folder's hidden `Icon` file, or a name with `:` or `?`) made the restore fail before the upload. It is now uploaded under its own name (#224).
+- The Mac installers are built more reliably (#225).
+
+On Windows, if you still have 1.2.0 or 1.2.1, install this version once by hand (`CallidoRestore-x64.msi` below); from 1.2.2 on, updates install themselves.
+
 ## What's new in 1.2.3
 
 - **Compare a backup run with a folder.** In the Restore step, "Compare with the targets" checks the selected files of the run against the target folders by name and size, without downloading or changing anything: how many files are already there, which are missing (with their size, per folder) and which have another size. Useful for folders you copied back some other way. "Restore the missing files" then restores just those; a folder that does not exist yet counts as all missing (#217, #219, #220).
