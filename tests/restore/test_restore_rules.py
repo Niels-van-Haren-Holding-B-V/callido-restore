@@ -270,7 +270,47 @@ class RestoreLoopRemote(unittest.TestCase):
         self.assertTrue(res["paused"]); self.assertEqual(res["next_index"], 0)
 
 
+    def test_parallel_uploads_report_progress_and_resume_at_the_oldest_unfinished_file(self):
+        # four files; the uploads of a.txt and c.txt finish, b.txt is still running when Stop comes, d.txt never starts:
+        # the restore pauses at b.txt (the oldest unfinished), and while b.txt ran its bar was in job["transfers"]
+        import threading as th
+        b = _fake_backup("nas:Restore", [("e.txt", 1, 1), ("f.txt", 2, 2), ("g.txt", 3, 3), ("h.txt", 4, 4)])
+        job = {"id": "t9p", "label": "restore", "started": 0.0}; seen = []; release = th.Event()
+        def upload(cmd, cancelled=None, progress=None, **kw):
+            target = cmd[3]
+            if target.endswith("/f.txt"):
+                progress(100, 200, 50); seen.append(list(job["transfers"]))
+                job["cancel"] = True
+                while not cancelled(): pass
+                return backup_mod.UPLOAD_CANCELLED, ""
+            os.unlink(cmd[2]); return 0, ""
+        with mock.patch.object(backup_mod, "upload_watched", side_effect=upload):
+            res = b.restore([{"share": "share", "ver": 1, "path": "", "is_dir": True}], "nas:Restore", job)
+        self.assertTrue(res["paused"]); self.assertEqual(res["next_index"], 1)
+        self.assertEqual(seen[0], [{"kind": "upload", "name": "share/f.txt", "done": 100, "total": 200, "rate": 50}])
+        self.assertEqual(job["transfers"], [])                                          # cleared when the restore stops
+
+
 class UploadWatchdog(unittest.TestCase):
+    def test_kill_uploads_ends_running_upload_processes(self):
+        import sys, threading as th, time as _t
+        out = {}
+        t = th.Thread(target=lambda: out.setdefault("rc", backup_mod.upload_watched([sys.executable, "-c", "import time; time.sleep(30)"], stall_s=60, poll_s=1)))
+        t.start(); _t.sleep(1.5)
+        self.assertEqual(backup_mod.kill_uploads(), 1); t.join(10)
+        self.assertFalse(t.is_alive()); self.assertNotEqual(out["rc"][0], 0)
+
+    def test_rclone_units(self):
+        self.assertEqual(backup_mod._bytes("512 B"), 512); self.assertEqual(backup_mod._bytes("1.5 MiB"), int(1.5 * (1 << 20)))
+        self.assertEqual(backup_mod._bytes("2GiB"), 2 << 30); self.assertEqual(backup_mod._bytes(""), 0)
+
+    def test_progress_callback_gets_bytes(self):
+        import sys
+        got = []
+        rc, _ = backup_mod.upload_watched([sys.executable, "-c", "import sys; print('1 MiB / 4 MiB, 25%, 512 KiB/s, ETA 6s', file=sys.stderr, flush=True)"],
+                                          poll_s=1, stall_s=5, progress=lambda d, t, r: got.append((d, t, r)))
+        self.assertEqual(rc, 0); self.assertEqual(got[0], (1 << 20, 4 << 20, 512 << 10))
+
     """upload_watched with a stand-in for rclone that prints its one-line stats to stderr."""
     def run_fake(self, script, **kw):
         import sys

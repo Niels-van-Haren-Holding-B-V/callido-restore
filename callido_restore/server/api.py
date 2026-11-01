@@ -30,6 +30,10 @@ def _exit_app(code=0):
         from callido_restore.pool import poolmap
         poolmap.kill_running()                                     # the pool mapper and its scan workers, as a group
     except Exception: pass
+    try:
+        from callido_restore.restore import backup
+        backup.kill_uploads()                                      # running restore uploads (rclone moveto): not ended with the app on Windows
+    except Exception: pass
     if os.name != "nt": subprocess.run(["pkill", "-P", str(os.getpid())], capture_output=True)
     os._exit(code)
 

@@ -54,27 +54,52 @@ def mapper_phase(line):
 UPLOAD_STALL_S = 600          # an upload whose transferred bytes do not move for this long is ended and retried
 UPLOAD_STALLED, UPLOAD_CANCELLED = -999, -998
 
-def upload_watched(argv, cancelled=None, stall_s=None, poll_s=10):
+UPLOAD_WORKERS = 8           # files uploaded to a remote target at once (each its own rclone process and SMB session)
+_UNIT = {"": 1, "B": 1, "K": 1 << 10, "M": 1 << 20, "G": 1 << 30, "T": 1 << 40, "P": 1 << 50}
+_LIVE = set(); _LIVE_LOCK = threading.Lock()           # running upload processes, ended by kill_uploads() when the app quits
+
+def _bytes(txt):
+    """'12.3 MiB' / '512 B' / '1.5GiB' -> bytes (rclone's stats units)"""
+    m = re.match(r"\s*([\d.]+)\s*([KMGTP]?)i?B", txt or "")
+    return int(float(m.group(1)) * _UNIT[m.group(2)]) if m else 0
+
+def kill_uploads():
+    """End every running upload process (Quit: on Windows the app's children are not ended with it). Returns how many."""
+    with _LIVE_LOCK: ps = list(_LIVE)
+    for p in ps:
+        try: p.kill()
+        except Exception: pass
+    return len(ps)
+
+def upload_watched(argv, cancelled=None, stall_s=None, poll_s=10, progress=None):
     """Run an rclone upload; returns (returncode, stderr tail). rclone reports its progress every ``poll_s`` seconds; when the
     transferred bytes do not change for ``stall_s`` (a connection that stays open but carries nothing; seen over a VPN for two
     hours) the process is ended and UPLOAD_STALLED is returned so the caller retries. ``cancelled()`` true (Stop) ends it at
-    once: UPLOAD_CANCELLED."""
+    once: UPLOAD_CANCELLED. ``progress(done_bytes, total_bytes, bytes_per_s)`` follows rclone's stats lines."""
     stall_s = stall_s or UPLOAD_STALL_S
     p = subprocess.Popen(argv + ["--stats", f"{poll_s}s", "--stats-one-line", "--stats-log-level", "NOTICE"], stdout=subprocess.DEVNULL,
                          stderr=subprocess.PIPE, text=True, **popen_kw())
+    with _LIVE_LOCK: _LIVE.add(p)
     last = [time.time()]; seen = [None]; tail = []
     def read():
         for line in p.stderr:
             tail.append(line); del tail[:-20]
-            m = re.search(r"([\d.]+ ?[KMGTP]?i?B) / ", line)
-            if m and m.group(1) != seen[0]: seen[0] = m.group(1); last[0] = time.time()
+            m = re.search(r"([\d.]+ ?[KMGTP]?i?B) / ([\d.]+ ?[KMGTP]?i?B)(?:, \d+%)?(?:, ([\d.]+ ?[KMGTP]?i?B)/s)?", line)
+            if m:
+                if m.group(1) != seen[0]: seen[0] = m.group(1); last[0] = time.time()
+                if progress:
+                    try: progress(_bytes(m.group(1)), _bytes(m.group(2)), _bytes(m.group(3) or ""))
+                    except Exception: pass
     t = threading.Thread(target=read, daemon=True); t.start()
-    while p.poll() is None:
-        time.sleep(min(poll_s, 1))
-        if cancelled and cancelled(): p.kill(); p.wait(); t.join(2); return UPLOAD_CANCELLED, "".join(tail)
-        if time.time() - last[0] > stall_s: p.kill(); p.wait(); t.join(2); return UPLOAD_STALLED, "".join(tail)
-    t.join(2)
-    return p.returncode, "".join(tail)
+    try:
+        while p.poll() is None:
+            time.sleep(min(poll_s, 1))
+            if cancelled and cancelled(): p.kill(); p.wait(); t.join(2); return UPLOAD_CANCELLED, "".join(tail)
+            if time.time() - last[0] > stall_s: p.kill(); p.wait(); t.join(2); return UPLOAD_STALLED, "".join(tail)
+        t.join(2)
+        return p.returncode, "".join(tail)
+    finally:
+        with _LIVE_LOCK: _LIVE.discard(p)
 
 class Backup:
     def __init__(self, src: Source, log=None):
@@ -589,6 +614,22 @@ class Backup:
         if not start_at or "errors_total" not in job: job["errors_total"] = len(job["errors"])        # a seed without the counter: the list is all we know
         if not start_at or "unverified_total" not in job: job["unverified_total"] = len(job["unverified"])
         stalled = set()                                         # files whose upload to a remote target stalled in this run
+        lock = threading.RLock()                                # counters and lists below are shared with the upload threads
+        tx = {}; job["transfers"] = []                          # every running download / upload: what the progress bars show
+        def tx_set(key, kind, name, done, total, rate):
+            with lock:
+                tx[key] = {"kind": kind, "name": name, "done": int(done or 0), "total": int(total or 0), "rate": int(rate or 0)}
+                job["transfers"] = list(tx.values())
+        def tx_done(key):
+            with lock:
+                if tx.pop(key, None) is not None: job["transfers"] = list(tx.values())
+        def add_error(f, msg):
+            with lock:
+                job["errors"].append({"path": f"{f['share']}/{f['path']}", "error": str(msg)}); job["errors_total"] += 1   # the list is capped in the saved file, the total is not
+                if job["errors_total"] <= 100 or job["errors_total"] % 100 == 0:          # app.log: the first 100, then every 100th
+                    log(f"restore error {job['errors_total']}: {f['share']}/{f['path']}: {msg}")
+                if job["errors_total"] > 2000: fatal.append("too many errors, aborting")
+        fatal = []
         # verified / identical_copy / unverified: per restored file, how its placement was established
         pool = self.pool; fh_cache = {}
         def restored(f):
@@ -596,27 +637,33 @@ class Backup:
             placement of every record the file reads from matched the file sizes when the map was built and each chunk's md5 was
             checked on read (not a file-level checksum); "identical_copy" = restored from an identical record's entries;
             "unverified" = listed with the reason"""
-            job["done_files"] += 1
+            with lock: job["done_files"] += 1
             st, why = ("verified", "") if f["off"] is not None and f["off"] < 0 else ("unverified", "the pool map gives no status")
             if f["off"] is not None and f["off"] >= 0 and hasattr(pool, "verification"):
                 try: st, why = pool.verification(f["off"])
                 except Exception as e: st, why = "unverified", f"status check failed: {e}"
-            if st == "verified": job["verified"] += 1
-            elif st == "identical_copy": job["identical_copy"] += 1
-            else:
-                job["unverified_total"] += 1                                              # counted always; listed up to the cap
-                if len(job["unverified"]) < UNVERIFIED_MAX: job["unverified"].append({"path": f"{f['share']}/{f['path']}", "reason": why})
+            with lock:
+                if st == "verified": job["verified"] += 1
+                elif st == "identical_copy": job["identical_copy"] += 1
+                else:
+                    job["unverified_total"] += 1                                          # counted always; listed up to the cap
+                    if len(job["unverified"]) < UNVERIFIED_MAX: job["unverified"].append({"path": f"{f['share']}/{f['path']}", "reason": why})
         def result(**extra):
             return {**extra, "restored": job["done_files"] - job["skipped"], "skipped": job["skipped"], "errors": job["errors_total"], "verified": job["verified"],
                     "identical_copy": job["identical_copy"], "unverified": job["unverified_total"]}
         # --- bucket prefetch (parallel downloads ahead of the extractor) + LRU eviction of downloaded bucket data
-        import concurrent.futures, threading
+        import concurrent.futures
         cache_limit = int(os.environ.get("HBK_CACHE_GB", "20")) * (1 << 30)
         downloaded = collections.OrderedDict(); dl_lock = threading.Lock(); dl_size = [0]
         def fetch(bk):
             rel = pool.bucket_name(bk, "bucket")
             already = self.src.locate(rel)
-            path = self.src.ensure(rel)
+            key = ("dl", bk); total = 0
+            if already is None:
+                try: total = (self.src.listdir(os.path.dirname(rel)).get(os.path.basename(rel)) or {}).get("size") or 0
+                except Exception: total = 0
+            try: path = self.src.ensure(rel, progress=lambda done, speed, note="": tx_set(key, "download", os.path.basename(rel), done, total, speed))
+            finally: tx_done(key)
             # Only files this job created in the app cache are eligible for eviction.
             if already is None and self.src.in_cache(path) and path.is_file():
                 with dl_lock:
@@ -644,6 +691,59 @@ class Backup:
                     if bk in seen or bk in pending: continue
                     seen.add(bk)
                     if len(pending) < prof.prefetch: pending[bk] = ex.submit(fetch, bk)
+        # Uploads to a remote target run UPLOAD_WORKERS at a time (each rclone process opens its own SMB session; one file at a
+        # time spent most of its time on that set-up). Reading the backup stays in this thread (the reader's file handles are
+        # not shared). The saved position is the oldest file whose upload has not finished, so a resume never skips one.
+        up_ex = concurrent.futures.ThreadPoolExecutor(max_workers=UPLOAD_WORKERS); inflight = {}; up_cancelled = set()
+        bytes_done = [done_bytes]
+        def upload_task(i, f, out, root, rel):
+            key = ("up", i); name = f"{f['share']}/{f['path']}"
+            try:
+                for attempt in range(3):
+                    if job.get("cancel"): return "cancelled"
+                    rc, err = upload_watched([RCLONE, "moveto", out, f"{root}/{rel}", "--ignore-existing", "--retries", "5", "--low-level-retries", "20",
+                                              "--retries-sleep", "5s"], cancelled=lambda: bool(job.get("cancel")),
+                                             progress=lambda d, t, r: tx_set(key, "upload", name, d, t or f["size"], r))
+                    if rc == UPLOAD_CANCELLED: return "cancelled"               # Stop: this file is uploaded again on resume
+                    if rc == 0:
+                        if os.path.exists(out):                                    # not moved: the target already had it
+                            os.unlink(out)
+                            with lock: was_stalled = rel in stalled
+                            if was_stalled:                                        # may be the start of our own interrupted upload: never overwrite
+                                add_error(f, "an upload of this file was interrupted and a file is at the target now; check its size, delete it if "
+                                             "it is incomplete, and restore this file again")
+                            else:
+                                with lock: job["skipped"] += 1; job["done_files"] += 1
+                        else: restored(f)
+                        return "done"
+                    if rc == UPLOAD_STALLED:
+                        with lock: stalled.add(rel)
+                        err = f"upload stalled: no progress for {UPLOAD_STALL_S // 60} min (network or NAS not answering)"
+                    else: err = "upload failed: " + err.strip()[-200:]
+                    if attempt < 2:
+                        job["message"] = f"{name}: {err} — retrying"; time.sleep([2, 10][attempt]); continue
+                    add_error(f, err); return "done"
+            except Exception as e:
+                add_error(f, e); return "done"
+            finally:
+                tx_done(key)
+                with lock: bytes_done[0] += f["size"]; job["done_bytes"] = bytes_done[0]
+                if os.path.exists(out):
+                    try: os.unlink(out)
+                    except OSError: pass
+        def reap(block=False):
+            """collect finished uploads; with block, wait for at least one"""
+            if block and inflight: concurrent.futures.wait(list(inflight.values()), return_when=concurrent.futures.FIRST_COMPLETED)
+            for k in [k for k, fut in inflight.items() if fut.done()]:
+                fut = inflight.pop(k)
+                try:
+                    if fut.result() == "cancelled": up_cancelled.add(k)
+                except Exception: pass
+        def drain():
+            while inflight: reap(block=True)
+        def resume_point(i):
+            """the oldest file not finished: in flight or cancelled, else the current one"""
+            return min(list(inflight) + list(up_cancelled) + [i])
         # Every file is extracted into a staging folder and then moved into place. Each local root gets its own folder inside
         # that root (same filesystem, so place_file can hard-link atomically); it is new (mkdtemp) and removed in the finally
         # below, nothing else under the root is touched. If the app is killed mid-restore the folder stays behind; it carries the
@@ -661,9 +761,14 @@ class Backup:
         job["next_index"] = start_at; persist()
         try:
             for i, f in enumerate(files):
-                if i < start_at: done_bytes += f["size"]; continue
+                if i < start_at:
+                    with lock: bytes_done[0] += f["size"]
+                    continue
+                if fatal: raise RuntimeError(fatal[0])
+                reap()
                 if job.get("cancel"):
-                    job["next_index"] = i; job["message"] = "paused"; persist("paused"); return result(paused=True, next_index=i, bytes=done_bytes)   # the file resumes where the result says
+                    drain(); r = resume_point(i)                             # running uploads end within a second (cancelled)
+                    job["next_index"] = r; job["message"] = "paused"; persist("paused"); return result(paused=True, next_index=r, bytes=bytes_done[0])
                 if i % 10 == 0:
                     for bk in [k for k, fut in pending.items() if fut.done()]: pending.pop(bk)
                     prefetch_from(i); evict()
@@ -676,59 +781,66 @@ class Backup:
                                 if bk in downloaded: downloaded.move_to_end(bk)
                     except Exception: pass
                 root, rel = file_target(f, items, dest); remote_dest = is_remote_path(root); out = os.path.join(root, rel)
-                job["message"] = f"{i + 1}/{len(files)}: {f['share']}/{f['path']}"; job["progress"] = done_bytes / total_bytes if total_bytes else (i / max(1, len(files)))
-                job["next_index"] = i
+                job["message"] = f"{i + 1}/{len(files)}: {f['share']}/{f['path']}"; job["progress"] = bytes_done[0] / total_bytes if total_bytes else (i / max(1, len(files)))
+                job["next_index"] = resume_point(i)
                 if i % 50 == 0: persist()
+                if remote_dest and rel not in existing[root]:
+                    out = os.path.join(stage[root], rel); os.makedirs(os.path.dirname(out), exist_ok=True); ok = False
+                    for attempt in range(3):
+                        try: pool.extract(f["off"], out, size=f["size"], mtime=f["mtime"], job=None, fh_cache=fh_cache); ok = True; break
+                        except Exception as e:
+                            if attempt < 2 and not isinstance(e, KeyError):  # KeyError = chunk not in pool map: retrying will not help
+                                job["message"] = f"{f['share']}/{f['path']}: {e} — retrying"; time.sleep([2, 10][attempt]); continue
+                            add_error(f, e); break
+                    if ok:
+                        while len(inflight) >= UPLOAD_WORKERS * 2: reap(block=True)
+                        inflight[i] = up_ex.submit(upload_task, i, f, out, root, rel)
+                    else:
+                        with lock: bytes_done[0] += f["size"]; job["done_bytes"] = bytes_done[0]
+                    if len(fh_cache) > 64:
+                        for k in list(fh_cache)[:32]: fh_cache.pop(k).close()
+                    continue
                 for attempt in range(3):
                   try:
-                    if remote_dest:
-                        if rel in existing[root]:
-                            job["skipped"] += 1; job["done_files"] += 1; break
-                        out = os.path.join(stage[root], rel); os.makedirs(os.path.dirname(out), exist_ok=True)
-                        pool.extract(f["off"], out, size=f["size"], mtime=f["mtime"], job=None, fh_cache=fh_cache)
-                        # --ignore-existing: if the file appeared at the target since the listing, rclone leaves it alone
-                        rc, err = upload_watched([RCLONE, "moveto", out, f"{root}/{rel}", "--ignore-existing", "--retries", "5", "--low-level-retries", "20", "--retries-sleep", "5s"],
-                                                 cancelled=lambda: bool(job.get("cancel")))
-                        if rc == UPLOAD_CANCELLED:   # Stop during an upload: end it now; this file is uploaded again on resume
-                            job["next_index"] = i; job["message"] = "paused"; persist("paused"); return result(paused=True, next_index=i, bytes=done_bytes)
-                        if rc == UPLOAD_STALLED: stalled.add(rel); raise RuntimeError(f"upload stalled: no progress for {UPLOAD_STALL_S // 60} min (network or NAS not answering)")
-                        if rc != 0: raise RuntimeError("upload failed: " + err.strip()[-200:])
-                        if os.path.exists(out):      # not moved: the target already had it
-                            os.unlink(out)
-                            if rel in stalled:       # what is there may be the start of our own interrupted upload: say so, never overwrite
-                                job["errors"].append({"path": f"{f['share']}/{f['path']}", "error": "an upload of this file was interrupted and a file is at the "
-                                                      "target now; check its size, delete it if it is incomplete, and restore this file again"})
-                                job["errors_total"] += 1; break                # an error, like a failed upload: not counted as done
-                            job["skipped"] += 1; job["done_files"] += 1; break
-                        restored(f); break
+                    if remote_dest:                  # (files not yet at the target were handed to the upload threads above)
+                        with lock: job["skipped"] += 1; job["done_files"] += 1
+                        break
                     if os.path.lexists(out):         # anything already there is kept as is, whatever its size or date
-                        job["skipped"] += 1; job["done_files"] += 1; break
+                        with lock: job["skipped"] += 1; job["done_files"] += 1
+                        break
                     tmp = os.path.join(stage[root], rel); os.makedirs(os.path.dirname(tmp), exist_ok=True)
                     pool.extract(f["off"], tmp, size=f["size"], mtime=f["mtime"], job=None, fh_cache=fh_cache)
                     if not place_file(tmp, out):     # appeared since the check above: kept, counted as skipped
-                        job["skipped"] += 1; job["done_files"] += 1; break
+                        with lock: job["skipped"] += 1; job["done_files"] += 1
+                        break
                     restored(f); break
                   except Exception as e:
                     if attempt < 2 and not isinstance(e, KeyError):      # KeyError = chunk not in pool map: retrying will not help
                         job["message"] = f"{f['share']}/{f['path']}: {e} — retrying"; time.sleep([2, 10][attempt]); continue
-                    job["errors"].append({"path": f"{f['share']}/{f['path']}", "error": str(e)}); job["errors_total"] += 1   # the list is capped in the saved file, the total is not
-                    if job["errors_total"] <= 100 or job["errors_total"] % 100 == 0:          # app.log: the first 100, then every 100th
-                        log(f"restore error {job['errors_total']}: {f['share']}/{f['path']}: {e}")
-                    if job["errors_total"] > 2000: raise RuntimeError("too many errors, aborting")
+                    add_error(f, e)
+                    if fatal: raise RuntimeError(fatal[0])
                     break                                              # recorded once; without this a non-retried error was logged on every attempt
-                done_bytes += f["size"]; job["done_bytes"] = done_bytes
+                with lock: bytes_done[0] += f["size"]; job["done_bytes"] = bytes_done[0]
                 if len(fh_cache) > 64:
                     for k in list(fh_cache)[:32]: fh_cache.pop(k).close()
+            drain()
+            if fatal: raise RuntimeError(fatal[0])
+            if job.get("cancel") or up_cancelled:
+                r = resume_point(len(files)); job["next_index"] = r; job["message"] = "paused"; persist("paused")
+                return result(paused=True, next_index=r, bytes=bytes_done[0])
         except Exception:
             persist("error"); raise
         finally:
+            job["cancel_uploads"] = True
+            up_ex.shutdown(wait=True, cancel_futures=True)              # running uploads end with the cancel flag or finish
+            with lock: tx.clear(); job["transfers"] = []
             ex.shutdown(wait=False, cancel_futures=True)
             for fh in fh_cache.values(): fh.close()
             for root, st in stage.items():               # only this job's staging folders; never anything else at a destination
                 if not is_remote_path(root): shutil.rmtree(st, ignore_errors=True)
             if remote_stage: shutil.rmtree(remote_stage, ignore_errors=True)
         job["progress"] = 1.0; job["next_index"] = len(files); persist("done")
-        return result(files=len(files), bytes=done_bytes)
+        return result(files=len(files), bytes=bytes_done[0])
 
     # --- content extraction (small files stored in Pool/file_pool/<n>.file)
     def extract(self, share, ver, fid, job=None):
