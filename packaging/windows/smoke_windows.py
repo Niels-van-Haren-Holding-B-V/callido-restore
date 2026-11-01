@@ -108,6 +108,7 @@ def check_auto_update(old_msi, old_version, new_msi, app_name, version, folder):
         print(f"auto-update check skipped: previous release {old_version} is not older than {version}"); return
     sys.path.insert(0, str(ROOT))
     from callido_restore import update_windows as uw
+    old_msi = Path(old_msi).resolve()                      # msiexec needs a full path with backslashes ("prev/x.msi" fails)
     msiexec("/i", str(old_msi))
     exe = folder / f"{app_name}.exe"
     if not exe.is_file(): die(f"previous release {old_version} did not install {exe}")
