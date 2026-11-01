@@ -6,24 +6,54 @@
 2. **+ Add backup** → choose where the `.hbk` lives: an rclone remote you already have, Google Drive (sign in; with or without a
    Google key of your own, see "Google Drive: a key of your own" below), a NAS over SMB, or a local folder → browse to the `.hbk`
    folder → name it.
-3. The overview shows the task, the shares and all backup runs. Click a run in the chart (or "Go to version"). The latest run is
-   selected by default. Click the share chips to load snapshots (downloads a few MB each).
-4. Tabs: **Changes** (what that run added/changed), **File timeline**, **Browse folders**, **Search & flags** (suspicious files),
-   **Compare versions**, **Restore wizard**.
-5. **Restore wizard**: pick the run → tick shared folders or subfolders in the tree (▸ opens a folder; untick a subfolder to leave it
-   out; the selected file count and size update as you go; folders and files can also be added with the + buttons under Folders or
-   Search) → build the pool map once (downloads ~200 KB per bucket;
-   progress bar; Stop keeps index files already downloaded, and running it again continues) → choose where each selected folder
-   goes: a table with one row per folder, defaulting to the NAS share with the same name (the folder’s contents land there directly,
-   no version or source folder in between); pick another share or sub-folder per row, or choose “a mounted share / local path” as the
-   connection and type a path per row. “Advanced” can put everything under one folder as `<folder>/<share>/<path>` instead.
-   No NAS connection yet? Open “Prepare the NAS and connect” on that step: it explains the shared folder, user and SMB settings and
-   connects from there. “Check targets and preview” tells you per row whether the folder is new, empty or already has files, and shows
-   one sample file with its final path; a folder inside the backup itself (or around it) is refused → Start.
-   The bar at the top shows running jobs. Pause/Resume from the wizard; after a crash or reboot the job is listed for resuming.
+
+   <img src="screenshots/guide-1-add-backup.png" width="560" alt="Add a backup, step 1: where the .hbk folder is">
+
+3. The overview shows the task, the shares and all backup runs. Click a run in the chart (or type its number in "Go to run"); the
+   latest run is selected by default. Each shared folder of a run has its own file list: click a chip to load it, or **Load all shares
+   for this run** (a few MB each). The chip then shows the number of files and their size.
+
+   <img src="screenshots/guide-2-load-lists.png" alt="Run 102 with one chip per shared folder, each still to be loaded">
+
+4. Tabs: **What changed** (what that run added, changed or removed, with ransomware flags), **Folders**, **Search**, **Timeline**,
+   **Compare runs** and **Restore**.
+5. **Restore**, in four steps:
+   * **Which backup run?** After an incident, pick the last run before it.
+   * **What to restore?** Tick shared folders or subfolders in the tree (▸ opens a folder; ticking a folder takes everything under
+     it; untick a subfolder to leave it out). The selected file count and size update as you go. Folders and files can also be added
+     with the + buttons under Folders or Search. A shared folder whose file list is not loaded yet loads when you tick it.
+
+     <img src="screenshots/guide-3-select.png" alt="The tree: Documents ticked, Photos partly ticked (2025 yes, 2026 no), homes not ticked">
+
+   * **Where should the files go?** One row per selected shared folder, defaulting to the NAS share with the same name: the
+     folder's contents land there directly, with no version or source folder in between. Pick another share or sub-folder per row,
+     or choose "a mounted share / local path" as the connection and type a path per row. "Advanced" can put everything under one
+     folder as `<folder>/<share>/<path>` instead. No NAS connection yet? Open "Prepare the NAS and connect": it explains the shared
+     folder, user and SMB settings and connects from there. "Check targets and preview" tells you per row whether the folder is new,
+     empty or already has files, and shows one sample file with its final path; a folder inside the backup itself (or around it) is
+     refused.
+   * **Check and start.** "Count files and size" shows what will be restored and where. A backup made by Hyper Backup records where
+     every piece of every file is stored, so it is ready to restore at once:
+
+     <img src="screenshots/guide-4-ready.png" alt="Step 4: Start restore, 'Ready to restore', 18 files and where they go">
+
+     A backup without that record needs a one-time preparation first (the app downloads the backup's index files and builds a
+     map; it starts by itself and shows its progress on one line). You can press **Start when the backup is prepared**: the
+     restore then starts by itself as soon as the preparation is done.
+   * **The result.** The bar shows the restore while it runs. A restore cut short (the app closed, a crash, a restart) is listed under
+     "Earlier restores you can continue". When it ends, one line sums it up: restored, skipped (already at the target), errors, size, and how many files were
+     **checked** (the file's place in the backup was confirmed and every block's checksum matched while it was read). Files that
+     **couldn't be verified** were restored, but check them before you rely on them; files that could not be restored at all are
+     listed under **Errors**.
+
+     <img src="screenshots/guide-5-result.png" alt="Restore finished: 24 restored, 2 errors, 22 checked, 2 couldn't be verified, with both lists">
+
    Files already at the target are never overwritten or deleted. During a restore to a local folder, files are staged in a hidden
    `.hbk-restore-<job id>-…` folder inside the target and moved into place one by one; it is removed when the job ends or is resumed.
    If the app was killed mid-restore, that folder may remain; it is safe to delete.
+
+The pictures show synthetic backups with made-up names; `scripts/guide_screenshots.py` regenerates them.
+
 Encrypted (`.L0CK3D`) copies are detected and reported as unreadable.
 
 ## Google Drive: a key of your own (optional, recommended)
