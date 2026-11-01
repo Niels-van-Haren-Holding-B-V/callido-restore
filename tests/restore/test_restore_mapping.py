@@ -253,7 +253,7 @@ class RestoreApiTests(_Fixture):
         with urlopen(f"http://127.0.0.1:{self.srv.server_address[1]}{path}") as r: return json.loads(r.read())
 
     def test_a_restore_is_listed_to_resume_once_and_not_while_it_runs(self):
-        # Niels: "restores you can resume ... 2 now"; "we always restore the current restore that is still busy"
+        # the user: "restores you can resume ... 2 now"; "we always restore the current restore that is still busy"
         items = [dict(self.items[0], dest=self.dA), dict(self.items[1], dest=self.dB)]
         stopped = {"id": "0123456789", "src": "t8", "items": items, "dest": "", "state": "paused", "label": "restore", "started": 0}
         other = dict(stopped, id="0123456780", items=items[:1])                       # another restore: stays

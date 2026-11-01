@@ -494,7 +494,7 @@ class H(BaseHTTPRequestHandler):
                     if d: it["dest"] = d
                     else: it.pop("dest", None)
                     items.append(it)
-                err = restore_target_error(b.src, items, dest, create=False)
+                err = restore_target_error(b.src, items, dest, create=False, missing_ok=True)   # read-only; a missing target = all missing
                 if err: return self._json({"error": err}, 400)
                 return self._json(start_job(lambda job: b.compare_target(items, dest, job, body.get("skip_meta", True)), "compare"))
             if u.path == "/api/restore/resume":

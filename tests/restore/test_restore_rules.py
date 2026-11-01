@@ -491,7 +491,7 @@ class DownloadBars(unittest.TestCase):
 
 class AlreadyThereNeedsNoDownload(unittest.TestCase):
     def test_files_at_the_target_are_skipped_without_fetching_their_data(self):
-        # Niels: "the check on what's restored already ... can't that be quicker by a listing": a file already at the target
+        # the check of what is restored already must not wait for downloads (the user: "can't that be quicker by a listing"): a file already at the target
         # (name and size) is skipped before anything of the backup is downloaded for it
         d = Path(tempfile.mkdtemp()); self.addCleanup(shutil.rmtree, d, True)
         dest = d / "dest"; (dest / "share").mkdir(parents=True); (dest / "share" / "f0.txt").write_bytes(b"xxxx")
@@ -515,7 +515,7 @@ class AlreadyThereNeedsNoDownload(unittest.TestCase):
 
 
 class CompareTarget(unittest.TestCase):
-    """Niels restored folders himself: the run's selection against a target by name and size, nothing written."""
+    """Folders restored some other way: the run's selection against a target by name and size, nothing written."""
     def test_local_target_counts_same_missing_and_other_size_and_writes_nothing(self):
         d = Path(tempfile.mkdtemp()); self.addCleanup(shutil.rmtree, d, True)
         (d / "share" / "a").mkdir(parents=True); (d / "share" / "a" / "x.txt").write_bytes(b"1234"); (d / "share" / "y.txt").write_bytes(b"12")
@@ -535,6 +535,19 @@ class CompareTarget(unittest.TestCase):
             res = b.compare_target([{"share": "share", "ver": 1, "path": "", "is_dir": True}], "nas:R", {})
         ls.assert_called_once_with("nas:R")
         self.assertEqual((res["same"], res["missing"], res["missing_bytes"]), (1, 1, 4))
+        self.assertEqual(res["missing_targets"], [])
+
+    def test_a_target_that_is_not_there_counts_as_empty(self):
+        b = _fake_backup("nas:R", [("a.txt", 3, 0)])
+        with mock.patch.object(backup_mod, "destination_sizes", side_effect=RuntimeError("cannot list the destination nas:R: directory not found")):
+            res = b.compare_target([{"share": "share", "ver": 1, "path": "", "is_dir": True}], "nas:R", {})
+        self.assertEqual((res["missing"], res["missing_targets"]), (1, ["nas:R"]))
+        b = _fake_backup("/nonexistent/folder", [("a.txt", 3, 0)])
+        res = b.compare_target([{"share": "share", "ver": 1, "path": "", "is_dir": True}], "/nonexistent/folder", {})
+        self.assertEqual((res["missing"], res["missing_targets"]), (1, ["/nonexistent/folder"]))
+        with mock.patch.object(backup_mod, "destination_sizes", side_effect=RuntimeError("cannot list the destination nas:R: access denied")):
+            with self.assertRaises(RuntimeError):                                # unreadable is not empty
+                b2 = _fake_backup("nas:R", [("a.txt", 3, 0)]); b2.compare_target([{"share": "share", "ver": 1, "path": "", "is_dir": True}], "nas:R", {})
 
 class UploadWatchdog(unittest.TestCase):
     def test_kill_uploads_ends_running_upload_processes(self):

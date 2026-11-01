@@ -967,7 +967,7 @@ async function tabRestore(){const el=$('#tab-restore');
     catch(e){$('#rsProg').innerHTML='';if(g){g.disabled=false;g.textContent='Start restore'}toastError(e)}};
   // Parallel transfers of a running restore (hbk-1's engine: job.transfers = [{kind: download|upload|bucket, name, done, total, rate}]):
   // one small bar per file. "download": a file whose data is coming from the backup (the next ones, and the one being read);
-  // "upload": a file going to the NAS. The backup's own bucket files ("bucket") are not shown (Niels: "I just want the files").
+  // "upload": a file going to the NAS. The backup's own bucket files ("bucket") are not shown (the user: "I just want the files").
   // A total of 0 means the size is not known yet: no percentage, the bar stays empty until bytes arrive.
   const xferBar=x=>{const pct=x.total?Math.min(100,Math.round(100*(x.done||0)/x.total)):null;const nm=String(x.name||'');const short=nm.split('/').pop()||nm;
     const up=x.kind==='upload';const what=up?'↑ to the target':'↓ from the backup';
