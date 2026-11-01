@@ -14,4 +14,4 @@ REPO = "Niels-van-Haren-Holding-B-V/callido-restore"   # the only place updates 
 # key exists only as the GitHub Actions secret RELEASE_SIGNING_KEY. Rotation: add the new key here in a release signed with the
 # old one, sign later releases with the new one, then drop the old key (docs/HANDOVER.md, "Release signing"). Empty: updates are
 # only offered as a link to the release page.
-UPDATE_PUBLIC_KEYS = []
+UPDATE_PUBLIC_KEYS = ["d25d5fb4197efff814838f55f9b642e62a2202ecb2cbc6028883a7b0a290a3cf"]   # created 2026-11-01 by Niels
