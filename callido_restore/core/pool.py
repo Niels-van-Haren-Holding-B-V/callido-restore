@@ -73,14 +73,19 @@ class SlicedStream:
     def __init__(self, source, reldir):
         self.src, self.reldir = source, reldir
         self._names = None; self._fh = {}
+        # one lock per stream: a read is seek + read on a shared handle, and a restore to a NAS reads from several threads at once
+        # (the upload threads verify each file, the main thread plans the next one, prefetch threads plan ahead). Without it a
+        # seek of one thread landed between another's seek and read: "record trailer missing" for a file that is fine.
+        self._lock = threading.Lock()
     def names(self):
         if self._names is None:
-            self._names = {}
+            names = {}                                          # filled first, published whole: another thread never sees it half built
             for n, e in self.src.listdir(self.reldir).items():
                 m = re.match(r"^(\d+)\.idx\.(\d+)$", n)
-                if m: 
+                if m:
                     k = int(m.group(1))
-                    if k not in self._names or int(m.group(2)) > rev_sort_key(self._names[k]): self._names[k] = n
+                    if k not in names or int(m.group(2)) > rev_sort_key(names[k]): names[k] = n
+            self._names = names
         return self._names
     def slice_path(self, k, job=None, progress=None, cancelled=None):
         n = self.names().get(k)
@@ -90,10 +95,11 @@ class SlicedStream:
         out = b""
         while n > 0:
             k, lo = divmod(off, SLICE)
-            p = self.slice_path(k, job)
-            fh = self._fh.get(k)
-            if fh is None: fh = self._fh[k] = open(p, "rb")
-            fh.seek(lo); chunk = fh.read(min(n, SLICE - lo))
+            p = self.slice_path(k, job)                          # outside the lock: fetching a slice may take seconds
+            with self._lock:
+                fh = self._fh.get(k)
+                if fh is None: fh = self._fh[k] = open(p, "rb")
+                fh.seek(lo); chunk = fh.read(min(n, SLICE - lo))
             if not chunk: raise EOFError(f"{self.reldir} offset {off}")
             out += chunk; off += len(chunk); n -= len(chunk)
         return out
