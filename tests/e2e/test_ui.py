@@ -2,6 +2,7 @@
 drives the page like a user; a scenario fails on a page exception, a wrong or missing restored file, or a failed check.
 
     HBK_E2E_UI=1 [HBK_CHROME=<chrome binary>] [HBK_E2E_UI_OUT=<folder for notes and screenshots>] python -m unittest tests.e2e.test_ui
+    HBK_E2E_APP=<built app executable> runs every scenario against a release build instead of the source.
 
 Chrome: HBK_CHROME, else the usual install locations. POSIX only (the driver talks to Chrome over a pipe)."""
 import os, re, shutil, subprocess, sys, tempfile, unittest

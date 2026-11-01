@@ -292,6 +292,7 @@ def upload_flow(b, base, notes, shot):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--chrome", required=True); ap.add_argument("--out", required=True)
+    ap.add_argument("--app", default=os.environ.get("HBK_E2E_APP"), help="run this built app instead of the source (e.g. <mount>/Callido Restore.app/Contents/MacOS/Callido Restore)")
     ap.add_argument("--upload", action="store_true", help="#201/#202: per-file bars while a restore uploads to a NAS (rclone WebDAV)")
     ap.add_argument("--settings", action="store_true", help="#190: the Settings dialog (NAS edit, Drive key, appearance, updates, cache)")
     ap.add_argument("--stop", action="store_true", help="#187: Stop the running restore, Resume it, byte-exact")
@@ -328,7 +329,8 @@ def main():
     if a.settings:                 # the update choice must be real here: no HBK_NO_UPDATE_CHECK, but "checked just now" so no check is due
         env.pop("HBK_NO_UPDATE_CHECK", None)
         (home / ".hbk-explorer" / "update.json").write_text(json.dumps({"checked": time.time()}))
-    srv = subprocess.Popen([sys.executable, "-m", "callido_restore", "--no-window", "--port", str(port)], cwd=str(ROOT), env=env, stdout=log, stderr=subprocess.STDOUT)
+    cmd = [a.app] if a.app else [sys.executable, "-m", "callido_restore"]       # --app: a built app (the .app's executable or the .exe)
+    srv = subprocess.Popen([*cmd, "--no-window", "--port", str(port)], cwd=str(ROOT), env=env, stdout=log, stderr=subprocess.STDOUT)
     notes = []; n = [0]
     def shot(b, name):
         n[0] += 1; p = out / f"{n[0]:02d}-{name}.png"; p.write_bytes(b.png()); notes.append(f"[shot] {p.name}")
