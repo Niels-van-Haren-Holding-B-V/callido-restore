@@ -226,19 +226,22 @@ class RestoreLoopRemote(unittest.TestCase):
         self.calls = []
         def run(cmd, **kw):
             self.calls.append(cmd)
-            if cmd[1] == "lsjson":
-                return subprocess.CompletedProcess(cmd, 0, stdout=json.dumps([{"Path": "share/a.txt", "Size": 3}]), stderr="")
+            if cmd[1] == "lsjson":                       # what is at the target: a.txt from the start, then every upload
+                return subprocess.CompletedProcess(cmd, 0, stdout=json.dumps([{"Path": "share/a.txt", "Size": 3}] + [
+                    {"Path": t.split("nas:Restore/", 1)[1], "Size": n} for t, n in self.at_target.items()]), stderr="")
             raise AssertionError(cmd)
         def upload(cmd, cancelled=None, **kw):
             self.calls.append(cmd)
             staged, target = cmd[2], cmd[3]
             if target in self.stall_once: self.stall_once.discard(target); return backup_mod.UPLOAD_STALLED, ""
+            if target not in self.lost: self.at_target[target] = os.path.getsize(staged) - (1 if target in self.partial else 0)  # partial: the start of an interrupted upload
             if not target.endswith("/c.txt") and target not in self.partial: os.unlink(staged)   # moved; c.txt "appeared" after the listing
             return 0, ""
-        self.stall_once = set(); self.partial = set()
+        self.stall_once = set(); self.partial = set(); self.at_target = {}; self.lost = set()
         p = mock.patch.object(subprocess, "run", side_effect=run); p.start(); self.addCleanup(p.stop)
         p = mock.patch.object(backup_mod, "upload_watched", side_effect=upload); p.start(); self.addCleanup(p.stop)
         p = mock.patch.object(backup_mod.time, "sleep", lambda s: None); p.start(); self.addCleanup(p.stop)
+        p = mock.patch.object(backup_mod, "CHECK_WAIT_S", 0); p.start(); self.addCleanup(p.stop)
 
     def test_listed_and_late_files_are_skipped_others_uploaded(self):
         b = _fake_backup("nas:Restore", [("a.txt", 5, 1), ("b.txt", 4, 2), ("c.txt", 3, 3)])
@@ -260,6 +263,36 @@ class RestoreLoopRemote(unittest.TestCase):
         res = b.restore([{"share": "share", "ver": 1, "path": "", "is_dir": True}], "nas:Restore", job)
         self.assertEqual((res["restored"], res["skipped"], res["errors"]), (1, 0, 1))
         self.assertIn("interrupted", job["errors"][0]["error"])
+        self.assertEqual(job["check"]["ok"], 1); self.assertEqual(job["kept"], [])     # the short d.txt stays an error, not "kept"
+
+    def test_final_check_restores_a_lost_file_again(self):
+        # b.txt's upload reports success but the file is not at the target: the final check finds it missing and uploads it again
+        b = _fake_backup("nas:Restore", [("a.txt", 5, 1), ("b.txt", 4, 2)])
+        self.lost = {"nas:Restore/share/b.txt"}
+        def upload(cmd, cancelled=None, **kw):
+            self.calls.append(cmd); staged, target = cmd[2], cmd[3]
+            if target in self.lost: self.lost.discard(target)                  # lost once
+            else: self.at_target[target] = os.path.getsize(staged)
+            os.unlink(staged); return 0, ""
+        job = {"id": "t5c", "label": "restore", "started": 0.0}
+        with mock.patch.object(backup_mod, "upload_watched", side_effect=upload):
+            res = b.restore([{"share": "share", "ver": 1, "path": "", "is_dir": True}], "nas:Restore", job)
+        self.assertEqual([c[3] for c in self.calls if c[1] == "moveto"], ["nas:Restore/share/b.txt"] * 2)
+        self.assertEqual((res["errors"], res["restored"]), (0, 1))
+        self.assertEqual(res["check"], {"ok": 1, "missing": 0, "differs": 1, "partial": 0, "restored_again": 1, "files": 2})
+        self.assertEqual(job["kept"], [{"path": "share/a.txt", "at_target": 3, "in_backup": 5}])   # a different a.txt was there: kept
+
+    def test_final_check_lists_a_file_that_stays_missing_and_counts_rclone_leftovers(self):
+        b = _fake_backup("nas:Restore", [("b.txt", 4, 2)])
+        self.at_target["nas:Restore/share/b.txt.0123abcd.partial"] = 2
+        def upload(cmd, cancelled=None, **kw):
+            self.calls.append(cmd); os.unlink(cmd[2]); return 0, ""            # "moved", never arrives
+        job = {"id": "t5d", "label": "restore", "started": 0.0}
+        with mock.patch.object(backup_mod, "upload_watched", side_effect=upload):
+            res = b.restore([{"share": "share", "ver": 1, "path": "", "is_dir": True}], "nas:Restore", job)
+        self.assertEqual(len([c for c in self.calls if c[1] == "moveto"]), 1 + backup_mod.CHECK_ROUNDS)
+        self.assertEqual((res["errors"], res["check"]["missing"], res["check"]["partial"]), (1, 1, 1))
+        self.assertIn("final check", job["errors"][0]["error"])
 
     def test_stop_during_an_upload_pauses_at_that_file(self):
         b = _fake_backup("nas:Restore", [("b.txt", 4, 2), ("e.txt", 5, 5)]); job = {"id": "t6", "label": "restore", "started": 0.0}
@@ -283,12 +316,13 @@ class RestoreLoopRemote(unittest.TestCase):
                 job["cancel"] = True
                 while not cancelled(): pass
                 return backup_mod.UPLOAD_CANCELLED, ""
-            os.unlink(cmd[2]); return 0, ""
+            self.at_target[target] = os.path.getsize(cmd[2]); os.unlink(cmd[2]); return 0, ""
         with mock.patch.object(backup_mod, "upload_watched", side_effect=upload):
             res = b.restore([{"share": "share", "ver": 1, "path": "", "is_dir": True}], "nas:Restore", job)
         self.assertTrue(res["paused"]); self.assertEqual(res["next_index"], 1)
         self.assertEqual(seen[0], [{"kind": "upload", "name": "share/f.txt", "done": 100, "total": 200, "rate": 50}])
         self.assertEqual(job["transfers"], [])                                          # cleared when the restore stops
+        self.assertEqual(job["rates"], {"download": 0, "upload": 0})
 
     def test_staged_bytes_are_bounded_and_one_large_file_still_goes(self):
         # STAGE_MAX = 5 bytes; each upload holds its file 0.3 s. When a file is extracted, what already waits plus the new file
@@ -303,13 +337,46 @@ class RestoreLoopRemote(unittest.TestCase):
             return real(off, out, size=size, **kw)
         b.pool.extract = extract
         def upload(cmd, cancelled=None, **kw):
-            th.Event().wait(0.3); os.unlink(cmd[2]); return 0, ""
+            th.Event().wait(0.3); self.at_target[cmd[3]] = os.path.getsize(cmd[2]); os.unlink(cmd[2]); return 0, ""
         with mock.patch.object(backup_mod, "upload_watched", side_effect=upload), mock.patch.object(backup_mod, "STAGE_MAX", 5):
             res = b.restore([{"share": "share", "ver": 1, "path": "", "is_dir": True}], "nas:Restore", job)
         self.assertEqual(res["restored"], 4)
         self.assertEqual(len(seen), 4)
         for waiting, size in seen: self.assertTrue(waiting == 0 or waiting + size <= 5, seen)
         self.assertEqual(seen[1], (1, 2))                                           # f.txt joins e.txt: 3 bytes fit
+
+
+class RestoreCache(unittest.TestCase):
+    """The bucket cache is a passage: it stays near HBK_CACHE_GB during a restore, buckets left by an earlier run count too, a
+    finished restore deletes them, and nothing but bucket files in the app cache is ever deleted."""
+    def test_cache_is_bounded_counts_old_buckets_and_is_emptied_at_the_end(self):
+        d = Path(tempfile.mkdtemp()); self.addCleanup(shutil.rmtree, d, True)
+        cache = d / "cache"; dest = d / "dest"; (dest / "share").mkdir(parents=True)
+        p = mock.patch.object(paths, "JOBS_DIR", d / "jobs"); p.start(); self.addCleanup(p.stop)
+        old = cache / "Pool/0/9/5.bucket.3"; old.parent.mkdir(parents=True); old.write_bytes(b"x" * 100)      # an earlier run's bucket
+        keep = cache / "Config/file_chunk4.index/1.idx.3"; keep.parent.mkdir(parents=True); keep.write_bytes(b"i")
+        sizes = []
+        class Src:
+            id = "cachetest"; cache_dir = cache
+            def in_cache(self, q): return Path(q).resolve().is_relative_to(cache.resolve())
+            def locate(self, rel): return (cache / rel) if (cache / rel).is_file() else None
+            def listdir(self, rel): return {}
+            def ensure(self, rel, progress=None, **kw):
+                q = cache / rel; q.parent.mkdir(parents=True, exist_ok=True); q.write_bytes(b"b" * 100)
+                sizes.append(sum(f.stat().st_size for f in (cache / "Pool").rglob("*.bucket.*"))); return q
+        class Pool(_FakePool):
+            def plan(self, off): return [(off, 0)], None                  # file n reads bucket n
+            def bucket_name(self, b, kind): return f"Pool/0/{b // 2048}/{b % 2048}.bucket.1"
+        b = _Backup.__new__(_Backup); b.src = Src(); b._fake_pool = Pool(str(dest))
+        b.restore_plan = lambda items, skip_meta=True: [{"share": "share", "path": f"f{n}.txt", "off": n, "size": 4, "mtime": 0} for n in range(100)]
+        job = {"id": "tc", "label": "restore", "started": 0.0}
+        with mock.patch.dict(os.environ, {"HBK_CACHE_GB": str(1000 / (1 << 30))}):          # 1000 bytes = 10 buckets
+            res = b.restore([{"share": "share", "ver": 1, "path": "", "is_dir": True}], str(dest), job)
+        self.assertEqual(res["restored"], 100)
+        self.assertFalse(old.exists())                                    # counted and deleted, it was not needed
+        self.assertTrue(keep.exists())                                    # not a bucket: never touched
+        self.assertEqual(list((cache / "Pool").rglob("*.bucket.*")), [])  # emptied at the end
+        self.assertLess(max(sizes), 100 * 60)                             # bounded: never all 100 buckets at once (look-ahead 40 + limit)
 
 class UploadWatchdog(unittest.TestCase):
     def test_kill_uploads_ends_running_upload_processes(self):

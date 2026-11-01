@@ -107,5 +107,13 @@ computer together with the sign-in token.
 Nothing is ever written to the backup. What the app downloads goes into its own cache folder (`~/.hbk-explorer/cache`):
 the backup's chunk table (`Pool/chunk_index`, read in 8 MB slices as a restore needs them; up to the table's full size,
 6.8 GB for a 1.5 TB backup, and kept for later restores), the snapshot file lists you load, and the bucket files a restore
-reads (removed again once the cache holds more than 20 GB of them). You can delete the cache folder when the app is closed;
-it is filled again on demand.
+reads. Bucket files only pass through: once the cache holds more than 5 GB of them, the ones the next files do not need are
+deleted, and a finished restore deletes them all (a stopped one keeps them for Resume). You can delete the cache folder when
+the app is closed; it is filled again on demand.
+
+## The check at the end of a restore
+When a restore has gone through all files, the app checks the target: every file of the restore must be there with the size
+the backup gives. Files that are missing are restored again (twice at most; when the NAS refused an upload, after waiting two
+minutes, because the NAS had the file in use). The result line says how many files are at the target, how many were
+restored again and how many are still missing; those stay in the error list. A different file that was already at the
+target is kept, never written over, and listed under "Kept". A Stop during the check resumes with the check.

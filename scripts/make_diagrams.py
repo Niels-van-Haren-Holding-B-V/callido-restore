@@ -119,7 +119,7 @@ def restore_flow():
     # row 1: the backup and the transfer
     d.box(24, 80, 200, 74, "the backup (.hbk)", ["Google Drive · NAS over SMB ·", "a local or mounted disk"], "ext")
     d.box(304, 80, 240, 74, "rclone daemon", ["one backend per connection,", "throttled, retried (transfer.py)"], "ext")
-    d.box(624, 80, 332, 74, "app cache  ~/.hbk-explorer/cache", ["slices and bucket files on demand;", "LRU ≤ 20 GB, several buckets at once"], "box")
+    d.box(624, 80, 332, 74, "app cache  ~/.hbk-explorer/cache", ["slices and bucket files on demand;", "≤ 5 GB, deleted after use"], "box")
     d.arrow(224, 117, 304, 117, label="read only", ly=108)
     d.arrow(544, 117, 624, 117, label="copyfile", ly=108)
     # row 2: locating a file's chunks

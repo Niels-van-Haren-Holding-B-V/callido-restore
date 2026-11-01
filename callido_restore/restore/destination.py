@@ -83,3 +83,10 @@ def list_destination(dest):
     except rclone.RcloneError as e:
         raise RuntimeError(f"cannot list the destination {dest}: {e}; nothing was written")
     return {e["Path"] for e in entries}
+
+def destination_sizes(dest):
+    """Every file at a remote destination with its size, {path: size} (recursive); raises like list_destination."""
+    try: entries = rclone.ls(dest, recurse=True, files_only=True)
+    except rclone.RcloneError as e:
+        raise RuntimeError(f"cannot list the destination {dest}: {e}")
+    return {e["Path"]: e.get("Size") for e in entries}
