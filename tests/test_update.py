@@ -37,6 +37,7 @@ class UpdateTests(unittest.TestCase):
         for k, v in (("VERSION", "1.1.0"), ("UPDATE_PUBLIC_KEYS", [PK])):
             p = mock.patch.object(update, k, v); p.start(); self.addCleanup(p.stop)
         p = mock.patch.object(update, "platform_asset", return_value="CallidoRestore-arm64.dmg"); p.start(); self.addCleanup(p.stop)
+        p = mock.patch.object(paths, "WINDOWS", False); p.start(); self.addCleanup(p.stop)        # the macOS path, on every OS
         self.payload = b"the new disk image" * 1000
         self.files = {}
         self.set_release("v1.2.0", self.payload)
@@ -44,7 +45,7 @@ class UpdateTests(unittest.TestCase):
     def set_release(self, tag, payload, sums=None, sig=None):
         base = f"https://github.com/{update.REPO}/releases/download/{tag}/"
         sums = sums if sums is not None else f"{hashlib.sha256(payload).hexdigest()}  CallidoRestore-arm64.dmg\n".encode()
-        sig = sig if sig is not None else _sign(sums)
+        sig = sig if sig is not None else _sign(update.signed_message(tag, sums))
         self.files = {base + "CallidoRestore-arm64.dmg": payload, base + "SHA256SUMS": sums, base + "SHA256SUMS.sig": sig}
         self.rel = {"tag_name": tag, "name": tag, "body": "notes", "html_url": base,
                     "assets": [{"name": u.rsplit("/", 1)[1], "browser_download_url": u, "size": len(b)} for u, b in self.files.items()]}
@@ -71,7 +72,7 @@ class UpdateTests(unittest.TestCase):
     # ------------------------------------------------------------------ refusals
     def test_bad_signature(self):
         sums = f"{hashlib.sha256(self.payload).hexdigest()}  CallidoRestore-arm64.dmg\n".encode()
-        self.set_release("v1.2.0", self.payload, sums=sums, sig=_sign(sums.replace(b"  ", b" ")))
+        self.set_release("v1.2.0", self.payload, sums=sums, sig=_sign(update.signed_message("v1.2.0", sums.replace(b"  ", b" "))))
         with self.assertRaises(RuntimeError) as cm: self.download()
         self.assertIn("signature", str(cm.exception)); self.assertNothingKept()
 
@@ -83,6 +84,23 @@ class UpdateTests(unittest.TestCase):
         self.set_release("v1.2.0", evil, sums=sums, sig=bytes(64))
         with self.assertRaises(RuntimeError): self.download()
         self.assertNothingKept()
+
+    def test_old_signed_release_republished_under_a_newer_tag(self):
+        """Release write access without the key: the old v1.0.0 list and its valid signature, the old image, a new tag."""
+        sums = f"{hashlib.sha256(self.payload).hexdigest()}  CallidoRestore-arm64.dmg\n".encode()
+        self.set_release("v9.9.9", self.payload, sums=sums, sig=_sign(update.signed_message("v1.0.0", sums)))
+        with self.assertRaises(RuntimeError) as cm: self.download()
+        self.assertIn("signature", str(cm.exception)); self.assertNothingKept()
+
+    def test_a_signature_without_the_tag_is_refused(self):
+        sums = f"{hashlib.sha256(self.payload).hexdigest()}  CallidoRestore-arm64.dmg\n".encode()
+        self.set_release("v1.2.0", self.payload, sums=sums, sig=_sign(sums))                  # signed the list alone
+        with self.assertRaises(RuntimeError): self.download()
+
+    def test_windows_is_not_installable_without_the_windows_step(self):
+        with mock.patch.object(paths, "WINDOWS", True), mock.patch.object(update, "latest_release", return_value=self.rel):
+            update._check_now()
+            self.assertTrue(update.status()["available"]); self.assertFalse(update.status()["installable"])
 
     def test_tampered_installer(self):
         self.set_release("v1.2.0", self.payload)
@@ -150,5 +168,20 @@ class UpdateTests(unittest.TestCase):
 
     def test_swap_script_restores_the_old_app_on_failure(self):
         s = update.mac_swap_script("/Applications/Callido Restore.app", "/Applications/.Callido Restore.app.new", 4242)
-        self.assertIn("kill -0 4242", s); self.assertIn("|| mv '/Applications/Callido Restore.app.old' '/Applications/Callido Restore.app'", s)
-        self.assertTrue(s.rstrip().endswith("open '/Applications/Callido Restore.app'"))
+        self.assertIn("kill -0 4242", s); self.assertTrue(s.rstrip().endswith("open '/Applications/Callido Restore.app'"))
+
+    @unittest.skipUnless(os.name == "posix" and shutil.which("sh"), "needs a POSIX shell")
+    def test_swap_script_on_real_folders(self):
+        """The helper on real folders: a clean swap; a leftover .old that cannot be removed leaves the old app untouched."""
+        import subprocess, stat
+        def run(script): subprocess.run(["/bin/sh", "-c", script.replace("open ", "true ")], check=True)
+        base = tempfile.mkdtemp(); self.addCleanup(shutil.rmtree, base, True)
+        app, new = os.path.join(base, "X.app"), os.path.join(base, ".X.app.new")
+        os.makedirs(os.path.join(app, "v1")); os.makedirs(os.path.join(new, "v2"))
+        run(update.mac_swap_script(app, new, 999999))
+        self.assertEqual(os.listdir(app), ["v2"]); self.assertFalse(os.path.exists(new)); self.assertFalse(os.path.exists(app + ".old"))
+        os.makedirs(os.path.join(new, "v3")); os.makedirs(os.path.join(app + ".old", "locked", "f"))
+        os.chmod(os.path.join(app + ".old", "locked"), stat.S_IRUSR | stat.S_IXUSR)            # rm -rf of .old fails
+        self.addCleanup(os.chmod, os.path.join(app + ".old", "locked"), stat.S_IRWXU)
+        run(update.mac_swap_script(app, new, 999999))
+        self.assertEqual(os.listdir(app), ["v2"]); self.assertNotIn("X.app", os.listdir(app + ".old"))   # nothing moved into .old

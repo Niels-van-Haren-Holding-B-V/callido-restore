@@ -84,7 +84,7 @@ The app checks GitHub for a newer release once a day (`callido_restore/update.py
   (Niels adds it; nobody else keeps a copy, the local file is deleted after adding it). The public key is in
   `callido_restore/about.py`, `UPDATE_PUBLIC_KEYS` (hex, 32 bytes).
 * **What is signed.** `build.yml` signs `SHA256SUMS` (the two disk images) and `build-windows.yml` signs
-  `CallidoRestore-x64.msi.sha256`; the signatures are attached to the release as `<list>.sig`. The app verifies the list's
+  `CallidoRestore-x64.msi.sha256`; the signatures are attached to the release as `<list>.sig`. The signed data is `callido-restore <tag>\n` followed by the list (`update.signed_message`), so a validly signed list of an old release cannot be re-published under a newer tag. The app verifies the list's
   signature (`callido_restore/ed25519.py`, pure Python, RFC 8032), then the installer's SHA-256 against the signed list, and
   refuses a tag that is not strictly newer than its own version or a file that is not this platform's. HTTPS only, to
   `api.github.com` and GitHub's release-asset hosts. Any failure deletes the download; every step is logged to `app.log`.

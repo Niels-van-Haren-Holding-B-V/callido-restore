@@ -139,10 +139,24 @@ def status(force=False):
             "url": rel.get("html_url") or f"https://github.com/{REPO}/releases/latest", "asset": asset,
             "signed_updates": bool(UPDATE_PUBLIC_KEYS),
             # Windows: msiexec replaces the installed app, which exists only in the packaged app (from source: the release page)
-            "installable": avail and asset is not None and bool(UPDATE_PUBLIC_KEYS) and (not paths.WINDOWS or bool(getattr(sys, "frozen", False)))}
+            "installable": avail and asset is not None and bool(UPDATE_PUBLIC_KEYS) and (not paths.WINDOWS or _windows_ready())}
+
+
+def _windows_ready():
+    """The Windows install step (update_windows, hbk-5) is present and this is the packaged app."""
+    if not getattr(sys, "frozen", False): return False
+    try: import callido_restore.update_windows  # noqa: F401
+    except ImportError: return False
+    return True
 
 
 # ----------------------------------------------------------------------------- verification
+def signed_message(tag, text):
+    """What the release workflow signs: the release tag bound to the checksum list, so a validly signed list of an old release
+    cannot be re-published under a newer tag (a downgrade by someone who can edit releases but has no key)."""
+    return f"callido-restore {tag}\n".encode() + text
+
+
 def verify_signed(text, sig, keys=None):
     """True when ``sig`` is a valid Ed25519 signature of ``text`` (bytes) under one of the app's release keys."""
     for k in (UPDATE_PUBLIC_KEYS if keys is None else keys):
@@ -165,9 +179,10 @@ def verified_sha(rel, asset, keys=None):
     """The SHA-256 of ``asset`` from the release's signed checksum list; RuntimeError when the list or its signature is missing
     or does not verify, or when it does not list the asset. Shared by the macOS path and update_windows."""
     if not (UPDATE_PUBLIC_KEYS if keys is None else keys): raise RuntimeError("this version has no release key; install the update from the release page")
-    lst = checksum_list(asset)
+    lst = checksum_list(asset); tag = rel.get("tag_name") or ""
     text, sig = _fetch_small(rel, lst), _fetch_small(rel, lst + ".sig")
-    if not verify_signed(text, sig, keys): raise RuntimeError(f"the signature of {lst} does not verify: the release was not signed with the Callido release key; nothing was installed")
+    if not verify_signed(signed_message(tag, text), sig, keys):
+        raise RuntimeError(f"the signature of {lst} does not verify for {tag}: the release was not signed with the Callido release key (or not for this version); nothing was installed")
     want = expected_sha(text.decode("utf-8", "replace"), asset)
     if not want: raise RuntimeError(f"{lst} lists no checksum for {asset}")
     log(f"{lst}: signature verified, {asset} sha256 {want[:16]}…")
@@ -224,8 +239,13 @@ def mac_swap_script(app, new_app, pid):
     """The helper that waits for this process to end, swaps the bundles and starts the new app (a rename on one volume)."""
     q = lambda s: "'" + s.replace("'", "'\\''") + "'"
     old = app + ".old"
+    # mv onto an existing directory would move the bundle INTO it, so every target is checked to be absent first; any failure
+    # leaves the old app where it was (or puts it back) and opens it.
     return (f"while kill -0 {int(pid)} 2>/dev/null; do sleep 0.3; done; "
-            f"rm -rf {q(old)}; mv {q(app)} {q(old)} && mv {q(new_app)} {q(app)} && rm -rf {q(old)} || mv {q(old)} {q(app)}; "
+            f"rm -rf {q(old)}; "
+            f"if [ ! -e {q(old)} ] && mv {q(app)} {q(old)}; then "
+            f"if [ ! -e {q(app)} ] && mv {q(new_app)} {q(app)}; then rm -rf {q(old)}; "
+            f"else rm -rf {q(app)}; [ ! -e {q(app)} ] && mv {q(old)} {q(app)}; fi; fi; "
             f"open {q(app)}")
 
 
