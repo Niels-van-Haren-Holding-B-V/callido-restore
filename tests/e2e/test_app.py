@@ -31,7 +31,7 @@ class AppFlow(unittest.TestCase):
         port = int(os.environ.get("HBK_SMOKE_PORT") or free_port())
         if port == 8765: raise unittest.SkipTest("refusing port 8765: that is the user's running app")
         cls.base = f"http://127.0.0.1:{port}"
-        env = dict(os.environ, HOME=str(cls.home), USERPROFILE=str(cls.home), PYTHONPATH=str(ROOT)); env.pop("HBK_NO_AUTOPREPARE", None)
+        env = dict(os.environ, HOME=str(cls.home), USERPROFILE=str(cls.home), XDG_CONFIG_HOME=str(cls.home / ".config"), XDG_CACHE_HOME=str(cls.home / ".cache"), RCLONE_CONFIG=str(cls.home / ".config" / "rclone" / "rclone.conf"), PYTHONPATH=str(ROOT)); env.pop("HBK_NO_AUTOPREPARE", None)
         cls.log = open(cls.work / "app.log", "w")
         cls.p = subprocess.Popen([sys.executable, "-m", "callido_restore", "--no-window", "--port", str(port)], cwd=str(ROOT), env=env,
                                  stdout=cls.log, stderr=subprocess.STDOUT)

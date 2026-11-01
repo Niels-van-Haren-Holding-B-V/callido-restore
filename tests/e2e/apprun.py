@@ -19,7 +19,8 @@ class App:
         self.port = int(os.environ.get("HBK_SMOKE_PORT") or free_port())
         if self.port == 8765: raise RuntimeError("refusing port 8765: that is the user's running app")
         self.base = f"http://127.0.0.1:{self.port}"
-        self.env = dict(os.environ, HOME=str(self.home), USERPROFILE=str(self.home), PYTHONPATH=str(ROOT), HBK_NO_UPDATE_CHECK="1", **(env or {}))
+        self.env = dict(os.environ, HOME=str(self.home), USERPROFILE=str(self.home), XDG_CONFIG_HOME=str(self.home / ".config"), XDG_CACHE_HOME=str(self.home / ".cache"), RCLONE_CONFIG=str(self.home / ".config" / "rclone" / "rclone.conf"),    # rclone follows XDG_CONFIG_HOME (set on CI runners)
+                        PYTHONPATH=str(ROOT), HBK_NO_UPDATE_CHECK="1", **(env or {}))
         self.env.pop("HBK_NO_AUTOPREPARE", None)
 
     def rclone(self, *args):

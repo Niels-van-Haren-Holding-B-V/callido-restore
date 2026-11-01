@@ -53,6 +53,7 @@ def queue_flow(b, base, work, m, notes, shot):
         t0 = time.time()
         while time.time() - t0 < 30 and not b.js(f"!!(S.snaps&&S.snaps['{sh}']&&S.snaps['{sh}'].indexed) && [...document.querySelectorAll('#wzMap td.mono')].some(t=>t.textContent.startsWith('{sh}'))"): time.sleep(0.3)
     dest = work / "restore-queue"; dest.mkdir()
+    b.js(LOCAL_TARGET); time.sleep(1)
     b.js(f"""(()=>{{const ins=[...document.querySelectorAll('#tab-restore input')].filter(i=>i.placeholder==='/Volumes/share/folder');
              const shares=['Documents','Photos','homes'];ins.forEach((i,k)=>{{i.value={json.dumps(str(dest))}+'/'+shares[k];i.dispatchEvent(new Event('input',{{bubbles:true}}))}})}})()""")
     time.sleep(1); clear()
@@ -81,6 +82,9 @@ def queue_flow(b, base, work, m, notes, shot):
     shot(b, "queue-started")
     cmp_ = flow.compare(m, ver, {sh: dest / sh for sh in ("Documents", "Photos", "homes")})
     notes.append(f"queue: on disk vs manifest: ok={len(cmp_['ok'])} missing={len(cmp_['missing'])} wrong_bytes={cmp_['wrong_bytes']} wrong_mtime={cmp_['wrong_mtime']}")
+
+
+LOCAL_TARGET = "(()=>{const r=document.querySelector('#wzRem');if(r&&r.value){r.value='';r.dispatchEvent(new Event('change',{bubbles:true}))}})()"   # step 3: "a mounted share / local path"
 
 
 HOSTILE_NOTES = """## v99.0.0
@@ -165,6 +169,7 @@ def stop_flow(b, base, work, m, notes, shot):
         t0 = time.time()
         while time.time() - t0 < 30 and not b.js(f"!!(S.snaps&&S.snaps['{sh}']&&S.snaps['{sh}'].indexed) && [...document.querySelectorAll('#wzMap td.mono')].some(t=>t.textContent.startsWith('{sh}'))"): time.sleep(0.3)
     dest = work / "restore-stop"; dest.mkdir()
+    b.js(LOCAL_TARGET); time.sleep(1)
     b.js(f"""(()=>{{const ins=[...document.querySelectorAll('#tab-restore input')].filter(i=>i.placeholder==='/Volumes/share/folder');
              const shares=['Documents','Photos','homes'];ins.forEach((i,k)=>{{i.value={json.dumps(str(dest))}+'/'+shares[k];i.dispatchEvent(new Event('input',{{bubbles:true}}))}})}})()""")
     time.sleep(1); b.js("document.querySelector('#rsGo').click()")
@@ -274,7 +279,7 @@ def main():
             "body": HOSTILE_NOTES, "html_url": "https://github.com/Niels-van-Haren-Holding-B-V/callido-restore/releases/tag/v99.0.0", "assets": []}}))
     port = int(os.environ.get("HBK_SMOKE_PORT") or shots.free_port()); assert port != 8765
     base = f"http://127.0.0.1:{port}"; log = open(work / "app.log", "w")
-    env = dict(os.environ, HOME=str(home), PYTHONPATH=str(ROOT), HBK_NO_UPDATE_CHECK="1"); env.pop("HBK_NO_AUTOPREPARE", None)   # never asks GitHub
+    env = dict(os.environ, HOME=str(home), XDG_CONFIG_HOME=str(home / ".config"), XDG_CACHE_HOME=str(home / ".cache"), RCLONE_CONFIG=str(home / ".config" / "rclone" / "rclone.conf"), PYTHONPATH=str(ROOT), HBK_NO_UPDATE_CHECK="1"); env.pop("HBK_NO_AUTOPREPARE", None)   # never asks GitHub
     if a.settings:                 # the update choice must be real here: no HBK_NO_UPDATE_CHECK, but "checked just now" so no check is due
         env.pop("HBK_NO_UPDATE_CHECK", None)
         (home / ".hbk-explorer" / "update.json").write_text(json.dumps({"checked": time.time()}))
@@ -340,6 +345,7 @@ def main():
                 t0 = time.time()
                 while time.time() - t0 < 10 and b.js("[...document.querySelectorAll('#tab-restore input')].filter(i=>i.placeholder==='/Volumes/share/folder').length") < 3: time.sleep(0.05)
                 notes.append(f"fast: rows on the page after {time.time() - t0:.2f}s; lists loaded: {b.js('Object.fromEntries(Object.entries(S.snaps||{}).map(([k,v])=>[k,!!v.indexed]))')}")
+            b.js(LOCAL_TARGET); time.sleep(1)
             ok = b.js(f"""(()=>{{const ins=[...document.querySelectorAll('#tab-restore input')].filter(i=>i.placeholder==='/Volumes/share/folder');
                          const shares=['Documents','Photos','homes'];ins.forEach((i,k)=>{{i.value={json.dumps(str(dest))}+'/'+shares[k];
                          i.dispatchEvent(new Event('input',{{bubbles:true}}));i.dispatchEvent(new Event('change',{{bubbles:true}}))}});return ins.length}})()""")
