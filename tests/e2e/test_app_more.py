@@ -73,9 +73,11 @@ class RemoteSourceAndDestination(unittest.TestCase):
         self.assertTrue(chk["inside_source"], f"a target inside the backup on the remote must be refused: {chk}")
         items = [{"share": sh, "ver": ver, "path": "", "is_dir": True} for sh in SHARES]
         j = a.wait_job(a.post("/api/restore", src=S["src"], items=items, dest="e2enas:restore")["id"], timeout=600)
-        self.assertEqual(j["state"], "done", j.get("error")); self.assertEqual(j["errors"], [])
+        # notes.txt at the target has another size than the backup's: kept untouched and reported as the one error (#208)
+        self.assertEqual(j["state"], "done", j.get("error")); self.assertEqual([e["path"] for e in j["errors"]], ["Documents/notes.txt"], j["errors"])
         total = sum(len(v) for v in self.m["versions"][str(ver)].values())
-        self.assertEqual((j["result"]["skipped"], j["result"]["restored"]), (1, total - 1), j["result"])
+        self.assertEqual((j["result"]["skipped"], j["result"]["restored"], j["result"]["errors"]), (0, total - 1, 1), j["result"])
+        self.assertEqual(j["result"]["check"]["ok"], total - 1, j["result"])
         self.assertEqual((self.nas / "restore/Documents/notes.txt").read_bytes(), b"the NAS already has this file\n")
         cmp_ = flow.compare(self.m, ver, {sh: self.nas / "restore" / sh for sh in SHARES}, only=lambda sh, p: (sh, p) != ("Documents", "notes.txt"))
         for k in ("missing", "wrong_bytes", "wrong_mtime"): self.assertEqual(cmp_[k], [], k)
@@ -87,15 +89,16 @@ class RemoteSourceAndDestination(unittest.TestCase):
         before = tree(self.nas)
         j = a.wait_job(a.post("/api/restore", src=S["src"], items=S["items"], dest="e2enas:restore")["id"], timeout=600)
         self.assertEqual(j["state"], "done", j.get("error"))
-        self.assertEqual(j["result"]["restored"], 0, j["result"]); self.assertEqual(j["result"]["skipped"], j["result"]["files"])
+        self.assertEqual(j["result"]["restored"], 0, j["result"])
+        self.assertEqual((j["result"]["skipped"], j["result"]["errors"]), (j["result"]["files"] - 1, 1), j["result"])   # notes.txt: kept, reported
         self.assertEqual(tree(self.nas), before)
 
     def test_4_the_backup_is_only_read(self):
         self.assertIn("src", self.S)
         self.assertEqual(tree(self.drive), self.before, "nothing in the backup on the remote may change")
         cache = Path(self.app.home, ".hbk-explorer", "cache", self.S["src"])
-        fetched = [p for p in cache.rglob("*.bucket.*")] if cache.is_dir() else []
-        self.assertTrue(fetched, f"bucket data should have been fetched into the app cache {cache}")
+        left = [p for p in cache.rglob("*.bucket.*")] if cache.is_dir() else []
+        self.assertEqual(left, [], f"a finished restore empties the bucket cache {cache} (#208)")
 
 
 @unittest.skipUnless(E2E, "set HBK_E2E=1 to run the app-level end-to-end tests")

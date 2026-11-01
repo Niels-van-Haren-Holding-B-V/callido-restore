@@ -359,14 +359,16 @@ def move_no_replace(src, dst, timeout=300):
     """Rename src to dst on the same remote (server-side on SMB and WebDAV), never replacing a file at dst: True when moved,
     False when dst already existed (dst untouched; src is left for the caller). Raises RcloneError."""
     if stat(dst, timeout=timeout) is not None: return False
+    moved = False
     if DAEMON.available():
         sfs, srel = _split(src); dfs, drel = _split(dst)
         try:
             DAEMON.rc("operations/movefile", timeout=timeout, srcFs=sfs, srcRemote=srel, dstFs=dfs, dstRemote=drel, _config={"IgnoreExisting": True})
-            return True
+            moved = True
         except DaemonGone: pass
-    _run(["moveto", "--ignore-existing", src, dst], timeout=timeout)
-    return True
+    if not moved: _run(["moveto", "--ignore-existing", src, dst], timeout=timeout)
+    # a file that appeared at dst between the stat and the move makes IgnoreExisting skip it silently: src is still there then
+    return stat(src, timeout=timeout) is None
 
 
 def deletefile(path, timeout=120):

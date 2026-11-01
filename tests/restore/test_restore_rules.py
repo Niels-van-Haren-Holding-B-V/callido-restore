@@ -235,7 +235,7 @@ class RestoreLoopRemote(unittest.TestCase):
     def setUp(self):
         self.d = tempfile.mkdtemp(); self.addCleanup(shutil.rmtree, self.d, True)
         p = mock.patch.object(paths, "JOBS_DIR", Path(self.d) / "jobs"); p.start(); self.addCleanup(p.stop)
-        self.calls = []; self.nas = {"share/a.txt": 3}; self.appear = {}; self.stall_once = set(); self.lost = set()
+        self.calls = []; self.nas = {"share/a.txt": 3}; self.appear = {}; self.stall_once = set(); self.lost = set(); self.at_move = {}
         def run(cmd, **kw):
             self.calls.append(cmd); args = cmd[1:]
             ok = lambda out="": subprocess.CompletedProcess(cmd, 0, stdout=out, stderr="")
@@ -247,6 +247,7 @@ class RestoreLoopRemote(unittest.TestCase):
                 return ok(json.dumps([{"Path": k, "Size": n} for k, n in self.nas.items()]))
             if args[0] == "moveto" and args[-2].startswith(self.ROOT):            # server-side rename, never over a file
                 src, dst = (x.split(self.ROOT, 1)[1] for x in args[-2:])
+                if dst in self.at_move: self.nas[dst] = self.at_move.pop(dst)        # appears between the stat and the move
                 if dst in self.nas: return ok()
                 if src not in self.nas: return subprocess.CompletedProcess(cmd, 3, stdout="", stderr="ERROR : object not found")
                 n = self.nas.pop(src)
@@ -285,6 +286,12 @@ class RestoreLoopRemote(unittest.TestCase):
         self.assertEqual(self.nas, {"share/a.txt": 3, "share/b.txt": 4, "share/c.txt": 3})        # no temporary name left
         self.assertEqual((res["files"], res["restored"], res["skipped"], res["errors"]), (3, 1, 2, 0))
         self.assertEqual(b.pool.calls, ["b.txt", "c.txt"])
+
+    def test_a_file_appearing_between_the_check_and_the_rename_is_kept(self):
+        self.at_move = {"share/b.txt": 9}
+        res, job, b = self.restore([("b.txt", 4, 2)], "t2r")
+        self.assertEqual(self.nas, {"share/a.txt": 3, "share/b.txt": 9})                   # theirs kept, our temporary file gone
+        self.assertEqual((res["restored"], res["errors"]), (0, 1)); self.assertIn("9 bytes is at the target", job["errors"][0]["error"])
 
     def test_a_different_size_at_the_target_is_an_error_and_never_written_over(self):
         res, job, b = self.restore([("a.txt", 5, 1)], "t2d")                 # the NAS has a.txt with 3 bytes
