@@ -60,7 +60,7 @@ entry (or, for a copy that stored nothing, the record it shares); the bucket's `
   (anchor scan with four workers, then the placer); Stop ends the child and its workers at once.
 * **Restore** (`POST /api/restore`, a job): `restore_plan` (rows) → `PoolReader` per file (chunk table, or the inferred map) →
   bucket data fetched ahead of the writer, several at a time (the `restore` profile in `transfer.py`), LZ4 decoded, every chunk md5-checked → a per-root staging folder →
-  `place_file` (local) or `rclone moveto --ignore-existing` (NAS). Buckets the next 40 files do not need are evicted, oldest first, once the cache is over `HBK_CACHE_GB` (default 5; buckets from earlier runs count), and all at the end of a restore. A final check lists the targets, restores missing files again (`CHECK_ROUNDS`) and reports `check`/`kept`. The job is
+  `place_file` (local) or `rclone moveto --ignore-existing` (NAS). Buckets the next 40 files do not need are evicted, oldest first, once the cache is over `HBK_CACHE_GB` (default 5; buckets from earlier runs count), and all at the end of a restore. A final check lists the targets, restores missing files again (`CHECK_ROUNDS`) and reports `check`. Uploads go to `<name>.callido-restore.part` and are renamed on the target (never over a file) when complete. The job is
   persisted as it goes; pause is a cancel flag; `/api/restore/resume` restarts at `next_index`, carries the counts forward and skips
   files already at the target.
 

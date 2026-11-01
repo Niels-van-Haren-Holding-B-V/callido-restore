@@ -343,6 +343,41 @@ def ls(path, dirs_only=False, files_only=False, recurse=False, max_depth=None, n
     return json.loads(_run(args + [path], timeout=timeout) or "[]")
 
 
+def stat(path, timeout=60):
+    """The lsjson entry of one file (Path, Name, Size, IsDir), or None when nothing is there. Raises RcloneError otherwise."""
+    if DAEMON.available():
+        fs, rel = _split(path)
+        try: return DAEMON.rc("operations/stat", timeout=timeout, fs=fs, remote=rel, opt={"noModTime": True, "noMimeType": True}).get("item")
+        except DaemonGone: pass
+    try: return json.loads(_run(["lsjson", "--stat", "--no-mimetype", "--no-modtime", path], timeout=timeout) or "null")
+    except RcloneError as e:
+        if "not found" in str(e).lower(): return None
+        raise
+
+
+def move_no_replace(src, dst, timeout=300):
+    """Rename src to dst on the same remote (server-side on SMB and WebDAV), never replacing a file at dst: True when moved,
+    False when dst already existed (dst untouched; src is left for the caller). Raises RcloneError."""
+    if stat(dst, timeout=timeout) is not None: return False
+    if DAEMON.available():
+        sfs, srel = _split(src); dfs, drel = _split(dst)
+        try:
+            DAEMON.rc("operations/movefile", timeout=timeout, srcFs=sfs, srcRemote=srel, dstFs=dfs, dstRemote=drel, _config={"IgnoreExisting": True})
+            return True
+        except DaemonGone: pass
+    _run(["moveto", "--ignore-existing", src, dst], timeout=timeout)
+    return True
+
+
+def deletefile(path, timeout=120):
+    """Delete one file (callers only pass names the app itself created)."""
+    if DAEMON.available():
+        fs, rel = _split(path)
+        try: DAEMON.rc("operations/deletefile", timeout=timeout, fs=fs, remote=rel); return
+        except DaemonGone: pass
+    _run(["deletefile", path], timeout=timeout)
+
+
 def _strip_prefix(entries, rel):
     """Strip "<rel>/" from every entry's Path (compared without case and with separators normalised, as a case-insensitive
     SMB share may answer in another spelling). False when an entry does not start with it."""

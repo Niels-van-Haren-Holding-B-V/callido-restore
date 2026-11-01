@@ -119,11 +119,11 @@ class MappedRestoreTests(_Fixture):
         self.assertEqual(int(os.stat(os.path.join(self.dB, "docs", "deeper", "w.txt")).st_mtime), 1700000003)
 
     def test_existing_file_is_skipped_per_root(self):
-        os.makedirs(os.path.join(self.dB, "docs", "deeper")); open(os.path.join(self.dB, "docs", "deeper", "w.txt"), "w").write("mine")
+        os.makedirs(os.path.join(self.dB, "docs", "deeper")); open(os.path.join(self.dB, "docs", "deeper", "w.txt"), "w").write("mine12345")   # the backup's size (9): skipped
         res = self.b.restore(self.items, "", self.job())
         self.assertEqual((res["restored"], res["skipped"]), (3, 1))                      # restored = written files; skipped ones are not restored
         self.assertEqual(len(self.b.pool.extracted), 3)
-        self.assertEqual(open(os.path.join(self.dB, "docs", "deeper", "w.txt")).read(), "mine")
+        self.assertEqual(open(os.path.join(self.dB, "docs", "deeper", "w.txt")).read(), "mine12345")
 
     def test_mapping_persisted_and_resumed(self):
         job = self.job(); job["cancel"] = True                                               # pause before the first file

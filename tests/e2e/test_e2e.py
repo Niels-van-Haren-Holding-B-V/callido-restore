@@ -43,7 +43,8 @@ class FullFlow(unittest.TestCase):
     def test_rerun_writes_nothing_and_keeps_changed_files(self):         # T8
         rr = self.rep["rerun"]
         self.assertEqual(rr["changed"], []); self.assertEqual(rr["new_files"], []); self.assertTrue(rr["victim_kept"])
-        self.assertEqual(rr["result"]["skipped"], rr["result"]["files"])
+        # the changed file has another size than the backup's: kept, and reported (it could be a cut-off copy), not "skipped"
+        self.assertEqual((rr["result"]["skipped"], rr["result"]["errors"]), (rr["result"]["files"] - 1, 1))
 
     def test_rerun_does_not_count_skipped_files_as_restored(self):
         """E2 (fixed in #117): 'Done: 25 restored · 25 skipped' after a re-run that restored nothing."""

@@ -16,7 +16,10 @@ from callido_restore.restore.jobs import log
 from callido_restore.paths import RCLONE, ui_path
 from callido_restore.restore.destination import file_target
 from callido_restore.restore.destination import destination_sizes
+from callido_restore.restore.destination import delete_own
 from callido_restore.restore.destination import list_destination
+from callido_restore.restore.destination import move_no_replace
+from callido_restore.restore.destination import remote_stat
 from callido_restore.restore.destination import place_file
 from callido_restore.restore.destination import restore_roots
 from callido_restore.sources.source import Source
@@ -61,9 +64,20 @@ _UNIT = {"": 1, "B": 1, "K": 1 << 10, "M": 1 << 20, "G": 1 << 30, "T": 1 << 40, 
 _LIVE = set(); _LIVE_LOCK = threading.Lock()           # running upload processes, ended by kill_uploads() when the app quits
 
 CACHE_GB = 5                                      # downloaded backup data kept on this computer during a restore (HBK_CACHE_GB)
+PART_SUFFIX = ".callido-restore.part"             # an upload's name on the target until it is complete
 CHECK_ROUNDS = 2                                  # the final check restores missing files again this many times
 CHECK_WAIT_S = 120                                # and first waits this long when an upload failed (the NAS had the file in use)
 PARTIAL_RE = re.compile(r"^(.*)\.[0-9a-f]{8}\.partial$")   # rclone's temporary name while it uploads <name>
+
+def local_size(path):
+    """size of the file at path; None for a directory, a symlink or nothing"""
+    try: return None if os.path.islink(path) or os.path.isdir(path) else os.lstat(path).st_size
+    except OSError: return None
+
+def differs_msg(have, want):
+    if have is None: return "something that is not a file is at the target under this name; it was kept"
+    return (f"a file of {have:,} bytes is at the target, the backup's is {want:,} bytes (perhaps the start of an interrupted copy); "
+            "it was not written over: check it, delete it if it is incomplete, and restore again")
 
 def _bytes(txt):
     """'12.3 MiB' / '512 B' / '1.5GiB' -> bytes (rclone's stats units)"""
@@ -594,8 +608,10 @@ class Backup:
         return {"files": len(files), "bytes": sum(f["size"] for f in files), "mappings": out, "sample": [f"{f['share']}/{f['path']}" for f in files[:20]]}
     def restore(self, items, dest, job, skip_meta=True, start_at=0):
         """Restore the selected items. An item with its own 'dest' gets its contents there (H8: one target per folder);
-        the others go under dest as <share>/<path>. Files that already exist at a destination are skipped, whatever their
-        size or date; nothing at a destination is ever written over or deleted (T8)."""
+        the others go under dest as <share>/<path>. A file already at a destination is kept, whatever its date: with the
+        backup's size it is skipped, with another size it is reported as an error. Nothing at a destination is ever written over
+        or deleted (T8); the only deletions are the app's own temporary upload names (<name>.callido-restore.part). A final
+        check lists the targets and restores missing files again."""
         paths.JOBS_DIR.mkdir(parents=True, exist_ok=True)
         jf = paths.JOBS_DIR / f"{job['id']}.json"
         def persist(state="running"):
@@ -603,13 +619,14 @@ class Backup:
                                       "next_index": job.get("next_index", 0), "done_files": job.get("done_files", 0), "skipped": job.get("skipped", 0),
                                       "errors": job.get("errors", [])[-200:], "errors_total": job.get("errors_total", len(job.get("errors", []))), "total_files": job.get("total_files"), "total_bytes": job.get("total_bytes"),
                                       "verified": job.get("verified", 0), "identical_copy": job.get("identical_copy", 0), "unverified": job.get("unverified", [])[:UNVERIFIED_MAX], "unverified_total": job.get("unverified_total", len(job.get("unverified", []))),
-                                      "done_bytes": job.get("done_bytes", 0), "check": job.get("check"), "kept": job.get("kept", []), "state": state, "label": job["label"], "started": job["started"], "updated": time.time()}))
+                                      "done_bytes": job.get("done_bytes", 0), "check": job.get("check"), "state": state,
+                                      "done_ahead": sorted(k for k in (finished | done_ahead) if k >= job.get("next_index", 0)), "label": job["label"], "started": job["started"], "updated": time.time()}))
         roots = restore_roots(items, dest)                       # every folder written into, local paths or rclone remotes
-        existing = {}                                            # remote root -> files already there (never written over)
+        existing = {}                                            # remote root -> {path: size} already there (never written over)
         for root in roots:
             if not is_remote_path(root): continue
             job["message"] = f"listing destination {root}"
-            try: existing[root] = list_destination(root)
+            try: existing[root] = destination_sizes(root)
             except Exception:
                 persist("error"); raise
         files = self.restore_plan(items, skip_meta)
@@ -620,7 +637,6 @@ class Backup:
             if not start_at or k not in job: job[k] = zero if not isinstance(zero, list) else list(zero)
         if not start_at or "errors_total" not in job: job["errors_total"] = len(job["errors"])        # a seed without the counter: the list is all we know
         if not start_at or "unverified_total" not in job: job["unverified_total"] = len(job["unverified"])
-        stalled = set()                                         # files whose upload to a remote target stalled in this run
         lock = threading.RLock()                                # counters and lists below are shared with the upload threads
         tx = {}; job["transfers"] = []                          # every running download / upload: what the progress bars show
         def publish_tx():
@@ -662,6 +678,12 @@ class Backup:
                 else:
                     job["unverified_total"] += 1                                          # counted always; listed up to the cap
                     if len(job["unverified"]) < UNVERIFIED_MAX: job["unverified"].append({"path": f"{f['share']}/{f['path']}", "reason": why})
+        def already_there(f, have):
+            """a file is at the target under this name (kept as is, whatever its date): with the backup's size it counts as
+            skipped; with another size, or not a file, it is an error (perhaps the start of an interrupted copy). Never written over (T8)."""
+            if have == f["size"]:
+                with lock: job["skipped"] += 1; job["done_files"] += 1
+            else: add_error(f, differs_msg(have, f["size"]))
         def result(**extra):
             if job.get("check"): extra = {**extra, "check": job["check"]}
             return {**extra, "restored": job["done_files"] - job["skipped"], "skipped": job["skipped"], "errors": job["errors_total"], "verified": job["verified"],
@@ -727,35 +749,37 @@ class Backup:
         # not shared). The saved position is the oldest file whose upload has not finished, so a resume never skips one.
         up_ex = concurrent.futures.ThreadPoolExecutor(max_workers=UPLOAD_WORKERS); inflight = {}; up_cancelled = set(); staged = {}
         job.pop("cancel_uploads", None)
+        finished = set()                                        # plan indexes whose upload ended (restored, skipped or error)
+        done_ahead = set(job.get("done_ahead") or [])          # a resumed job: files after next_index that finished before the Stop
         stopping = lambda: bool(job.get("cancel") or job.get("cancel_uploads"))   # Stop, or the restore ends (an abort does not wait for 8 uploads)
         bytes_done = [done_bytes]
         def upload_task(i, f, out, root, rel):
-            key = ("up", i); name = f"{f['share']}/{f['path']}"
+            """upload one staged file. It goes to <rel>.callido-restore.part on the target first and is renamed to its name only
+            when complete (on the target, never over a file there): a killed upload (Stop, stall, Quit, a dropped connection)
+            leaves only that temporary name, never a cut-off file under the real name (some rclone backends write in place)."""
+            key = ("up", i); name = f"{f['share']}/{f['path']}"; part = f"{root}/{rel}{PART_SUFFIX}"
             try:
                 for attempt in range(3):
                     if stopping(): return "cancelled"
-                    rc, err = upload_watched([RCLONE, "moveto", out, f"{root}/{rel}", "--ignore-existing", "--retries", "5", "--low-level-retries", "20",
+                    rc, err = upload_watched([RCLONE, "moveto", out, part, "--retries", "5", "--low-level-retries", "20",
                                               "--retries-sleep", "5s"], cancelled=stopping,
                                              progress=lambda d, t, r: tx_set(key, "upload", name, d, t or f["size"], r))
                     if rc == UPLOAD_CANCELLED: return "cancelled"               # Stop: this file is uploaded again on resume
-                    if rc == 0:
-                        if os.path.exists(out):                                    # not moved: the target already had it
-                            os.unlink(out)
-                            with lock: was_stalled = rel in stalled
-                            if was_stalled:                                        # may be the start of our own interrupted upload: never overwrite
-                                add_error(f, "an upload of this file was interrupted and a file is at the target now; check its size, delete it if "
-                                             "it is incomplete, and restore this file again")
-                            else:
-                                with lock: job["skipped"] += 1; job["done_files"] += 1
-                        else: restored(f)
-                        return "done"
-                    if rc == UPLOAD_STALLED:
-                        with lock: stalled.add(rel)
-                        err = f"upload stalled: no progress for {UPLOAD_STALL_S // 60} min (network or NAS not answering)"
+                    if rc == 0: break
+                    if rc == UPLOAD_STALLED: err = f"upload stalled: no progress for {UPLOAD_STALL_S // 60} min (network or NAS not answering)"
                     else: err = "upload failed: " + err.strip()[-200:]
                     if attempt < 2:
                         job["message"] = f"{name}: {err} — retrying"; time.sleep([2, 10][attempt]); continue
                     add_error(f, err); return "done"
+                for attempt in range(3):                                       # the complete file is at the temporary name now
+                    try: moved = move_no_replace(part, f"{root}/{rel}"); break
+                    except Exception as e:
+                        if attempt < 2: time.sleep([2, 10][attempt]); continue
+                        add_error(f, f"upload failed: the file is on the target as {rel}{PART_SUFFIX} but could not be renamed: {e}"); return "done"
+                if moved: restored(f); finished.add(i); return "done"
+                try: delete_own(part)                                          # a file with this name appeared meanwhile: ours goes
+                except Exception: pass
+                already_there(f, (remote_stat(f"{root}/{rel}") or {}).get("Size")); finished.add(i); return "done"
             except Exception as e:
                 add_error(f, e); return "done"
             finally:
@@ -796,22 +820,21 @@ class Backup:
                 if have is None: missing.append((i, f))
                 elif have != f["size"]: differs.append((f, have))
                 else: ok += 1
-            for root, listing in sizes.items():          # rclone's leftovers of an interrupted upload of a planned file
+            for root, listing in sizes.items():
                 for p in listing:
-                    m = PARTIAL_RE.match(p)
-                    if m and (root, m.group(1)) in planned: partial += 1
+                    if p.endswith(PART_SUFFIX) and (root, p[:-len(PART_SUFFIX)]) in planned:
+                        try: delete_own(f"{root}/{p}")            # this app's temporary name of an interrupted upload: ours, removed
+                        except Exception: pass
+                        continue
+                    m = PARTIAL_RE.match(p)                     # rclone's own leftovers (<name>.<hash>.partial): counted, not touched
+                    if m and (root, m.group(1).removesuffix(PART_SUFFIX)) in planned: partial += 1
             return {"ok": ok, "missing": missing, "differs": differs, "partial": partial}
         def finish_check(chk):
             """the check result in the job; the error list keeps one entry per file that is still wrong"""
             if chk.get("error"):
                 job["check"] = {"error": chk["error"]}; log(f"restore check failed: {chk['error']}"); return
-            # A different file already at the target was kept (never written over); it is listed apart, it is no error, unless the
-            # restore itself reported that file (an interrupted upload).
-            wrong = {f"{f['share']}/{f['path']}" for _, f in chk["missing"]}
-            with lock: reported = {e["path"] for e in job["errors"]}
-            wrong |= {f"{f['share']}/{f['path']}" for f, _ in chk["differs"] if f"{f['share']}/{f['path']}" in reported}
-            kept = [{"path": f"{f['share']}/{f['path']}", "at_target": have, "in_backup": f["size"]} for f, have in chk["differs"]
-                    if f"{f['share']}/{f['path']}" not in reported]
+            # a file at the target with another size than the backup's is an error (kept, never written over)
+            wrong = {f"{f['share']}/{f['path']}" for _, f in chk["missing"]} | {f"{f['share']}/{f['path']}" for f, _ in chk["differs"]}
             with lock:
                 last = {}
                 for e in job["errors"]:
@@ -820,10 +843,12 @@ class Backup:
                 for _, f in chk["missing"]:
                     pth = f"{f['share']}/{f['path']}"
                     if pth not in last: errs.append({"path": pth, "error": "not at the target after the restore (found by the final check)"})
+                for f, have in chk["differs"]:
+                    pth = f"{f['share']}/{f['path']}"
+                    if pth not in last: errs.append({"path": pth, "error": differs_msg(have, f["size"])})
                 job["errors_total"] = len(errs); job["errors"] = errs                 # the check counts every file: exact, also beyond the saved list
-                job["check"] = {"ok": chk["ok"], "missing": len(chk["missing"]), "differs": len(kept), "partial": chk["partial"],
+                job["check"] = {"ok": chk["ok"], "missing": len(chk["missing"]), "differs": len(chk["differs"]), "partial": chk["partial"],
                                 "restored_again": chk_retried[0], "files": len(files)}
-                job["kept"] = kept[:UNVERIFIED_MAX]                               # the first ones; the count is in check["differs"]
             log(f"restore check: {job['check']}")
         # Every file is extracted into a staging folder and then moved into place. Each local root gets its own folder inside
         # that root (same filesystem, so place_file can hard-link atomically); it is new (mkdtemp) and removed in the finally
@@ -878,17 +903,12 @@ class Backup:
                 return
             for attempt in range(3):
               try:
-                if remote_dest:                  # (files not yet at the target were handed to the upload threads above)
-                    with lock: job["skipped"] += 1; job["done_files"] += 1
-                    break
-                if os.path.lexists(out):         # anything already there is kept as is, whatever its size or date
-                    with lock: job["skipped"] += 1; job["done_files"] += 1
-                    break
+                if remote_dest or os.path.lexists(out):   # (remote files not yet at the target went to the upload threads above)
+                    already_there(f, existing[root].get(rel) if remote_dest else local_size(out)); break
                 tmp = os.path.join(stage[root], rel); os.makedirs(os.path.dirname(tmp), exist_ok=True)
                 pool.extract(f["off"], tmp, size=f["size"], mtime=f["mtime"], job=None, fh_cache=fh_cache)
-                if not place_file(tmp, out):     # appeared since the check above: kept, counted as skipped
-                    with lock: job["skipped"] += 1; job["done_files"] += 1
-                    break
+                if not place_file(tmp, out):     # appeared since the check above: kept
+                    already_there(f, local_size(out)); break
                 restored(f); break
               except Exception as e:
                 if attempt < 2 and not isinstance(e, KeyError):      # KeyError = chunk not in pool map: retrying will not help
@@ -902,7 +922,7 @@ class Backup:
         job["next_index"] = start_at; persist()
         try:
             for i, f in enumerate(files):
-                if i < start_at:
+                if i < start_at or i in done_ahead:
                     with lock: bytes_done[0] += f["size"]
                     continue
                 if fatal: raise RuntimeError(fatal[0])
@@ -934,7 +954,7 @@ class Backup:
                     while time.monotonic() < t_end and not job.get("cancel"):
                         job["message"] = f"{len(chk['missing'])} file(s) not at the target yet: trying again in {int(t_end - time.monotonic()) + 1} s"
                         threading.Event().wait(1)
-                for root in existing: existing[root] = list_destination(root)
+                for root in existing: existing[root] = destination_sizes(root)
                 for k, (i, f) in enumerate(chk["missing"]):
                     if fatal: raise RuntimeError(fatal[0])
                     reap()
