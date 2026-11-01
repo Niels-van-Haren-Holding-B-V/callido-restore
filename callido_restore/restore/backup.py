@@ -5,6 +5,7 @@ from callido_restore.sources import transfer
 from pathlib import Path
 from callido_restore import paths
 from callido_restore.core.hbkmeta import DOC_EXT
+from callido_restore.core.pool import Stopped
 from callido_restore.core.hbkmeta import RANSOM_NOTE
 from callido_restore.core.hbkmeta import RANSOM_SUFFIX
 from callido_restore.core.hbkmeta import ROOT_PARENT
@@ -678,6 +679,7 @@ class Backup:
         if not seeded or "errors_total" not in job: job["errors_total"] = len(job["errors"])        # a seed without the counter: the list is all we know
         if not seeded or "unverified_total" not in job: job["unverified_total"] = len(job["unverified"])
         lock = threading.RLock()                                # counters and lists below are shared with the upload threads
+        stop_now = lambda: bool(job.get("cancel"))            # Stop: also ends bucket downloads and the read of a large file
         tx = {}; job["transfers"] = []                          # every running download / upload: what the progress bars show
         win = []; cur = [-1]; got = {}                          # files ahead with their buckets; the file being read; buckets here (size)
         def file_bars():
@@ -786,7 +788,8 @@ class Backup:
                 try: total = (self.src.listdir(os.path.dirname(rel)).get(os.path.basename(rel)) or {}).get("size") or 0
                 except Exception: total = 0
             try:
-                path = self.src.ensure(rel, progress=lambda done, speed, note="": tx_set(key, "bucket", os.path.basename(rel), done, total, speed))
+                path = self.src.ensure(rel, progress=lambda done, speed, note="": tx_set(key, "bucket", os.path.basename(rel), done, total, speed),
+                                       cancelled=stop_now)                     # Stop ends running bucket downloads too
                 if already is None and path.is_file():
                     with lock: flow["bucket"] += max(0, path.stat().st_size - high.pop(key, 0))
             finally: tx_done(key)
@@ -969,9 +972,12 @@ class Backup:
                 try:
                     for bk, _ in pool.plan(f["off"])[0]:
                         fut = pending.get(bk)
-                        if fut: fut.result()
+                        while fut and not fut.done():                          # a large file waits for many buckets: Stop must not
+                            if job.get("cancel"): raise Stopped("stopped")    # wait for all of them
+                            concurrent.futures.wait([fut], timeout=0.5)
                         with dl_lock:
                             if bk in downloaded: downloaded.move_to_end(bk)
+                except Stopped: raise
                 except Exception: pass
             root, rel = file_target(f, items, dest); remote_dest = is_remote_path(root); out = os.path.join(root, rel)
             if again:
@@ -986,7 +992,8 @@ class Backup:
                 while inflight and (len(inflight) >= UPLOAD_WORKERS * 2 or sum(staged.values()) + f["size"] > STAGE_MAX): reap(block=True)
                 out = os.path.join(stage[root], rel); os.makedirs(os.path.dirname(out), exist_ok=True); ok = False
                 for attempt in range(3):
-                    try: pool.extract(f["off"], out, size=f["size"], mtime=f["mtime"], job=None, fh_cache=fh_cache); ok = True; break
+                    try: pool.extract(f["off"], out, size=f["size"], mtime=f["mtime"], job=None, fh_cache=fh_cache, cancelled=stop_now); ok = True; break
+                    except Stopped: raise
                     except Exception as e:
                         if attempt < 2 and not isinstance(e, KeyError):  # KeyError = chunk not in pool map: retrying will not help
                             job["message"] = f"{f['share']}/{f['path']}: {e} — retrying"; time.sleep([2, 10][attempt]); continue
@@ -1003,10 +1010,11 @@ class Backup:
                 if remote_dest or os.path.lexists(out):   # (remote files not yet at the target went to the upload threads above)
                     already_there(f, existing[root].get(rel) if remote_dest else local_size(out)); break
                 tmp = os.path.join(stage[root], rel); os.makedirs(os.path.dirname(tmp), exist_ok=True)
-                pool.extract(f["off"], tmp, size=f["size"], mtime=f["mtime"], job=None, fh_cache=fh_cache)
+                pool.extract(f["off"], tmp, size=f["size"], mtime=f["mtime"], job=None, fh_cache=fh_cache, cancelled=stop_now)
                 if not place_file(tmp, out):     # appeared since the check above: kept
                     already_there(f, local_size(out)); break
                 restored(f); break
+              except Stopped: raise
               except Exception as e:
                 if attempt < 2 and not isinstance(e, KeyError):      # KeyError = chunk not in pool map: retrying will not help
                     job["message"] = f"{f['share']}/{f['path']}: {e} — retrying"; time.sleep([2, 10][attempt]); continue
@@ -1030,7 +1038,10 @@ class Backup:
                 if i % 10 == 0:
                     for bk in [k for k, fut in pending.items() if fut.done()]: pending.pop(bk)
                     prefetch_from(i); evict()
-                process(i, f)
+                try: process(i, f)
+                except Stopped:                                            # Stop while a (large) file was downloading or being read
+                    drain(); r = resume_point(i)
+                    job["next_index"] = r; job["message"] = "paused"; persist("paused"); return result(paused=True, next_index=r, bytes=bytes_done[0])
             drain()
             if fatal: raise RuntimeError(fatal[0])
             if job.get("cancel") or up_cancelled:
@@ -1056,7 +1067,8 @@ class Backup:
                     if fatal: raise RuntimeError(fatal[0])
                     reap()
                     if job.get("cancel"): break
-                    process(i, f, again=(k, len(chk["missing"])))
+                    try: process(i, f, again=(k, len(chk["missing"])))
+                    except Stopped: break                                 # paused below, at the end of the plan
                 drain()
                 if fatal: raise RuntimeError(fatal[0])
                 if job.get("cancel") or up_cancelled:

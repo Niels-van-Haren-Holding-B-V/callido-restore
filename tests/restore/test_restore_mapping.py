@@ -52,7 +52,7 @@ class FakePool:
     def __init__(self): self.extracted = []
     def plan(self, off): return [], None
     def bucket_name(self, bk, kind): return f"{bk}.bucket"
-    def extract(self, off, out, size=0, mtime=0, job=None, fh_cache=None):
+    def extract(self, off, out, size=0, mtime=0, job=None, fh_cache=None, **kw):
         self.extracted.append(out)
         with open(out, "w") as fh: fh.write(f"content {off}".ljust(size)[:size] if size else f"content {off}")   # the plan's size: the final check compares it
         os.utime(out, (mtime, mtime))

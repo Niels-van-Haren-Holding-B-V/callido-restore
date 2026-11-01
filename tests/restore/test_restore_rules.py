@@ -77,7 +77,7 @@ class _FakePool:
     names for which a foreign file shows up at the final destination while the extract runs (the lexists/extract race)."""
     def __init__(self, dest, appear=()):
         self.dest, self.appear, self.calls = dest, set(appear), []
-    def extract(self, off, out, size=None, mtime=None, job=None, fh_cache=None):
+    def extract(self, off, out, size=None, mtime=None, job=None, fh_cache=None, **kw):
         self.calls.append(os.path.basename(out))
         Path(out).write_bytes(os.path.basename(out)[0].encode() * size); os.utime(out, (mtime, mtime))
         if os.path.basename(out) in self.appear:
@@ -571,6 +571,65 @@ class CompareTarget(unittest.TestCase):
         with mock.patch.object(backup_mod, "destination_sizes", side_effect=RuntimeError("cannot list the destination nas:R: access denied")):
             with self.assertRaises(RuntimeError):                                # unreadable is not empty
                 b2 = _fake_backup("nas:R", [("a.txt", 3, 0)]); b2.compare_target([{"share": "share", "ver": 1, "path": "", "is_dir": True}], "nas:R", {})
+
+
+class StopDuringALargeFile(unittest.TestCase):
+    """The user pressed Stop while a big MP4 downloaded and nothing stopped: Stop waited for the whole file."""
+    def setUp(self):
+        self.d = Path(tempfile.mkdtemp()); self.addCleanup(shutil.rmtree, self.d, True)
+        (self.d / "dest" / "share").mkdir(parents=True)
+        p = mock.patch.object(paths, "JOBS_DIR", self.d / "jobs"); p.start(); self.addCleanup(p.stop)
+    def backup(self, pool_cls, src):
+        b = _Backup.__new__(_Backup); b.src = src; b._fake_pool = pool_cls(str(self.d / "dest"))
+        b.restore_plan = lambda items, skip_meta=True: [{"share": "share", "path": "big.mp4", "off": 7, "size": 4, "mtime": 0},
+                                                       {"share": "share", "path": "next.jpg", "off": 8, "size": 4, "mtime": 0}]
+        return b
+    def run_stop(self, b, job):
+        import threading as th, time as _t
+        out = {}; t = th.Thread(target=lambda: out.setdefault("r", b.restore([{"share": "share", "ver": 1, "path": "", "is_dir": True}], str(self.d / "dest"), job)))
+        t0 = _t.monotonic(); t.start(); th.Event().wait(0.5); job["cancel"] = True; t.join(10)
+        self.assertFalse(t.is_alive(), "Stop did not stop the restore"); self.assertLess(_t.monotonic() - t0, 6)
+        return out["r"]
+
+    def test_stop_while_its_data_downloads(self):
+        d = self.d; cancelled_seen = []
+        class Src:
+            id = "big"; cache_dir = d / "cache"
+            def in_cache(self, q): return True
+            def locate(self, rel): return None
+            def listdir(self, rel): return {}
+            def ensure(self, rel, progress=None, cancelled=None, **kw):         # a download that only ends with Stop
+                import threading as th
+                while not (cancelled and cancelled()): th.Event().wait(0.05)
+                cancelled_seen.append(rel); raise RuntimeError(f"fetch of {rel} cancelled")
+        class Pool(_FakePool):
+            def plan(self, off): return [(off * 10 + k, 0) for k in range(3)], None
+            def bucket_name(self, b, kind): return f"Pool/0/0/{b}.bucket.1"
+        job = {"id": "sb", "label": "restore", "started": 0.0}
+        res = self.run_stop(self.backup(Pool, Src()), job)
+        self.assertEqual((res["paused"], res["next_index"], res["restored"]), (True, 0, 0))
+        import threading as th
+        for _ in range(40):
+            if cancelled_seen: break
+            th.Event().wait(0.05)
+        self.assertTrue(cancelled_seen)                                           # the running bucket downloads end too (not left running)
+
+    def test_stop_while_it_is_being_read(self):
+        class Src:
+            id = "big2"; cache_dir = None
+            def in_cache(self, q): return False
+            def locate(self, rel): return None
+            def listdir(self, rel): return {}
+            def ensure(self, rel, **kw): raise FileNotFoundError(rel)
+        class Pool(_FakePool):
+            def plan(self, off): return [], None
+            def extract(self2, off, out, size=None, mtime=None, job=None, fh_cache=None, cancelled=None, **kw):
+                import threading as th
+                while not (cancelled and cancelled()): th.Event().wait(0.05)        # reading a very large file, chunk by chunk
+                raise backup_mod.Stopped("stopped")
+        job = {"id": "sr", "label": "restore", "started": 0.0}
+        res = self.run_stop(self.backup(Pool, Src()), job)
+        self.assertEqual((res["paused"], res["next_index"], res["errors"]), (True, 0, 0))   # a Stop is not an error
 
 class UploadWatchdog(unittest.TestCase):
     def test_kill_uploads_ends_running_upload_processes(self):

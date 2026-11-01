@@ -248,31 +248,34 @@ make_dmg() {
     [ "$try" = 3 ] && die "hdiutil create failed"
     sleep 2
   done
-  # The custom-icon flag does not survive -srcfolder: set it on the mounted volume, then compress.
+  # The custom-icon flag does not survive -srcfolder: set it on the mounted volume, then compress. The mount is only for that
+  # cosmetic flag, so a volume that will not let go (Spotlight or another process holding it; seen on the Intel CI runner,
+  # which failed the v1.2.3 release run) never fails the build: after the retries the image is made without the icon.
   mnt=$(mktemp -d "${TMPDIR:-/tmp}/hbk-dmg-rw.XXXXXX")
-  dev=$(hdiutil attach -nobrowse -readwrite -noverify -mountpoint "$mnt" "$rw" | awk 'NR==1 {print $1}')
-  if [ -n "$dev" ]; then
-    if command -v SetFile >/dev/null 2>&1; then
-      SetFile -a C "$mnt"; SetFile -a V "$mnt/.VolumeIcon.icns"
-    else
-      echo "warning: SetFile not found (Xcode command line tools); the disk image gets no custom volume icon" >&2
-    fi
-    # The volume can still be busy for a moment after writing (seen on the Intel CI runner): sync, then retry the detach
-    # by device node; the image must be detached before hdiutil convert can read it.
-    sync
-    detached=
-    for try in 1 2 3 4 5 6; do
-      if hdiutil detach "$dev" >/dev/null 2>&1; then detached=1; break; fi
-      sleep 3
-    done
-    if [ -z "$detached" ]; then
-      hdiutil detach -force "$dev" >/dev/null 2>&1 || die "could not detach $dev ($mnt) after retries"
-    fi
+  dev=$(hdiutil attach -nobrowse -readwrite -noverify -noautoopen -mountpoint "$mnt" "$rw" | awk 'NR==1 {print $1}')
+  [ -n "$dev" ] || die "could not attach $rw"
+  mdutil -i off "$mnt" >/dev/null 2>&1 || true            # no Spotlight indexing of the temporary volume (it keeps it busy)
+  if command -v SetFile >/dev/null 2>&1; then
+    SetFile -a C "$mnt"; SetFile -a V "$mnt/.VolumeIcon.icns"
   else
-    die "could not attach $rw"
+    echo "warning: SetFile not found (Xcode command line tools); the disk image gets no custom volume icon" >&2
   fi
+  sync
+  detached=
+  for try in 1 2 3 4 5 6 7 8 9 10; do
+    if hdiutil detach "$dev" >/dev/null 2>&1; then detached=1; break; fi
+    diskutil unmountDisk "$dev" >/dev/null 2>&1 && hdiutil detach "$dev" >/dev/null 2>&1 && { detached=1; break; }
+    [ "$try" -ge 5 ] && { hdiutil detach -force "$dev" >/dev/null 2>&1 && { detached=1; break; }; }
+    sleep $((try < 5 ? 3 : 6))
+  done
   rmdir "$mnt" 2>/dev/null || true
-  hdiutil convert -quiet "$rw" -format UDZO -o "$image" || die "hdiutil convert failed"
+  if [ -n "$detached" ]; then
+    hdiutil convert -quiet "$rw" -format UDZO -o "$image" || die "hdiutil convert failed"
+  else
+    echo "warning: could not detach $dev after retries; building the disk image without the custom volume icon" >&2
+    rm -f "$image"
+    hdiutil create -volname "$APP_NAME" -srcfolder "$stage" -ov -format UDZO "$image" >/dev/null || die "hdiutil create (UDZO) failed"
+  fi
   rm -f "$rw"
   echo "built dist/${DMG_BASE}-${ARCH}.dmg"
 }
