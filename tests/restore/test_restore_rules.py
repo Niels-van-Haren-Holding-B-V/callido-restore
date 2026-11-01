@@ -369,7 +369,7 @@ class RestoreLoopRemote(unittest.TestCase):
         with mock.patch.object(backup_mod, "upload_watched", side_effect=upload):
             res = b.restore([{"share": "share", "ver": 1, "path": "", "is_dir": True}], "nas:Restore", job)
         self.assertTrue(res["paused"]); self.assertEqual(res["next_index"], 1)
-        self.assertEqual(seen[0], [{"kind": "upload", "name": "share/f.txt", "done": 100, "total": 200, "rate": 50}])
+        self.assertIn({"kind": "upload", "name": "share/f.txt", "done": 100, "total": 200, "rate": 50}, seen[0])   # (other uploads may run too; each bar starts at 0)
         self.assertEqual(job["transfers"], [])                                          # cleared when the restore stops
         self.assertEqual(job["rates"], {"download": 0, "upload": 0})
         saved = json.loads((paths.JOBS_DIR / "t9p.json").read_text())
@@ -377,6 +377,28 @@ class RestoreLoopRemote(unittest.TestCase):
         res2, job2, _ = self.restore([("e.txt", 1, 1), ("f.txt", 2, 2), ("g.txt", 3, 3), ("h.txt", 4, 4)], "t9r", start_at=saved["next_index"], job=seed)
         self.assertEqual((res2["restored"], res2["skipped"], res2["errors"]), (4, 0, 0))   # each file counted once
         self.assertEqual(res2["check"]["ok"], 4)
+
+    def test_a_stop_while_the_first_file_uploads_keeps_the_counts_on_resume(self):
+        # Stop while e.txt (index 0) uploads and the others finish: next_index is 0; Resume must keep the seeded counts and
+        # count each file once (it restarted the counts at position 0, and the files in done_ahead were never counted)
+        b = _fake_backup("nas:Restore", [("e.txt", 1, 1), ("f.txt", 2, 2), ("g.txt", 3, 3)])
+        job = {"id": "t0s", "label": "restore", "started": 0.0}
+        import threading as th; others = th.Event(); n = [0]
+        def upload(cmd, cancelled=None, **kw):
+            if "/e.txt" in cmd[3]:
+                others.wait(5); job["cancel"] = True
+                while not cancelled(): pass
+                return backup_mod.UPLOAD_CANCELLED, ""
+            r = self.put(cmd); n[0] += 1
+            if n[0] == 2: others.set()
+            return r
+        with mock.patch.object(backup_mod, "upload_watched", side_effect=upload):
+            res = b.restore([{"share": "share", "ver": 1, "path": "", "is_dir": True}], "nas:Restore", job)
+        self.assertEqual((res["paused"], res["next_index"], res["restored"]), (True, 0, 2))
+        saved = json.loads((paths.JOBS_DIR / "t0s.json").read_text())
+        seed = {k: saved[k] for k in ("done_files", "skipped", "errors", "errors_total", "verified", "identical_copy", "unverified", "unverified_total", "done_ahead")}
+        res2, job2, _ = self.restore([("e.txt", 1, 1), ("f.txt", 2, 2), ("g.txt", 3, 3)], "t0r", start_at=0, job=seed)
+        self.assertEqual((res2["restored"], res2["skipped"], res2["errors"]), (3, 0, 0))
 
     def test_staged_bytes_are_bounded_and_one_large_file_still_goes(self):
         # STAGE_MAX = 5 bytes; each upload holds its file 0.3 s. When a file is extracted, what already waits plus the new file
