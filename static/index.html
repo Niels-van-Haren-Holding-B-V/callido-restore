@@ -507,10 +507,14 @@ function progressHtml(job,rich,extra){const stoppedEarly=!!(job.result&&job.resu
   // note has its own small line under the bar, so the main line keeps its shape from poll to poll.
   const slots=[];
   if(dlDone)slots.push(String(job.label||'').startsWith('restore')?`${human(job.total_bytes)} · ${pct}%`:`${human(job.total_bytes)} downloaded · ${pct}%`);   // a restore from a local backup downloads nothingelse if(job.total_bytes)slots.push(`${human(job.done_bytes||0)} of ${human(job.total_bytes)} (${pct}%)`);else slots.push(`${pct}%`);
-  if(running&&job.rates&&job.rates.upload)slots.push(`${human(job.rates.upload)}/s to the target`);   // 0: nothing uploading now, or a local target   // what really reaches the NAS (skipped files are not speed)
+  if(running&&job.rates&&(job.rates.upload||job.rates.download))slots.push(job.rates.upload?`${human(job.rates.upload)}/s to the target`:`${human(job.rates.download)}/s from the backup`);   // the engine's 30 s average   // 0: nothing uploading now, or a local target   // what really reaches the NAS (skipped files are not speed)
   else if(running&&Array.isArray(job.transfers)&&job.transfers.length){const r=job.transfers.filter(x=>x.kind==='upload').reduce((s,x)=>s+(x.rate||0),0);slots.push(r?human(r)+'/s':speedText(job.id))}   // parallel files: their own rates
   else if(running&&job.total_bytes&&!dlDone)slots.push(speedText(job.id));
-  if(running)slots.push(eta||'time left: estimating…');
+  // the engine's estimate (bytes left / bytes really restored per second over 30 s) when it has one: the page's own sampling
+  // of done_bytes jumped with every finished or skipped file, so the time left went up and down
+  const left=running&&job.eta_s!=null?job.eta_s:null;
+  const etaE=left==null?null:left<60?'less than a minute left':left<3600?`about ${Math.round(left/60)} min left`:`about ${(left/3600).toFixed(1)} h left`;
+  if(running)slots.push(etaE||eta||'time left: estimating…');
   if(running)slots.push(`${sinceText(job.started)} elapsed`);
   if(running&&!(job.progress>0)&&!(job.done_bytes>0))
     return `<div class="progress"><div class="meta"><span>${esc(job.message||'Starting…')}</span><span class="eta">${esc(sinceText(job.started))} elapsed${extra?' ':''}${extra||''}</span></div><div class="prog indet"><i></i></div></div>`;

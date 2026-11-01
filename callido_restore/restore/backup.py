@@ -59,6 +59,7 @@ UPLOAD_STALL_S = 600          # an upload whose transferred bytes do not move fo
 UPLOAD_STALLED, UPLOAD_CANCELLED = -999, -998
 
 DOWNLOAD_BARS = 8                                  # files shown with their download from the backup
+METER_S = 30                                       # speeds and time left: measured over this many seconds
 UPLOAD_WORKERS = 8                                         # files uploaded to a remote target at once (each its own rclone process and SMB session)
 STAGE_MAX = int(float(os.environ.get("HBK_STAGE_GB", "4")) * (1 << 30))   # extracted files waiting for their upload, bytes
 _UNIT = {"": 1, "B": 1, "K": 1 << 10, "M": 1 << 20, "G": 1 << 30, "T": 1 << 40, "P": 1 << 50}
@@ -93,8 +94,9 @@ def kill_uploads():
         except Exception: pass
     return len(ps)
 
-def upload_watched(argv, cancelled=None, stall_s=None, poll_s=10, progress=None):
-    """Run an rclone upload; returns (returncode, stderr tail). rclone reports its progress every ``poll_s`` seconds; when the
+def upload_watched(argv, cancelled=None, stall_s=None, poll_s=1, progress=None):
+    """Run an rclone upload; returns (returncode, stderr tail). rclone reports its progress every ``poll_s`` seconds (1 s: a
+    photo uploads within seconds, and with 10 s the only report was the last one, so every bar showed 100 %); when the
     transferred bytes do not change for ``stall_s`` (a connection that stays open but carries nothing; seen over a VPN for two
     hours) the process is ended and UPLOAD_STALLED is returned so the caller retries. ``cancelled()`` true (Stop) ends it at
     once: UPLOAD_CANCELLED. ``progress(done_bytes, total_bytes, bytes_per_s)`` follows rclone's stats lines."""
@@ -633,22 +635,25 @@ class Backup:
         files = self.restore_plan(items, skip_meta)
         total_bytes = sum(f["size"] for f in files); done_bytes = 0
         job["total_files"] = len(files); job["total_bytes"] = total_bytes
-        # A resumed job (start_at > 0) keeps the counts and the error list seeded from its saved file; a fresh one starts at zero.
+        # A resumed job keeps the counts and the error list seeded from its saved file; a fresh one starts at zero. Resumed = seeded
+        # (done_files is on the job), also at position 0: a Stop while the first file uploaded saves next_index 0, and the files
+        # after it that finished are in done_ahead (the counts used to restart then, and those files were never counted).
+        seeded = start_at > 0 or "done_files" in job
         for k, zero in (("done_files", 0), ("errors", []), ("skipped", 0), ("verified", 0), ("identical_copy", 0), ("unverified", [])):
-            if not start_at or k not in job: job[k] = zero if not isinstance(zero, list) else list(zero)
-        if not start_at or "errors_total" not in job: job["errors_total"] = len(job["errors"])        # a seed without the counter: the list is all we know
-        if not start_at or "unverified_total" not in job: job["unverified_total"] = len(job["unverified"])
+            if not seeded or k not in job: job[k] = zero if not isinstance(zero, list) else list(zero)
+        if not seeded or "errors_total" not in job: job["errors_total"] = len(job["errors"])        # a seed without the counter: the list is all we know
+        if not seeded or "unverified_total" not in job: job["unverified_total"] = len(job["unverified"])
         lock = threading.RLock()                                # counters and lists below are shared with the upload threads
         tx = {}; job["transfers"] = []                          # every running download / upload: what the progress bars show
         win = []; cur = [-1]; got = {}                          # files ahead with their buckets; the file being read; buckets here (size)
         def file_bars():
-            """one "download" bar per file whose data is still coming from the backup (the next ones, at most DOWNLOAD_BARS),
-            and the file being read now: done/total = its buckets' bytes downloaded / their size (0 = size not known yet)"""
+            """one "download" bar per file whose data is still coming from the backup (the next ones, at most DOWNLOAD_BARS):
+            done/total = its buckets' bytes downloaded / their size (0 = size not known yet)"""
             out = []; uploading = {t["name"] for t in tx.values() if t["kind"] == "upload"}
             for j, f, bks in win:
                 if j < cur[0] or f"{f['share']}/{f['path']}" in uploading: continue
                 waiting = [b for b in bks if b not in got]
-                if not waiting and j != cur[0]: continue
+                if not waiting: continue                               # its data is here (being read now, or next): no bar at 100 %
                 done = total = rate = 0; known = True
                 for b in bks:
                     if b in got: done += got[b]; total += got[b]; continue
@@ -663,10 +668,25 @@ class Backup:
             # the backup's own bucket files ("bucket", not shown by the page). rates: bytes/s now, "download" from the backup source,
             # "upload" to a NAS target (the main bar's speed counts skipped files too, so it can be far above what reaches the NAS).
             job["transfers"] = file_bars() + list(tx.values())
-            job["rates"] = {"download": sum(t["rate"] for t in tx.values() if t["kind"] == "bucket"),
-                            "upload": sum(t["rate"] for t in tx.values() if t["kind"] == "upload")}
+            meter()
+        # Speeds and time left, measured here over the last METER_S seconds (the page's own sampling of done_bytes jumped with every
+        # finished or skipped file): bytes that moved to the target and from the backup, and bytes of files really restored.
+        flow = {"upload": 0, "bucket": 0, "restored": 0}; samples = collections.deque(); last_s = [0.0]
+        def meter(force=False):
+            now = time.monotonic()
+            if force or now - last_s[0] >= 1:
+                last_s[0] = now; samples.append((now, flow["upload"], flow["bucket"], flow["restored"]))
+                while len(samples) > 2 and now - samples[0][0] > METER_S: samples.popleft()
+            t0, u0, d0, r0 = samples[0] if samples else (now, 0, 0, 0); dt = now - t0
+            if dt < 3: return
+            up, dl, rs = (flow["upload"] - u0) / dt, (flow["bucket"] - d0) / dt, (flow["restored"] - r0) / dt
+            job["rates"] = {"download": int(dl), "upload": int(up)}
+            left = max(0, (job.get("total_bytes") or 0) - bytes_done[0])
+            job["eta_s"] = int(left / rs) if rs > 0 else None      # files ahead that will be skipped make this an upper bound
         def tx_set(key, kind, name, done, total, rate):
             with lock:
+                if kind in ("upload", "bucket"):
+                    prev = tx.get(key, {}).get("done", 0); flow[kind] += max(0, int(done or 0) - prev)
                 tx[key] = {"kind": kind, "name": name, "done": int(done or 0), "total": int(total or 0), "rate": int(rate or 0)}
                 publish_tx()
         def tx_done(key):
@@ -688,7 +708,7 @@ class Backup:
             "unverified" = listed with the reason"""
             with lock:
                 if id(f) in counted: return                    # restored again by the final check: counted once
-                counted.add(id(f)); job["done_files"] += 1
+                counted.add(id(f)); job["done_files"] += 1; flow["restored"] += f["size"]; meter()
             st, why = ("verified", "") if f["off"] is not None and f["off"] < 0 else ("unverified", "the pool map gives no status")
             if f["off"] is not None and f["off"] >= 0 and hasattr(pool, "verification"):
                 try: st, why = pool.verification(f["off"])
@@ -729,7 +749,10 @@ class Backup:
             if already is None:
                 try: total = (self.src.listdir(os.path.dirname(rel)).get(os.path.basename(rel)) or {}).get("size") or 0
                 except Exception: total = 0
-            try: path = self.src.ensure(rel, progress=lambda done, speed, note="": tx_set(key, "bucket", os.path.basename(rel), done, total, speed))
+            try:
+                path = self.src.ensure(rel, progress=lambda done, speed, note="": tx_set(key, "bucket", os.path.basename(rel), done, total, speed))
+                if already is None and path.is_file():
+                    with lock: flow["bucket"] += max(0, path.stat().st_size - tx.get(key, {}).get("done", 0))
             finally: tx_done(key)
             try:
                 with lock: got[bk] = path.stat().st_size; publish_tx()
@@ -791,9 +814,12 @@ class Backup:
             try:
                 for attempt in range(3):
                     if stopping(): return "cancelled"
+                    tx_set(key, "upload", name, 0, f["size"], 0)                 # the bar is there from the start, at 0 %
+                    t_up = time.monotonic()                                      # rclone's first 1 s report often says 0 B/s
+                    up_rate = lambda d, r: r or (int(d / max(0.5, time.monotonic() - t_up)) if d else 0)
                     rc, err = upload_watched([RCLONE, "moveto", out, part, "--retries", "5", "--low-level-retries", "20",
                                               "--retries-sleep", "5s"], cancelled=stopping,
-                                             progress=lambda d, t, r: tx_set(key, "upload", name, d, t or f["size"], r))
+                                             progress=lambda d, t, r: tx_set(key, "upload", name, d, t or f["size"], up_rate(d, r)))
                     if rc == UPLOAD_CANCELLED: return "cancelled"               # Stop: this file is uploaded again on resume
                     if rc == 0: break
                     if rc == UPLOAD_STALLED: err = f"upload stalled: no progress for {UPLOAD_STALL_S // 60} min (network or NAS not answering)"
@@ -801,6 +827,8 @@ class Backup:
                     if attempt < 2:
                         job["message"] = f"{name}: {err} — retrying"; time.sleep([2, 10][attempt]); continue
                     add_error(f, err); return "done"
+                with lock: flow["upload"] += max(0, f["size"] - tx.get(key, {}).get("done", 0))   # bytes no stats line reported
+                tx_done(key)                                                   # uploaded: the bar goes, the rename follows
                 for attempt in range(3):                                       # the complete file is at the temporary name now
                     try: moved = move_no_replace(part, f"{root}/{rel}"); break
                     except Exception as e:
@@ -1006,7 +1034,7 @@ class Backup:
         finally:
             job["cancel_uploads"] = True
             up_ex.shutdown(wait=True, cancel_futures=True)              # running uploads end with the cancel flag or finish
-            with lock: tx.clear(); win.clear(); publish_tx()
+            with lock: tx.clear(); win.clear(); publish_tx(); job["rates"] = {"download": 0, "upload": 0}; job["eta_s"] = None
             ex.shutdown(wait=False, cancel_futures=True)
             for fh in fh_cache.values(): fh.close()
             for root, st in stage.items():               # only this job's staging folders; never anything else at a destination
