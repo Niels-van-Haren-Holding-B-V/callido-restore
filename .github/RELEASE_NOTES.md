@@ -1,5 +1,11 @@
 **Callido Restore** restores files from a Synology Hyper Backup (`.hbk`) without Hyper Backup or a working NAS. It reads the backup's own metadata, shows every backup run on a timeline, and restores the folders you pick to a NAS share or a local folder. Files already at the destination are never overwritten or deleted, and the backup source is only read.
 
+## What's new in 1.2.2
+
+- **A progress bar for every file being downloaded.** While a restore runs you now see two groups: "↓ Downloading from the backup" with a bar per file whose data is coming from Google Drive, and "↑ Uploading to the target" with a bar per file going to the NAS, each with its own speed. So you can see whether Google Drive or the NAS is the slow part. A restore to a local folder shows its file bars too (#214).
+- **Starting over a share that is mostly restored is much faster.** Files already at the target (same name and size) are skipped before anything is downloaded for them; before, their data was still fetched from Google Drive first (#214).
+- **"Restores you can resume" lists each restore once.** The restore that is running is no longer listed there, and starting or resuming a restore removes older saved copies of the same restore (#214).
+
 ## What's new in 1.2.1
 
 A maintenance release for restores to a NAS. Install it from the header ("Version 1.2.1 is available") or by hand.
