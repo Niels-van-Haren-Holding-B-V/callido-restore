@@ -247,10 +247,10 @@ footer.madeBy img{width:18px;height:18px;border-radius:5px;vertical-align:middle
   <div class="row" style="justify-content:flex-end;margin-top:10px"><span id="wsBusy" class="muted" style="display:none;align-items:center;gap:8px"><span class="spin"></span><span id="wsBusyText">Signing in…</span></span><button id="nCancel" class="ghost">Cancel</button><button id="wsBack" style="display:none">Back</button><button id="wsNext" class="primary">Next</button></div>
 </dialog>
 <script>
-const WD={msg:'',cls:''};
+const WD={msg:'',cls:''};   // last result of the NAS connect in the restore wizard (kept across re-renders)
 // Typing another name in the NAS form leaves edit mode (a new connection again: user required, labels back). Inline handler, so it
 // works while the rest of the form's handlers wait for the share listing.
-function wdNameInput(el){if(WD.editing&&el.value.trim()!==WD.editing){WD.editing=null;const p=$('#wdPass'),b=$('#wdConnect');if(p)p.placeholder='';if(b)b.textContent='Connect'}}   // last result of the NAS connect in the restore wizard (kept across re-renders)
+function wdNameInput(el){if(WD.editing&&el.value.trim()!==WD.editing){WD.editing=null;const p=$('#wdPass'),b=$('#wdConnect');if(p)p.placeholder='';if(b)b.textContent='Connect'}}
 const LOCAL_EG=/^Win/.test(navigator.platform)?'Z:':'/Volumes';   // example local path in placeholders: a mapped drive on Windows
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 const S={src:null,info:null,ver:null,snaps:{},indexing:{},tab:'changes',range:365,basket:JSON.parse(localStorage.getItem('basket')||'[]')};
@@ -737,7 +737,9 @@ async function tabRestore(){const el=$('#tab-restore');
     $('#wzEdit').onclick=()=>{const c=smb[rem()];if(!c)return;const d=$('#wzPrep');d.open=true;
       WD.editing=rem().replace(/:$/,'');WD.host=c.host+(c.port&&c.port!=='445'?':'+c.port:'');WD.user=c.user||'';$('#wdName').value=WD.editing;$('#wdHost').value=WD.host;$('#wdUser').value=WD.user;$('#wdPass').value='';$('#wdPass').placeholder='unchanged';
       $('#wdConnect').textContent='Save and test';wdShow(`Editing ${rem()}: change the address, user or password (leave the password empty to keep it), then Save and test.`,'');d.scrollIntoView({block:'nearest'});$('#wdHost').focus()};
-    $('#wzRem').onchange=()=>{MAP._rem=rem();saveMap();editBtn();loadShares()};await loadShares()}catch(e){$('#wzRem').innerHTML='<option value="">a mounted share / local path</option>';fillRows()}
+    $('#wzRem').onchange=()=>{MAP._rem=rem();saveMap();editBtn();loadShares()};
+    loadShares()   // not awaited: listing an unreachable NAS takes up to 60 s, and the form's handlers below must work meanwhile
+  }catch(e){$('#wzRem').innerHTML='<option value="">a mounted share / local path</option>';fillRows()}
   const setCls=(el,c)=>{el.classList.remove('bad','ok');if(c)el.classList.add(c)};
   const showCheck=(st,r)=>{st.textContent=r.inside_source?`✗ ${r.conflict||r.dest} is the backup itself, a folder inside it, or the folder around it`:r.error?'? '+r.error:!r.exists?'✓ new folder, it will be created':r.empty?'✓ empty folder':`! already has ${r.files} entries: files already there are skipped, nothing is deleted`;setCls(st,r.inside_source||r.error?'bad':'ok');return!(r.inside_source||r.error)};
   let reason='';
