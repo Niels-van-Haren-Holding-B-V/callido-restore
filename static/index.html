@@ -948,7 +948,7 @@ async function tabRestore(){const el=$('#tab-restore');
   const xferBar=x=>{const pct=x.total?Math.min(100,Math.round(100*(x.done||0)/x.total)):null;const nm=String(x.name||'');const short=nm.split('/').pop()||nm;
     const up=x.kind==='upload';const what=up?'↑ to the target':'↓ from the backup';
     const amount=pct!=null?pct+' %':(x.done?human(x.done):'waiting');
-    return `<div class="xf" title="${esc(nm)} · ${what}"><div class="xfh"><span class="xfn mono">${esc(short)}</span><span class="help">${up?'↑':'↓'} ${amount}${x.rate?' · '+human(x.rate)+'/s':''}</span></div><div class="prog thin"><i style="width:${pct==null?0:pct}%"></i></div></div>`};
+    return `<div class="xf" title="${esc(nm)} · ${what}"><div class="xfh"><span class="xfn mono">${esc(short)}</span><span class="help">${up?'↑':'↓'} ${amount}${x.rate?' · '+human(x.rate)+'/s':''}</span></div><div class="prog thin"><i style="width:${pct!=null?pct:x.done?100:0}%${pct==null&&x.done?';opacity:.35':''}"></i></div></div>`};   // size unknown but bytes arriving: a faint full bar (busy, not stuck)
   const showXfers=job=>{const el=$('#rsXfers');if(!el)return;const all=job.state==='running'&&Array.isArray(job.transfers)?job.transfers:[];
     const ups=all.filter(x=>x.kind==='upload'),downs=all.filter(x=>x.kind==='download');
     if(!ups.length&&!downs.length){el.innerHTML='';return}
