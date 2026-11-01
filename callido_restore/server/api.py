@@ -1,7 +1,7 @@
-"""The JSON API and the static UI, served on 127.0.0.1 only (``ThreadingHTTPServer(("127.0.0.1", port), H)``). Handlers call into
+"""The JSON API and the static UI, served on 127.0.0.1 only (``LocalServer(("127.0.0.1", port), H)``, no reverse DNS lookup). Handlers call into
 ``sources`` and ``restore``; long operations go through ``restore.jobs``."""
-import json, os, re, subprocess, sys, tempfile, threading, time, traceback, uuid
-from http.server import BaseHTTPRequestHandler
+import json, os, re, socketserver, subprocess, sys, tempfile, threading, time, traceback, uuid
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs, unquote
 from callido_restore import paths
@@ -149,6 +149,16 @@ def start_auto_update(every=600, first=90):
         while True:
             auto_update_tick(); time.sleep(every)
     threading.Thread(target=loop, daemon=True, name="auto-update").start()
+
+
+class LocalServer(ThreadingHTTPServer):
+    """The app's HTTP server on 127.0.0.1. http.server's server_bind calls socket.getfqdn(host), a reverse DNS lookup of
+    127.0.0.1 whose answer nothing uses; where reverse lookups hang (GitHub's macOS runners: 35 s, and Macs on some VPN or
+    company networks) the app took that long to open. This bind skips the lookup."""
+    def server_bind(self):
+        socketserver.TCPServer.server_bind(self)
+        host, port = self.server_address[:2]
+        self.server_name, self.server_port = host, port
 
 
 class H(BaseHTTPRequestHandler):

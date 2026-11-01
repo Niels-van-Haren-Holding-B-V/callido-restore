@@ -36,13 +36,13 @@ class Settings(unittest.TestCase):
     """The UI's {check, auto} and the plain {mode} both set the update setting."""
     def test_settings_over_http(self):
         import json, os, shutil, tempfile, threading, pathlib
-        from http.server import ThreadingHTTPServer
+        from callido_restore.server.api import LocalServer
         from urllib.request import Request, urlopen
         from callido_restore import paths
         d = tempfile.mkdtemp(); self.addCleanup(shutil.rmtree, d, True)
         p = mock.patch.object(paths, "CONF_DIR", pathlib.Path(d)); p.start(); self.addCleanup(p.stop)
         p = mock.patch.object(update, "_checking", [True]); p.start(); self.addCleanup(p.stop)
-        srv = ThreadingHTTPServer(("127.0.0.1", 0), api.H); threading.Thread(target=srv.serve_forever, daemon=True).start()
+        srv = LocalServer(("127.0.0.1", 0), api.H); threading.Thread(target=srv.serve_forever, daemon=True).start()
         self.addCleanup(srv.server_close); self.addCleanup(srv.shutdown)
         def post(body):
             req = Request(f"http://127.0.0.1:{srv.server_address[1]}/api/update/settings", data=json.dumps(body).encode(), headers={"Content-Type": "application/json"})

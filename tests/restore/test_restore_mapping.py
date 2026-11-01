@@ -7,7 +7,7 @@ between). Items without ``dest`` go under the common ``dest`` as ``<share>/<path
 file, so pause/resume keeps it. ``/api/restore`` refuses a mapped target inside the backup and creates new local roots.
 """
 import json, os, shutil, tempfile, threading, time, unittest
-from http.server import ThreadingHTTPServer
+from callido_restore.server.api import LocalServer
 from urllib.request import Request, urlopen
 
 from callido_restore import paths
@@ -239,7 +239,7 @@ class RestoreApiTests(_Fixture):
     def setUp(self):
         super().setUp()
         SOURCES["t8"] = self.src; BACKUPS["t8"] = self.b
-        self.srv = ThreadingHTTPServer(("127.0.0.1", 0), H)
+        self.srv = LocalServer(("127.0.0.1", 0), H)
         threading.Thread(target=self.srv.serve_forever, daemon=True).start()
     def tearDown(self):
         self.srv.shutdown(); self.srv.server_close(); SOURCES.pop("t8", None); BACKUPS.pop("t8", None); super().tearDown()

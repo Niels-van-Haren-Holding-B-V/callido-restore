@@ -1,7 +1,7 @@
 """The pool preparation starts by itself (after open and after a share load) when it can, respects the user's pause, and
 the pause and resume endpoints drive it."""
 import json, tempfile, threading, time, unittest
-from http.server import ThreadingHTTPServer
+from callido_restore.server.api import LocalServer
 from pathlib import Path
 from unittest import mock
 from urllib.request import urlopen, Request
@@ -19,7 +19,7 @@ class AutoPrepare(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory(); root = Path(self.tmp.name)
         self.old = (paths.INDEX_DIR, paths.CACHE_DIR); paths.INDEX_DIR = root / "index"; paths.CACHE_DIR = root / "cache"
         (root / "hbk").mkdir(); SOURCES["ap"] = Source("ap", "ap", str(root / "hbk")); api.BACKUPS.pop("ap", None)
-        self.srv = ThreadingHTTPServer(("127.0.0.1", 0), api.H); threading.Thread(target=self.srv.serve_forever, daemon=True).start()
+        self.srv = LocalServer(("127.0.0.1", 0), api.H); threading.Thread(target=self.srv.serve_forever, daemon=True).start()
         self.base = f"http://127.0.0.1:{self.srv.server_address[1]}"
         self.built = []; self.release = threading.Event()        # a fake preparation runs until released or cancelled
         def build_pool(b, job, max_bucket=None):

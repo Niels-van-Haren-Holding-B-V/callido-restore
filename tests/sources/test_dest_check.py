@@ -7,7 +7,7 @@ the original shares (dest = the NAS root) passes as long as the backup does not 
 ``/api/dest/check`` reports that verdict together with whether the folder exists and is empty (rclone mocked here).
 """
 import json, os, subprocess, tempfile, threading, time, unittest
-from http.server import ThreadingHTTPServer
+from callido_restore.server.api import LocalServer
 from unittest import mock
 from urllib.parse import urlencode
 from urllib.error import HTTPError
@@ -93,7 +93,7 @@ class DestCheckApiTests(SourceFixture):
     def setUp(self):
         super().setUp()
         SOURCES["t7"] = self.src
-        self.srv = ThreadingHTTPServer(("127.0.0.1", 0), H)
+        self.srv = LocalServer(("127.0.0.1", 0), H)
         threading.Thread(target=self.srv.serve_forever, daemon=True).start()
     def tearDown(self):
         self.srv.shutdown(); self.srv.server_close(); SOURCES.pop("t7", None); super().tearDown()
