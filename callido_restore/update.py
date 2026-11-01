@@ -57,7 +57,9 @@ def version_tuple(v):
     return (int(m.group(1)), int(m.group(2) or 0), int(m.group(3) or 0), 0 if m.group(4) else 1)
 
 
-def newer(tag, current=VERSION): return version_tuple(tag) > version_tuple(current)
+def newer(tag, current=None):
+    """True when release ``tag`` is strictly newer than ``current`` (default: the running version, read at call time)."""
+    return version_tuple(tag) > version_tuple(VERSION if current is None else current)
 
 
 def check_enabled():
