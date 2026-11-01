@@ -250,9 +250,9 @@ class H(BaseHTTPRequestHandler):
             if u.path == "/api/update/install":                    # a job: download, verify the signed checksum, install, restart
                 from callido_restore import update
                 busy = [j for j in JOBS.values() if j["state"] == "running" and (j["label"].startswith("restore") or j["label"] == "build pool map" or j["label"] == "update")]
-                if busy: return self._json({"error": f"wait until '{busy[0]['label']}' has finished or is paused; a paused restore continues after the update"}, 409)
+                if busy: return self._json({"error": f"Wait until the {'restore' if busy[0]['label'].startswith('restore') else 'preparation' if busy[0]['label'] == 'build pool map' else 'update'} has finished or is paused; a paused restore continues after the update."}, 409)
                 st = update.status()
-                if not st["installable"]: return self._json({"error": "no installable update: " + ("this version has no release key; use the release page" if st["available"] else "this is the newest version")}, 409)
+                if not st["installable"]: return self._json({"error": ("This version cannot install updates itself: download the new version from the release page." if st["available"] else "No update to install: this is already the newest version.")}, 409)
                 return self._json(start_job(lambda job: update.install(job, _exit_app), "update"))
             if u.path == "/api/sources":
                 s = add_source(body["name"], body["local"], body.get("remote"), body.get("extra")); return self._json(s.to_json())
