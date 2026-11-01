@@ -262,9 +262,37 @@ def settings_flow(b, base, work, home, hbk, notes, shot, env):
     notes.append(f"settings: rclone.conf [nas] after Put back: host={back.get('host')} port={back.get('port')} user={back.get('user')}")
 
 
+def upload_flow(b, base, notes, shot):
+    """#201/#202 in the page: a restore to a NAS connection (an rclone WebDAV remote with throttled uploads) shows one small
+    bar per file being uploaded, several at once, while it runs."""
+    restores = lambda: [j for j in shots.api(base, "/api/jobs") if j["label"].startswith("restore")]
+    b.navigate(base + "/"); b.wait("typeof S!=='undefined' && S.info && S.info.readable", 60); time.sleep(1)
+    b.js("selectVersion(102)"); time.sleep(2); b.js("showTab('restore')"); time.sleep(1.5)
+    for sh in ("Documents", "Photos", "homes"):
+        b.js(f"(()=>{{const c=document.querySelector('#rsTree .tc[data-share=\"{sh}\"][data-path=\"\"]');if(c&&!c.checked){{c.checked=true;c.dispatchEvent(new Event('change'))}}}})()")
+        t0 = time.time()
+        while time.time() - t0 < 30 and not b.js(f"!!(S.snaps&&S.snaps['{sh}']&&S.snaps['{sh}'].indexed)"): time.sleep(0.3)
+    time.sleep(1)
+    b.js("""(()=>{const o=document.querySelector('#wzOne');if(!o.checked){o.checked=true;o.dispatchEvent(new Event('change',{bubbles:true}))}
+             const p=document.querySelector('#wzOnePath');p.value='e2enas:restore';p.dispatchEvent(new Event('input',{bubbles:true}))})()""")
+    time.sleep(1); b.js("document.querySelector('#rsGo').click()"); t0 = time.time(); seen = []; most = 0; jid = None
+    while time.time() - t0 < 300:                       # until this restore job itself has ended (a slow runner takes minutes)
+        if jid is None: jid = next((j["id"] for j in restores()), None)
+        elif shots.api(base, "/api/job", id=jid).get("state") != "running": time.sleep(2.5); break     # the page polls every ~2 s
+        bars = b.js("[...document.querySelectorAll('#rsXfers .xf')].map(x=>x.innerText.replace(/\\n/g,' '))") or []
+        if len(bars) > most: most = len(bars); seen = bars; head = b.text("#rsXfers").split("\n")[0]
+        if len(bars) >= 2 and not getattr(b, "_shot", None): shot(b, "upload-bars"); b._shot = True
+        time.sleep(0.3)
+    notes.append(f"upload: most bars at once {most}: {seen[:4]}")
+    notes.append(f"upload: line above the bars: {head if most else None!r}")
+    left = b.js("document.querySelectorAll('#rsXfers .xf').length")
+    notes.append(f"upload: bars after the restore: {left}; result {b.text('#rsProg')[-160:]!r}")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--chrome", required=True); ap.add_argument("--out", required=True)
+    ap.add_argument("--upload", action="store_true", help="#201/#202: per-file bars while a restore uploads to a NAS (rclone WebDAV)")
     ap.add_argument("--settings", action="store_true", help="#190: the Settings dialog (NAS edit, Drive key, appearance, updates, cache)")
     ap.add_argument("--stop", action="store_true", help="#187: Stop the running restore, Resume it, byte-exact")
     ap.add_argument("--update", action="store_true", help="an update on offer with hostile release notes: notice and dialog (no network)")
@@ -277,6 +305,13 @@ def main():
     work = Path(tempfile.mkdtemp(prefix="hbk-ui-")); home = work / "home"; (home / ".hbk-explorer").mkdir(parents=True)
     hbk = work / "backups" / "e2e_1.hbk"; m = hbkgen.build(str(hbk), a.scale, a.bucket_kb * 1024, chunk_index=a.chunk_index)
     (home / ".hbk-explorer" / "sources.json").write_text(json.dumps([{"id": "e2e", "name": "E2E backup", "local": str(hbk), "remotes": [], "extra": []}]))
+    dav = None
+    if a.upload:
+        from callido_restore.paths import RCLONE
+        nas = work / "nas"; nas.mkdir(); dport = shots.free_port()
+        iso = dict(os.environ, HOME=str(home), XDG_CONFIG_HOME=str(home / ".config"), RCLONE_CONFIG=str(home / ".config" / "rclone" / "rclone.conf"))
+        dav = subprocess.Popen([RCLONE, "serve", "webdav", str(nas), "--addr", f"127.0.0.1:{dport}"], env=iso, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run([RCLONE, "config", "create", "e2enas", "webdav", f"url=http://127.0.0.1:{dport}", "vendor=other"], env=iso, capture_output=True, check=True)
     if a.settings:                 # the test's own rclone.conf: a NAS that does not answer, a Drive remote with its own key, an alias "Drive"
         rc_dir = home / ".config" / "rclone"; rc_dir.mkdir(parents=True)
         (rc_dir / "rclone.conf").write_text("[nas]\ntype = smb\nhost = 127.0.0.1\nport = 1\nuser = alice\n\n[gdrive]\ntype = drive\nscope = drive.readonly\n"
@@ -289,6 +324,7 @@ def main():
     port = int(os.environ.get("HBK_SMOKE_PORT") or shots.free_port()); assert port != 8765
     base = f"http://127.0.0.1:{port}"; log = open(work / "app.log", "w")
     env = dict(os.environ, HOME=str(home), XDG_CONFIG_HOME=str(home / ".config"), XDG_CACHE_HOME=str(home / ".cache"), RCLONE_CONFIG=str(home / ".config" / "rclone" / "rclone.conf"), PYTHONPATH=str(ROOT), HBK_NO_UPDATE_CHECK="1"); env.pop("HBK_NO_AUTOPREPARE", None)   # never asks GitHub
+    if a.upload: env["RCLONE_BWLIMIT"] = "1M"                           # every upload process of the app at 1 MB/s: the bars have time to show
     if a.settings:                 # the update choice must be real here: no HBK_NO_UPDATE_CHECK, but "checked just now" so no check is due
         env.pop("HBK_NO_UPDATE_CHECK", None)
         (home / ".hbk-explorer" / "update.json").write_text(json.dumps({"checked": time.time()}))
@@ -297,11 +333,16 @@ def main():
     def shot(b, name):
         n[0] += 1; p = out / f"{n[0]:02d}-{name}.png"; p.write_bytes(b.png()); notes.append(f"[shot] {p.name}")
     try:
-        for _ in range(100):
+        t_up = time.time()
+        for _ in range(600):
             try: shots.api(base, "/api/sources"); break
             except Exception: time.sleep(0.1)
+        notes.append(f"[timing] app up after {time.time() - t_up:.1f}s")
         with Browser(a.chrome, str(work / "chrome")) as b:
             b.call("Page.enable")
+            if a.upload:
+                upload_flow(b, base, notes, lambda b_, name: shot(b_, name)); notes.extend(f"[{k}] {v}" for k, v in b.events)
+                return
             if a.settings:
                 settings_flow(b, base, work, home, hbk, notes, lambda b_, name: shot(b_, name), env); notes.extend(f"[{k}] {v}" for k, v in b.events)
                 return
@@ -412,6 +453,7 @@ def main():
         except Exception: pass
         try: srv.wait(10)
         except subprocess.TimeoutExpired: srv.kill()
+        if dav: dav.terminate()
         log.close(); shutil.copy(work / "app.log", out / "app.log"); shutil.rmtree(work, ignore_errors=True)
         (out / "notes.txt").write_text("\n".join(notes)); print("\n".join(notes))
 

@@ -2,17 +2,21 @@ name: e2e
 # End-to-end tests (tests/e2e, docs/handovers/2026-10-31-1530-claude-hbk6.md): synthetic backups with a real pool, the real app
 # process over HTTP, rclone remotes standing in for Google Drive and the NAS, and the UI in headless Chrome. Offline: the
 # remotes are rclone `alias` remotes on temporary folders, updates are never checked (HBK_NO_UPDATE_CHECK), nothing leaves the runner.
+# Pull requests run Ubuntu (~5 min) and the informative Windows leg; macOS (GitHub's macOS runners start the app process about
+# ten times slower, ~13 min for the suite) runs after every merge to main, nightly, and on demand.
 on:
   push:
     branches: [main]
   pull_request:
+  schedule:
+    - cron: "17 3 * * *"
   workflow_dispatch:
 jobs:
   e2e:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-15]
+        os: ${{ fromJSON(github.event_name == 'pull_request' && '["ubuntu-latest"]' || '["ubuntu-latest","macos-15"]') }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 40
     env:
