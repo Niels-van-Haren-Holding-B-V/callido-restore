@@ -1,5 +1,17 @@
 **Callido Restore** restores files from a Synology Hyper Backup (`.hbk`) without Hyper Backup or a working NAS. It reads the backup's own metadata, shows every backup run on a timeline, and restores the folders you pick to a NAS share or a local folder. Files already at the destination are never overwritten or deleted, and the backup source is only read.
 
+## What's new in 1.2.0
+
+- **The app updates itself.** Once a day it checks for a new version and shows "Version X is available · What's new" in the header; **Install now** downloads it, checks it, installs it and restarts (Windows and macOS). Every update is signed with Callido's release key and checked against its published checksum before anything is installed; an update that fails a check is deleted and nothing changes. Only newer versions are accepted. (#178, #180, #181, #183, #185). **This is the first version that can update itself; to get it, install 1.2.0 by hand once.**
+- **Stop and Resume on a running restore.** Stop is on the restore's progress bar and takes effect within a second, also in the middle of a large upload to the NAS; Resume continues where it stopped, also after a crash or a closed app (#186, #187).
+- **A restore to the NAS no longer hangs on a dead connection.** An upload that moves nothing for 10 minutes is ended and tried again (#186). An interrupted upload can leave a `.partial` file on the NAS; the user guide explains how to remove those (#188).
+- **A settings menu (⚙ in the header)** gathers every setting in one place: the NAS address, port, user and password (switch between a local and a VPN address; if the NAS does not answer after a change, the app says so and offers to put the old address back), your own Google key and signing in to Drive again, light, dark or system appearance, how updates are handled, and the cache with its size and a Clear button. Nothing else on the screens moved (#190, #196).
+- **Updates can install themselves.** In Settings → Updates choose "Install automatically", "Only mention" (the default) or "Don't check". Automatic installs wait until no restore or preparation is running, and announce the restart a minute ahead with a **Later** button (#195, #197, #198).
+- Photos and other files with an extra attribute block in the backup are also found by the fallback map used for backups without their own chunk table (#194).
+- When a step fails (connecting, loading a list, a job), the page shows the error at once instead of waiting a minute or spinning forever (#199).
+- The build and release machines use GitHub's current actions (Node 24) and a fixed Ubuntu version (#192).
+- **The app only answers its own window.** Requests from other web pages are refused, so a website cannot talk to the app running on your computer (#182, #184, #189).
+
 ## What's new in 1.1.0
 
 - **Faster restores on slower internet lines.** The app now downloads 32 pieces of the backup at a time instead of 8. On a home line to Google Drive that took restores from about 3.6 to 6.1 MB/s; on a fast line nothing changes (#172).
