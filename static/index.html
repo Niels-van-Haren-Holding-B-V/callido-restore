@@ -353,9 +353,10 @@ async function updFetch(check){try{const r=await fetch('/api/update'+(check?'?ch
 function updRender(st){UPD.st=st;const n=$('#updNote');if(!n)return;
   if(!st||!st.available){n.style.display='none'}else{n.style.display='inline-flex';$('#updText').textContent=`Version ${st.latest} is available`;
     $('#updMore').textContent=st.installable?"What's new · Update now":"What's new · Download"}
-  const s=$('#updState');if(s)s.textContent=!st?'':st.checking?'checking…':st.available?`version ${st.latest} is available`:`this is the newest version (${st.current})`;
+  const line=!st?'':st.checking?'checking…':st.available?`version ${st.latest} is available`:`this is the newest version (${st.current})`;
+  for(const id of ['#updState','#setUpdState']){const s=$(id);if(s)s.textContent=line}   // About and Settings both: Settings' "Check now" stayed on "checking…" for ever
   const a=$('#updAuto');if(a&&st)a.checked=!!st.check}
-async function updPoll(check){const st=await updFetch(check);if(st)updRender(st);clearTimeout(UPD.timer);UPD.timer=setTimeout(()=>updPoll(false),st&&st.checking?4000:3600*1000);return st}
+async function updPoll(check){const st=await updFetch(check);if(st)updRender(st);clearTimeout(UPD.timer);UPD.timer=setTimeout(()=>updPoll(false),st&&st.checking?1000:3600*1000);return st}
 function updOpen(){const st=UPD.st;if(!st)return;$('#updTitle').textContent=`Version ${st.latest} is available (you have ${st.current})`;
   $('#updNotes').innerHTML=st.notes?mdLite(st.notes):'No release notes.';$('#updJob').innerHTML='';
   const dl=$('#updDl');dl.href=st.url||'#';dl.style.display=st.url?'':'none';$('#updDlBtn').classList.toggle('primary',!st.installable);
