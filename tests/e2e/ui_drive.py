@@ -279,12 +279,15 @@ def upload_flow(b, base, notes, shot):
     while time.time() - t0 < 300:                       # until this restore job itself has ended (a slow runner takes minutes)
         if jid is None: jid = next((j["id"] for j in restores()), None)
         elif shots.api(base, "/api/job", id=jid).get("state") != "running": time.sleep(2.5); break     # the page polls every ~2 s
-        bars = b.js("[...document.querySelectorAll('#rsXfers .xf')].map(x=>x.innerText.replace(/\\n/g,' '))") or []
-        if len(bars) > most: most = len(bars); seen = bars; head = b.text("#rsXfers").split("\n")[0]
+        groups = b.js("""[...document.querySelectorAll('#rsXfers .xfgrid')].map(g=>({head:(g.previousElementSibling||{}).innerText||'',
+                         bars:[...g.querySelectorAll('.xf')].map(x=>x.innerText.replace(/\\n/g,' '))}))""") or []
+        up = next((g for g in groups if "Upload" in g["head"]), None)      # #214: "↓ Downloading …" and "↑ Uploading …" groups
+        bars = up["bars"] if up else []
+        if len(bars) > most: most = len(bars); seen = bars; head = up["head"]
         if len(bars) >= 2 and not getattr(b, "_shot", None): shot(b, "upload-bars"); b._shot = True
         time.sleep(0.3)
-    notes.append(f"upload: most bars at once {most}: {seen[:4]}")
-    notes.append(f"upload: line above the bars: {head if most else None!r}")
+    notes.append(f"upload: most upload bars at once {most}: {seen[:4]}")
+    notes.append(f"upload: heading of the upload group: {head if most else None!r}")
     left = b.js("document.querySelectorAll('#rsXfers .xf').length")
     notes.append(f"upload: bars after the restore: {left}; result {b.text('#rsProg')[-160:]!r}")
 

@@ -64,9 +64,9 @@ class UiScenarios(unittest.TestCase):
 
     def test_uploads_to_a_nas_show_a_bar_per_file(self):          # #201/#202: a WebDAV "NAS" via rclone, uploads held to 1 MB/s
         notes = self.drive("upload", "--upload", "--chunk-index", scale=10, bucket_kb=2048)
-        most = int(re.search(r"upload: most bars at once (\d+)", notes).group(1))
+        most = int(re.search(r"upload: most upload bars at once (\d+)", notes).group(1))
         self.assertGreaterEqual(most, 2, notes)
-        self.assertIn("files at the same time", notes)
+        self.assertIn("Uploading", re.search(r"upload: heading of the upload group: (.*)", notes).group(1), notes)
         self.assertIn("Done: 25 restored · 0 skipped · 0 errors", notes)
         self.assertIn("upload: bars after the restore: 0", notes)
 
