@@ -486,6 +486,17 @@ class H(BaseHTTPRequestHandler):
                 if err: return self._json({"error": err}, 400)
                 superseded = drop_saved_restores(body["src"], items, dest)       # the same restore saved earlier: this one replaces it
                 return self._json(start_job(lambda job: b.restore(items, dest, job, body.get("skip_meta", True)), "restore") | {"replaced": superseded})
+            if u.path == "/api/compare":   # a run's selection against a target folder, by name and size; reads only listings
+                b = backup_for(body["src"]); dest = os.path.expanduser((body.get("dest") or "").strip())
+                items = []
+                for it in body["items"]:
+                    it = dict(it); d = os.path.expanduser((it.get("dest") or "").strip()).rstrip("/")
+                    if d: it["dest"] = d
+                    else: it.pop("dest", None)
+                    items.append(it)
+                err = restore_target_error(b.src, items, dest, create=False)
+                if err: return self._json({"error": err}, 400)
+                return self._json(start_job(lambda job: b.compare_target(items, dest, job, body.get("skip_meta", True)), "compare"))
             if u.path == "/api/restore/resume":
                 jf = job_file(body.get("id"))
                 if jf is None: return self._json({"error": "not a job id"}, 400)
