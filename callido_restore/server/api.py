@@ -114,6 +114,39 @@ def request_refusal(host, origin, fetch_site, server_port, path=None, fetch_mode
     return None
 
 
+def update_busy(include_update=True):
+    """What an update must wait for: 'restore', 'preparation' or (``include_update``) 'update' while one runs, else None.
+    A paused restore does not count; it continues after the update."""
+    for j in list(JOBS.values()):
+        if j["state"] != "running": continue
+        if j["label"].startswith("restore"): return "restore"
+        if j["label"] == "build pool map": return "preparation"
+        if include_update and j["label"] == "update": return "update"
+    return None
+
+
+def auto_update_tick():
+    """With the automatic update setting: start the install job when a newer signed release is known and nothing runs; it
+    asks again before the app closes. Returns the job id or None. Called every few minutes by ``start_auto_update``."""
+    from callido_restore import update
+    try:
+        if not update.auto_due() or update_busy(): return None
+    except Exception as e:
+        update.log(f"automatic check skipped: {e}"); return None
+    update.log("starting the automatic install")
+    return start_job(lambda job: update.install(job, _exit_app, auto=True, may_install=lambda: update_busy(include_update=False) is None),
+                     "update")["id"]
+
+
+def start_auto_update(every=600, first=90):
+    """The background loop for the automatic setting (also runs the daily check through ``update.status``)."""
+    def loop():
+        time.sleep(first)
+        while True:
+            auto_update_tick(); time.sleep(every)
+    threading.Thread(target=loop, daemon=True, name="auto-update").start()
+
+
 class H(BaseHTTPRequestHandler):
     def log_message(self, *a): pass
     def _refused(self):
@@ -299,13 +332,18 @@ class H(BaseHTTPRequestHandler):
                 if busy: return self._json({"error": f"Wait until '{busy[0]['label']}' has finished: it may be reading from the cache."}, 409)
                 try: return self._json(cachedir.clear(body.get("part") or None))
                 except ValueError as e: return self._json({"error": str(e)}, 400)
-            if u.path == "/api/update/settings":                   # {check: bool}: the daily check on or off
+            if u.path == "/api/update/settings":                   # {mode: auto|mention|off}, or {check: bool, auto: bool} (the UI)
                 from callido_restore import update
+                if "auto" in body and "mode" not in body:
+                    body["mode"] = "off" if not body.get("check", True) else "auto" if body["auto"] else "mention"
+                if "mode" in body:
+                    try: return self._json(update.set_mode(body["mode"]))
+                    except ValueError as e: return self._json({"error": str(e)}, 400)
                 return self._json(update.set_check(bool(body.get("check", True))))
             if u.path == "/api/update/install":                    # a job: download, verify the signed checksum, install, restart
                 from callido_restore import update
-                busy = [j for j in JOBS.values() if j["state"] == "running" and (j["label"].startswith("restore") or j["label"] == "build pool map" or j["label"] == "update")]
-                if busy: return self._json({"error": f"Wait until the {'restore' if busy[0]['label'].startswith('restore') else 'preparation' if busy[0]['label'] == 'build pool map' else 'update'} has finished or is paused; a paused restore continues after the update."}, 409)
+                busy = update_busy()
+                if busy: return self._json({"error": f"Wait until the {busy} has finished or is paused; a paused restore continues after the update."}, 409)
                 st = update.status()
                 if not st["installable"]: return self._json({"error": ("This version cannot install updates itself: download the new version from the release page." if st["available"] else "No update to install: this is already the newest version.")}, 409)
                 return self._json(start_job(lambda job: update.install(job, _exit_app), "update"))
