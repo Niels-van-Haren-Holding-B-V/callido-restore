@@ -334,6 +334,7 @@ function pendingBar(el,text){if(el)el.innerHTML=progressHtml({state:'running',pr
 function toast(msg,o={}){const box=$('#toasts');const el=document.createElement('div');el.className='toast '+(o.kind||'');el.innerHTML=`<span>${esc(msg)}</span>`;
   if(o.actions&&o.actions.length){const a=document.createElement('span');a.className='acts';o.actions.forEach(([label,fn])=>{const b=document.createElement('button');b.className='small';b.textContent=label;b.onclick=()=>{fn();el.remove()};a.appendChild(b)});el.appendChild(a)}
   box.appendChild(el);while(box.children.length>4)box.firstChild.remove();setTimeout(()=>el.remove(),o.ms||(o.actions?6000:4000));return el}
+document.addEventListener('click',e=>{const a=e.target.closest('a.errJump');if(!a)return;e.preventDefault();const el=$('#rsErrors');if(el){el.scrollIntoView({behavior:'smooth',block:'start'});el.style.outline='2px solid var(--bad)';setTimeout(()=>el.style.outline='',1500)}});   // works across the bar's 0.8 s redraws
 const toastError=e=>toast(typeof e==='string'?e:(e&&e.message)||String(e),{kind:'bad'});
 const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const human=n=>{if(n==null)return'';const u=['B','KB','MB','GB','TB'];let i=0;while(n>=1024&&i<u.length-1){n/=1024;i++}return (i?n.toFixed(1):n)+' '+u[i]};
@@ -496,13 +497,14 @@ function progressHtml(job,rich,extra){const stoppedEarly=!!(job.result&&job.resu
   // note has its own small line under the bar, so the main line keeps its shape from poll to poll.
   const slots=[];
   if(dlDone)slots.push(String(job.label||'').startsWith('restore')?`${human(job.total_bytes)} · ${pct}%`:`${human(job.total_bytes)} downloaded · ${pct}%`);   // a restore from a local backup downloads nothingelse if(job.total_bytes)slots.push(`${human(job.done_bytes||0)} of ${human(job.total_bytes)} (${pct}%)`);else slots.push(`${pct}%`);
-  if(running&&Array.isArray(job.transfers)&&job.transfers.length){const r=job.transfers.filter(x=>x.kind==='upload').reduce((s,x)=>s+(x.rate||0),0);slots.push(r?human(r)+'/s':speedText(job.id))}   // parallel files: their own rates
+  if(running&&job.rates&&job.rates.upload!=null)slots.push(`${human(job.rates.upload)}/s to the target`);   // what really reaches the NAS (skipped files are not speed)
+  else if(running&&Array.isArray(job.transfers)&&job.transfers.length){const r=job.transfers.filter(x=>x.kind==='upload').reduce((s,x)=>s+(x.rate||0),0);slots.push(r?human(r)+'/s':speedText(job.id))}   // parallel files: their own rates
   else if(running&&job.total_bytes&&!dlDone)slots.push(speedText(job.id));
   if(running)slots.push(eta||'time left: estimating…');
   if(running)slots.push(`${sinceText(job.started)} elapsed`);
   if(running&&!(job.progress>0)&&!(job.done_bytes>0))
     return `<div class="progress"><div class="meta"><span>${esc(job.message||'Starting…')}</span><span class="eta">${esc(sinceText(job.started))} elapsed${extra?' ':''}${extra||''}</span></div><div class="prog indet"><i></i></div></div>`;
-  return `<div class="progress"><div class="meta"><span>${esc(job.message||'')}</span><span class="eta">${slots.map(esc).join(' · ')}${extra?' ':''}${extra||''}</span></div><div class="prog${stale!=null?' stale':''}"><i style="width:${pct}%"></i></div>${stale!=null?`<div class="meta muted note"><span>still working · last update ${stale<60?stale+' s':Math.floor(stale/60)+' min'} ago</span><span></span></div>`:''}${rich&&job.total_files!=null?`<div class="meta muted"><span>${(job.done_files||0).toLocaleString()} / ${(job.total_files||0).toLocaleString()} files</span><span>${(job.errors_total??(job.errors&&job.errors.length))?`<b style="color:var(--bad)">${(job.errors_total??job.errors.length).toLocaleString()} errors</b>`:''}</span></div>`:''}</div>`}
+  return `<div class="progress"><div class="meta"><span>${esc(job.message||'')}</span><span class="eta">${slots.map(esc).join(' · ')}${extra?' ':''}${extra||''}</span></div><div class="prog${stale!=null?' stale':''}"><i style="width:${pct}%"></i></div>${stale!=null?`<div class="meta muted note"><span>still working · last update ${stale<60?stale+' s':Math.floor(stale/60)+' min'} ago</span><span></span></div>`:''}${rich&&job.total_files!=null?`<div class="meta muted"><span>${(job.done_files||0).toLocaleString()} / ${(job.total_files||0).toLocaleString()} files</span><span>${(job.errors_total??(job.errors&&job.errors.length))?`<a href="#rsErrors" class="errJump" style="color:var(--bad);font-weight:600" title="Show the list of errors">${(job.errors_total??job.errors.length).toLocaleString()} errors ↓</a>`:''}</span></div>`:''}</div>`}
 const octal=m=>m==null?'':(m&0o7777).toString(8).padStart(4,'0');
 const tip=$('#tip');
 function showTip(e,html){tip.innerHTML=html;tip.style.display='block';tip.style.left=Math.min(e.clientX+14,innerWidth-380)+'px';tip.style.top=(e.clientY+14)+'px'}
@@ -964,7 +966,12 @@ const sleepOrWake=ms=>new Promise(res=>{let t=null;const done=()=>{clearTimeout(
 // an unknown job id ends the wait with an error result.
 async function waitJob(id,onMsg,ms=1000,onJob){for(let miss=0;;){let x=null;try{x=await api('/api/job',{id});miss=0}catch(e){if(/no such job/i.test(e.message)||++miss>60)return{state:'error',error:e.message}}
   if(x&&onJob)onJob(x);if(x&&x.state!=='running')return x;if(x&&onMsg)onMsg(x.message||'');await sleepOrWake(ms)}}
-function pollJob(id,el,done,rich,stopLabel,onTick){let stopping=false;const t=async()=>{if(!el.isConnected)return;let job;try{job=await api('/api/job',{id})}catch(e){if(/no such job/i.test(e.message)){el.innerHTML+=`<p style="color:var(--bad)">${esc(e.message)}</p>`;return}await sleepOrWake(2000);return t()}
+// A bar redrawn while the mouse button is down under it swallows the click (press and release land on two different elements),
+// so Stop and the error count felt dead or late: the redraw waits while a button is held inside the bar.
+function holdWhilePressed(el){if(el._holdWired)return;el._holdWired=true;el.addEventListener('pointerdown',()=>{el._held=true});
+  const up=()=>{if(el._held)setTimeout(()=>{el._held=false},50)};window.addEventListener('pointerup',up);window.addEventListener('pointercancel',up)}
+function pollJob(id,el,done,rich,stopLabel,onTick){let stopping=false;holdWhilePressed(el);const t=async()=>{if(!el.isConnected)return;
+  if(el._held){await new Promise(r=>setTimeout(r,100));return t()}let job;try{job=await api('/api/job',{id})}catch(e){if(/no such job/i.test(e.message)){el.innerHTML+=`<p style="color:var(--bad)">${esc(e.message)}</p>`;return}await sleepOrWake(2000);return t()}
   const stop=stopLabel&&job.state==='running'?`<button class="small" id="jobStop" ${stopping?'disabled':''}>${stopping?'Stopping…':stopLabel}</button>`:'';
   el.innerHTML=progressHtml(job,rich,stop);if(onTick)onTick(job);   // e.g. the restore's error list, shown while it runs
   const b=$('#jobStop');if(b)b.onclick=async()=>{stopping=true;b.disabled=true;b.textContent=stopLabel==='Pause'?'Pausing…':'Stopping…';if(stopLabel==='Pause')await prepPause(id);else await api('/api/job/cancel',{id})};
