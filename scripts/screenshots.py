@@ -145,7 +145,7 @@ def main():
             json.dump([{"id": "demo", "name": "Weekly backup (Google Drive)", "local": hbk, "remotes": None, "extra": []}], f)
         port = free_port(); base = f"http://127.0.0.1:{port}"
         srv = subprocess.Popen([a.python, "-m", "callido_restore", "--no-window", "--port", str(port)], cwd=ROOT,
-                               env={**os.environ, "HOME": home}, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                               env={**os.environ, "HOME": home, "HBK_NO_AUTOPREPARE": "1"}, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         try:
             for _ in range(50):
                 try: api(base, "/api/sources"); break
