@@ -49,17 +49,45 @@ class Helper(unittest.TestCase):
         with mock.patch.object(uw.oscompat, "WINDOWS", True), mock.patch.object(uw.sys, "frozen", False, create=True), \
              self.assertRaises(RuntimeError): uw.install_and_relaunch("x.msi", exit_app=lambda c: None)
 
+    def _fake_helper(self, write=True, exit_code=None):
+        """A Popen stand-in: writes "helper started" to the result file named in the script (like the real helper)."""
+        def popen(cmd, **kw):
+            if write:
+                import re
+                res = re.search(r"Add-Content -LiteralPath '([^']+)'", cmd[-1]).group(1).replace("''", "'")
+                Path(res).write_text("helper started 2026-11-01T20:00:00\n")
+            p = mock.Mock(pid=4242); p.poll.return_value = exit_code; p.returncode = exit_code; return p
+        return popen
+
     def test_install_starts_the_helper_then_exits(self):
         with tempfile.TemporaryDirectory() as d:
             msi = Path(d) / "1.2.3" / uw.MSI_NAME; msi.parent.mkdir(); msi.write_bytes(b"x"); exits = []
             with mock.patch.object(uw.oscompat, "WINDOWS", True), mock.patch.object(uw.sys, "frozen", True, create=True), \
-                 mock.patch.object(uw.subprocess, "Popen") as popen, mock.patch.object(uw.time, "sleep"):
+                 mock.patch.object(uw.paths, "CONF_DIR", Path(d)), \
+                 mock.patch.object(uw.subprocess, "Popen", side_effect=self._fake_helper()) as popen:
                 uw.install_and_relaunch(msi, exit_app=exits.append)
             self.assertEqual(exits, [0]); args, kw = popen.call_args
-            self.assertEqual(args[0][0], "powershell.exe"); self.assertTrue(kw["creationflags"] & uw.DETACHED_PROCESS)
+            self.assertEqual(args[0][0], "powershell.exe")
+            self.assertTrue(kw["creationflags"] & uw.CREATE_NO_WINDOW); self.assertFalse(kw["creationflags"] & uw.DETACHED_PROCESS)
             import hashlib
             self.assertIn(hashlib.sha256(b"x").hexdigest().upper(), args[0][-1])           # hashed right after the download's check
 
+    def test_app_stays_open_when_the_helper_does_not_start(self):   # v1.2.0 on Niels's PC: app quit, no result file, no restart
+        with tempfile.TemporaryDirectory() as d:
+            msi = Path(d) / "1.2.3" / uw.MSI_NAME; msi.parent.mkdir(); msi.write_bytes(b"x")
+            for fake, says in ((self._fake_helper(write=False), "did not start"), (self._fake_helper(write=False, exit_code=1), "ended at once")):
+                exits = []
+                with mock.patch.object(uw.oscompat, "WINDOWS", True), mock.patch.object(uw.sys, "frozen", True, create=True), \
+                     mock.patch.object(uw.paths, "CONF_DIR", Path(d)), mock.patch.object(uw, "HELPER_START_WAIT", 0.5), \
+                     mock.patch.object(uw.subprocess, "Popen", side_effect=fake):
+                    with self.assertRaises(uw.UpdateError) as cm: uw.start_helper(["powershell.exe", "x"], Path(d) / "r.result", wait=0.5)
+                self.assertIn(says, str(cm.exception)); self.assertIn("release page", str(cm.exception)); self.assertEqual(exits, [])
+
+    def test_a_stale_result_file_does_not_count(self):
+        with tempfile.TemporaryDirectory() as d:
+            res = Path(d) / "r.result"; res.write_text("helper started earlier\n")
+            with mock.patch.object(uw.subprocess, "Popen", side_effect=self._fake_helper(write=False)), self.assertRaises(uw.UpdateError):
+                uw.start_helper(["powershell.exe", "x"], res, wait=0.5)
 
 if __name__ == "__main__":
     unittest.main()
