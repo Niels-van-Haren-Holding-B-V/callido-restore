@@ -49,7 +49,8 @@ chunk table, `2026-10-31-1530-claude-hbk6.md` for the end-to-end tests).
   identical copy or unverified, and every chunk's md5 is checked on read. Errors are shown while a restore runs and go to `app.log`.
 * **Sources and targets.** Google Drive (own OAuth client id/secret), SMB (connect with live progress and plain error messages,
   a saved connection can be edited), any rclone remote, local folders. One persistent `rclone rcd` serves listings and downloads
-  (one backend per connection).
+  (one backend per connection); the bucket-index download, writes to a NAS target and connection setup still run as separate
+  rclone processes.
 * **Packaging.** `./build_app.sh` (PyInstaller + hdiutil, unsigned, not notarized) and `packaging/windows/build_msi.py`
   (WiX 5 MSI, unsigned). CI: `test.yml` (unit tests on ubuntu and windows), `build.yml` (two DMGs, release on `v*` tags),
   `build-windows.yml` (MSI, attached to the release).
