@@ -26,13 +26,19 @@ class NoReverseLookup(unittest.TestCase):
         finally:
             srv.server_close()
 
-    @unittest.skipIf(__import__("os").name == "nt", "SO_REUSEADDR lets a second bind succeed on Windows; the app's duplicate-launch check there is hbk-5's")
-    def test_a_port_in_use_still_raises(self):                       # app.main: OSError on bind -> _already_running(port)
+    def test_a_port_in_use_still_raises(self):                       # app.main: OSError on bind -> _already_running(port); Windows too
         first = LocalServer(("127.0.0.1", 0), H)
         try:
             with self.assertRaises(OSError): LocalServer(("127.0.0.1", first.server_address[1]), H)
         finally:
             first.server_close()
+
+    def test_the_port_can_be_bound_again_after_a_close(self):        # a start right after Quit
+        first = LocalServer(("127.0.0.1", 0), H); port = first.server_address[1]
+        threading.Thread(target=first.serve_forever, daemon=True).start()
+        with urlopen(f"http://127.0.0.1:{port}/api/sources", timeout=10) as r: r.read()       # a connection, so TIME_WAIT applies
+        first.shutdown(); first.server_close()
+        again = LocalServer(("127.0.0.1", port), H); again.server_close()
 
     def test_serves_the_api(self):
         with mock.patch.object(socket, "getfqdn", side_effect=RuntimeError("reverse lookup")):

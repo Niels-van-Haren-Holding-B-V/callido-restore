@@ -1,6 +1,6 @@
 """The JSON API and the static UI, served on 127.0.0.1 only (``LocalServer(("127.0.0.1", port), H)``, no reverse DNS lookup). Handlers call into
 ``sources`` and ``restore``; long operations go through ``restore.jobs``."""
-import json, os, re, socketserver, subprocess, sys, tempfile, threading, time, traceback, uuid
+import json, os, re, socket, socketserver, subprocess, sys, tempfile, threading, time, traceback, uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs, unquote
@@ -154,8 +154,13 @@ def start_auto_update(every=600, first=90):
 class LocalServer(ThreadingHTTPServer):
     """The app's HTTP server on 127.0.0.1. http.server's server_bind calls socket.getfqdn(host), a reverse DNS lookup of
     127.0.0.1 whose answer nothing uses; where reverse lookups hang (GitHub's macOS runners: 35 s, and Macs on some VPN or
-    company networks) the app took that long to open. This bind skips the lookup."""
+    company networks) the app took that long to open. This bind skips the lookup.
+    A port in use must make bind fail, so a second launch finds the running app (app.main: _already_running). On Windows
+    SO_REUSEADDR (which http.server turns on) lets a second socket take a port that is in use, so there the address is
+    used exclusively; macOS and Linux keep reuse, so a start right after Quit does not wait for TIME_WAIT."""
+    allow_reuse_address = os.name != "nt"
     def server_bind(self):
+        if os.name == "nt": self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
         socketserver.TCPServer.server_bind(self)
         host, port = self.server_address[:2]
         self.server_name, self.server_port = host, port
