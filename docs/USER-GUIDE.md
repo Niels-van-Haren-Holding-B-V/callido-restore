@@ -70,14 +70,16 @@ for `.partial`). Resuming the restore uploads the file again under its real name
 
 ## Settings
 
-**⚙ Settings** in the header gathers what used to be spread over the app:
-* **Connections**: every connection with its kind and address. *Edit* on a NAS changes its address, port, user or password and
-  tests it; the name stays, so backups and restore targets keep working (for example the NAS's local address at home and its
-  Tailscale address elsewhere). *Add your own key* on Google Drive opens the steps below.
-* **Backups**: the backups in the list; *Remove* forgets one here and never touches the backup itself.
-* **Updates**: the daily check on or off, and *Check for updates*.
-* **Download cache**: where it is, how much it holds, and *Clear the cache* (not while a restore or a preparation runs). Clearing
-  never undoes the file lists or the preparation; whatever is needed is downloaded again.
+**⚙** in the header opens the settings; nothing else on the screens moves (**+ Add backup** stays where it is):
+* **NAS**: *Edit* changes a NAS connection's address, port, user or password and tests it. The name stays, so backups and restore
+  targets keep working, for example when you switch between the NAS's local address at home and its Tailscale address elsewhere.
+* **Google Drive**: whether your own Google key is in use, *Add your own key* / *Replace key* (the steps below), and *Sign in
+  again* when Google asks for it; signing in again keeps your own key.
+* **Appearance**: follow the system, light or dark; remembered on this computer.
+* **Updates**: install updates automatically (never while a restore or a preparation runs), only mention them (the default: a
+  notice in the header, you choose when), or don't check; *Check now*.
+* **Download cache**: where it is, how much it holds, and *Clear the cache* (not while anything runs). Clearing never undoes the
+  file lists or the preparation; whatever is needed is downloaded again.
 
 ## Google Drive: a key of your own (optional, recommended)
 

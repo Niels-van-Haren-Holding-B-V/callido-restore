@@ -5,18 +5,25 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="icon" id="favicon" type="image/png">
 <title>Callido Restore</title>
+<script>try{const th=localStorage.getItem('theme');if(th==='light'||th==='dark')document.documentElement.dataset.theme=th}catch(e){}</script>
 <style>
-:root{color-scheme:light dark;
+:root{color-scheme:light dark;}:root[data-theme=light]{color-scheme:light}:root[data-theme=dark]{color-scheme:dark}
+:root{
   --bg:#f5f5f7;--panel:#ffffff;--panel2:#fafafa;--ink:#1d1d1f;--muted:#6e6e73;--faint:#aeaeb2;--line:#e5e5ea;--line2:#d2d2d7;
   --accent:#6a4bc9;--accent-ink:#5a3db4;--accent-soft:#efeafd;--coral:#ef6b5b;--accent2:#b55aa6;--grad:linear-gradient(135deg,#6a4bc9 0%,#b55aa6 55%,#ef6b5b 100%);
   --new:#4f7df3;--mod:#e8a33c;--rem:#e5534b;--ok:#2e9e5b;--warn:#c47a15;--bad:#d1382c;--chip:#f0f0f3;--sel:#efeafd;
   --shadow:0 1px 2px rgba(0,0,0,.04),0 6px 20px rgba(0,0,0,.06);--shadow-lg:0 2px 8px rgba(0,0,0,.08),0 24px 60px rgba(0,0,0,.18);
   --r:12px;--r-sm:8px;--mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,monospace}
-@media (prefers-color-scheme:dark){:root{
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]){
   --bg:#1c1c1e;--panel:#2c2c2e;--panel2:#242426;--ink:#f5f5f7;--muted:#a1a1a6;--faint:#636366;--line:#3a3a3c;--line2:#48484a;
   --accent:#a98cf5;--accent-ink:#b8a0ff;--accent-soft:#3a2f62;--coral:#f58474;--accent2:#d08ad0;
   --new:#7ea0ff;--mod:#f2b95a;--rem:#f0776b;--ok:#4fc27a;--warn:#e0a24a;--bad:#f0665b;--chip:#3a3a3c;--sel:#3a2f62;
   --shadow:0 1px 2px rgba(0,0,0,.3),0 6px 20px rgba(0,0,0,.25);--shadow-lg:0 2px 8px rgba(0,0,0,.4),0 24px 60px rgba(0,0,0,.5)}}
+:root[data-theme=dark]{
+  --bg:#1c1c1e;--panel:#2c2c2e;--panel2:#242426;--ink:#f5f5f7;--muted:#a1a1a6;--faint:#636366;--line:#3a3a3c;--line2:#48484a;
+  --accent:#a98cf5;--accent-ink:#b8a0ff;--accent-soft:#3a2f62;--coral:#f58474;--accent2:#d08ad0;
+  --new:#7ea0ff;--mod:#f2b95a;--rem:#f0776b;--ok:#4fc27a;--warn:#e0a24a;--bad:#f0665b;--chip:#3a3a3c;--sel:#3a2f62;
+  --shadow:0 1px 2px rgba(0,0,0,.3),0 6px 20px rgba(0,0,0,.25);--shadow-lg:0 2px 8px rgba(0,0,0,.4),0 24px 60px rgba(0,0,0,.5)}
 *{box-sizing:border-box}
 html{-webkit-text-size-adjust:100%}
 body{margin:0;font:14px/1.5 -apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--ink);-webkit-font-smoothing:antialiased}
@@ -76,9 +83,11 @@ tr.f:hover{background:var(--chip);cursor:pointer}td.num{text-align:right;white-s
 td.path{word-break:break-all}td.path b{font-weight:600}
 .flag{display:inline-block;font-size:10.5px;padding:0 6px;border-radius:5px;margin-right:3px;background:var(--chip);color:var(--muted);line-height:17px}
 .flag.exec,.flag.script,.flag.ransom,.flag.ssh,.flag.double-ext,.flag.timestomp{background:#fde4e1;color:#9a2a20}
-@media (prefers-color-scheme:dark){.flag.exec,.flag.script,.flag.ransom,.flag.ssh,.flag.double-ext,.flag.timestomp{background:#4c2320;color:#f6b0a8}}
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]) .flag.exec,:root:not([data-theme=light]) .flag.script,:root:not([data-theme=light]) .flag.ransom,:root:not([data-theme=light]) .flag.ssh,:root:not([data-theme=light]) .flag.double-ext,:root:not([data-theme=light]) .flag.timestomp{background:#4c2320;color:#f6b0a8}}
+:root[data-theme=dark] .flag.exec,:root[data-theme=dark] .flag.script,:root[data-theme=dark] .flag.ransom,:root[data-theme=dark] .flag.ssh,:root[data-theme=dark] .flag.double-ext,:root[data-theme=dark] .flag.timestomp{background:#4c2320;color:#f6b0a8}
 .flag.changed,.flag.N{background:#e1e9fe;color:#2a4fb8}.flag.M{background:#fdf0d8;color:#8a5a0c}.flag.D{background:#fde4e1;color:#9a2a20}
-@media (prefers-color-scheme:dark){.flag.changed,.flag.N{background:#27375f;color:#a9c0ff}.flag.M{background:#4a3a1c;color:#f2cf8a}.flag.D{background:#4c2320;color:#f6b0a8}}
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]) .flag.changed,:root:not([data-theme=light]) .flag.N{background:#27375f;color:#a9c0ff}:root:not([data-theme=light]) .flag.M{background:#4a3a1c;color:#f2cf8a}:root:not([data-theme=light]) .flag.D{background:#4c2320;color:#f6b0a8}}
+:root[data-theme=dark] .flag.changed,:root[data-theme=dark] .flag.N{background:#27375f;color:#a9c0ff}:root[data-theme=dark] .flag.M{background:#4a3a1c;color:#f2cf8a}:root[data-theme=dark] .flag.D{background:#4c2320;color:#f6b0a8}
 .tablewrap{max-height:60vh;overflow:auto;border:1px solid var(--line);border-radius:10px;background:var(--panel)}
 /* charts */
 svg text{fill:var(--muted);font-size:10px}
@@ -160,7 +169,7 @@ footer.madeBy img{width:18px;height:18px;border-radius:5px;vertical-align:middle
   <span id="jobs" class="row" style="flex:1 1 0;min-width:0;justify-content:flex-end;gap:14px;overflow:hidden;white-space:nowrap"></span>
   <span id="updNote" style="display:none;flex-shrink:0;align-items:center;gap:6px;font-size:12px;padding:3px 4px 3px 10px;border-radius:999px;background:color-mix(in srgb,var(--accent,#7c3aed) 12%,transparent)"><span id="updText"></span><button id="updMore" class="small ghost">What's new</button></span>
   <button id="basketBtn" class="small ghost" title="What you have selected for the restore">Restore selection · 0 items</button>
-  <button id="settingsBtn" class="small ghost" title="Settings: connections, backups, updates, cache" aria-label="Settings">⚙ Settings</button>
+  <button id="settingsBtn" class="small ghost" title="Settings" aria-label="Settings" style="font-size:15px;padding:2px 8px">⚙</button>
   <button id="about" class="small ghost" title="Version and bundled tools">About</button>
   <button id="quit" class="small ghost" title="Stop the app">Quit</button>
 </header>
@@ -169,14 +178,19 @@ footer.madeBy img{width:18px;height:18px;border-radius:5px;vertical-align:middle
   <p class="help" id="updHow" style="margin:8px 0 0"></p><div id="updJob" style="margin-top:8px"></div>
   <div class="row" style="justify-content:flex-end;gap:8px;margin-top:10px"><button id="updLater" class="small ghost">Later</button><a id="updDl" target="_blank" rel="noopener" style="display:none"><button class="small" id="updDlBtn" tabindex="-1">Download</button></a><button id="updGo" class="small primary" style="display:none">Install now</button></div></dialog>
 <dialog id="dlgSettings" style="max-width:760px;width:92vw"><h3 style="margin-top:0">Settings</h3>
-  <section class="setSec"><h4>Connections</h4><p class="help" style="margin:0 0 6px">Where the app reads backups from and restores to. Changing a NAS address (for example its local address at home and its Tailscale address elsewhere) keeps the connection's name, so your backups and targets stay as they are.</p><div id="setConns"><span class="spin"></span> Loading…</div></section>
-  <section class="setSec"><h4>Backups</h4><p class="help" style="margin:0 0 6px">Removing a backup from this list only forgets it here; the backup itself is never touched.</p><div id="setSources"></div></section>
-  <section class="setSec"><h4>Updates</h4><label><input type="checkbox" id="updAuto"> Check for updates automatically (once a day)</label>
-    <div class="row" style="margin-top:6px"><button id="updCheck" class="small">Check for updates</button><span id="updState"></span></div></section>
+  <section class="setSec"><h4>NAS</h4><p class="help" style="margin:0 0 6px">Changing the address (for example the NAS's local address at home and its Tailscale address elsewhere) keeps the connection's name, so your backups and restore targets stay as they are.</p><div id="setNas"><span class="spin"></span> Loading…</div></section>
+  <section class="setSec"><h4>Google Drive</h4><p class="help" style="margin:0 0 6px">A Google key of your own makes downloads from Drive faster (see the user guide). Sign in again when Google asks for it or the sign-in has expired.</p><div id="setDrive"></div></section>
+  <section class="setSec"><h4>Appearance</h4><label><input type="radio" name="setTheme" value="system"> Follow the system</label> &nbsp; <label><input type="radio" name="setTheme" value="light"> Light</label> &nbsp; <label><input type="radio" name="setTheme" value="dark"> Dark</label></section>
+  <section class="setSec"><h4>Updates</h4>
+    <label><input type="radio" name="setUpd" value="auto" id="setUpdAuto"> Install updates automatically <span class="help" id="setUpdAutoNote">(when no restore or preparation runs)</span></label><br>
+    <label><input type="radio" name="setUpd" value="mention"> Only mention them: a notice in the header, you choose when to install</label><br>
+    <label><input type="radio" name="setUpd" value="off"> Don't check for updates</label>
+    <div class="row" style="margin-top:6px"><button id="setUpdCheck" class="small">Check now</button><span id="setUpdState" class="help"></span></div></section>
   <section class="setSec"><h4>Download cache</h4><div id="setCache"><span class="spin"></span> Loading…</div></section>
   <div class="row" style="justify-content:flex-end;margin-top:10px"><button id="settingsClose" class="small">Close</button></div></dialog>
 <dialog id="dlgAbout" style="max-width:520px"><h3 style="margin-top:0">Callido Restore</h3><div id="aboutBody" class="help">loading…</div>
-  <p class="help" style="margin:8px 0 0">Connections, backups, updates and the cache are under <b>⚙ Settings</b>.</p>
+  <div id="aboutUpd" class="help" style="border-top:1px solid var(--line,#ddd);padding-top:8px;margin-top:8px"><label><input type="checkbox" id="updAuto"> Check for updates automatically (once a day)</label>
+    <div class="row" style="margin-top:6px"><button id="updCheck" class="small">Check for updates</button><span id="updState"></span></div></div>
   <div class="row" style="justify-content:flex-end;margin-top:10px"><button id="aboutClose" class="small">Close</button></div></dialog>
 <main>
   <ol id="flow" class="flow" aria-label="Steps"><li data-s="1"><i>1</i>Backup</li><li data-s="2"><i>2</i>Backup run</li><li data-s="3"><i>3</i>Files</li><li data-s="4"><i>4</i>Restore</li></ol><div id="toasts"></div>
@@ -359,16 +373,21 @@ $('#updAuto').onchange=async()=>{const a=$('#updAuto');try{updRender(await post(
 $('#updCheck').onclick=async()=>{$('#updState').innerHTML='<span class="spin"></span> checking…';const st=await updPoll(true);if(!st)$('#updState').textContent='updates are not available in this version'};
 // ---------- settings (⚙): connections, backups, updates, cache in one place
 const SET={editing:null};
-async function setConns(){const el=$('#setConns');let r;try{r=await api('/api/remotes')}catch(e){el.textContent='Could not list the connections: '+e.message;return}
-  const kind=n=>({drive:'Google Drive',smb:'NAS (SMB)',sftp:'SFTP',webdav:'WebDAV',ftp:'FTP',local:'local'})[r.types[n]]||r.types[n]||'';
-  if(!r.remotes.length){el.innerHTML='<p class="help">No connections yet. <b>+ Add backup</b> or the restore step create one.</p>';return}
-  el.innerHTML=`<table>${r.remotes.map(n=>{const nm=n.replace(/:$/,''),s=r.smb[n]||r.smb[nm]||null,own=r.keys[n]??r.keys[nm];
-    const detail=s?`${esc(s.host||'?')}${s.port&&String(s.port)!=='445'?':'+esc(s.port):''} · user ${esc(s.user||'?')}`:r.types[n]==='drive'?(own?'your own Google key':'shared rclone key (slower)'):'';
-    const act=s?`<button class="small" data-edit="${esc(nm)}">Edit</button>`:r.types[n]==='drive'?`<button class="small" data-key="${esc(nm)}">${own?'Change key':'Add your own key'}</button>`:'';
-    return `<tr><td class="mono">${esc(nm)}</td><td>${esc(kind(n))}</td><td class="help">${detail}</td><td style="text-align:right">${act}</td></tr>`+
-      (SET.editing===nm&&s?`<tr><td colspan="4"><div class="row" style="flex-wrap:wrap;gap:8px"><label class="f">NAS address <input id="setHost" value="${esc(s.host||'')}" style="width:180px" placeholder="192.0.2.10 or nas"></label><label class="f">port <input id="setPort" value="${esc(s.port||'445')}" style="width:60px"></label><label class="f">user <input id="setUser" value="${esc(s.user||'')}" style="width:120px"></label><label class="f">password <input id="setPass" type="password" placeholder="unchanged" style="width:140px"></label><button class="small primary" id="setSave">Save and test</button><button class="small ghost" id="setCancel">Cancel</button></div><div id="setMsg" class="status" style="margin-top:4px"></div></td></tr>`:'')}).join('')}</table>`;
-  $$('#setConns [data-edit]').forEach(b=>b.onclick=()=>{SET.editing=b.dataset.edit;setConns()});
-  $$('#setConns [data-key]').forEach(b=>b.onclick=()=>{$('#dlgSettings').close();openAddBackup({remote:b.dataset.key+':',key:true})});
+async function setConns(){const nas=$('#setNas'),drv=$('#setDrive');let r;try{r=await api('/api/remotes')}catch(e){nas.textContent='Could not list the connections: '+e.message;return}
+  const names=r.remotes.map(n=>n.replace(/:$/,'')),smb=names.filter(n=>r.types[n+':']==='smb'),drive=names.filter(n=>r.types[n+':']==='drive');
+  nas.innerHTML=smb.length?`<table>${smb.map(nm=>{const s=r.smb[nm+':']||{};
+    return `<tr><td class="mono">${esc(nm)}</td><td class="help">${esc(s.host||'?')}${s.port&&String(s.port)!=='445'?':'+esc(s.port):''} · user ${esc(s.user||'?')}</td><td style="text-align:right"><button class="small" data-edit="${esc(nm)}">Edit</button></td></tr>`+
+      (SET.editing===nm?`<tr><td colspan="3"><div class="row" style="flex-wrap:wrap;gap:8px"><label class="f">NAS address <input id="setHost" value="${esc(s.host||'')}" style="width:180px" placeholder="192.0.2.10 or nas"></label><label class="f">port <input id="setPort" value="${esc(s.port||'445')}" style="width:60px"></label><label class="f">user <input id="setUser" value="${esc(s.user||'')}" style="width:120px"></label><label class="f">password <input id="setPass" type="password" placeholder="unchanged" style="width:140px"></label><button class="small primary" id="setSave">Save and test</button><button class="small ghost" id="setCancel">Cancel</button></div><div id="setMsg" class="status" style="margin-top:4px"></div></td></tr>`:'')}).join('')}</table>`:
+    '<p class="help">No NAS connection yet. The restore step connects one ("Prepare the NAS and connect").</p>';
+  drv.innerHTML=drive.length?`<table>${drive.map(nm=>{const own=r.keys[nm+':'];
+    return `<tr><td class="mono">${esc(nm)}</td><td class="help">${own?'your own Google key is in use':'the shared rclone key (slower)'}</td><td style="text-align:right;white-space:nowrap"><button class="small" data-key="${esc(nm)}">${own?'Replace key':'Add your own key'}</button> <button class="small ghost" data-signin="${esc(nm)}">Sign in again</button></td></tr><tr><td colspan="3"><div class="status" data-msg="${esc(nm)}"></div></td></tr>`}).join('')}</table>`:
+    '<p class="help">No Google Drive connection yet; <b>+ Add backup</b> creates one.</p>';
+  $$('#setNas [data-edit]').forEach(b=>b.onclick=()=>{SET.editing=SET.editing===b.dataset.edit?null:b.dataset.edit;setConns()});
+  $$('#setDrive [data-key]').forEach(b=>b.onclick=()=>{$('#dlgSettings').close();openAddBackup({remote:b.dataset.key+':',key:true})});
+  $$('#setDrive [data-signin]').forEach(b=>b.onclick=async()=>{const nm=b.dataset.signin,msg=$(`#setDrive [data-msg="${CSS.escape(nm)}"]`);b.disabled=true;
+    msg.innerHTML='<span class="spin"></span> Signing in…';
+    try{const j=await post('/api/rclone/connect',{kind:'drive',name:nm,keep_key:true});const job=await waitJob(j.id,m=>{msg.innerHTML='<span class="spin"></span> '+esc(m||'Signing in…')});
+      msg.textContent=job.state==='error'?'Not signed in: '+job.error:`Signed in again: ${nm}.`;}catch(e){msg.textContent='Not signed in: '+e.message}b.disabled=false});
   const c=$('#setCancel');if(c)c.onclick=()=>{SET.editing=null;setConns()};
   const sv=$('#setSave');if(sv)sv.onclick=async()=>{const host=$('#setHost').value.trim(),port=$('#setPort').value.trim(),msg=$('#setMsg');
     if(!host){msg.textContent='Fill in the NAS address.';return}
@@ -379,18 +398,21 @@ async function setConns(){const el=$('#setConns');let r;try{r=await api('/api/re
       const sh=(job.result&&job.result.shares)||[];SET.editing=null;await setConns();
       toast(`Saved ${q.name}: connected, ${sh.length} share${sh.length===1?'':'s'}.`,{kind:'ok'});if(S.tab==='restore')tabRestore()}
     catch(e){msg.textContent='Not saved: '+e.message;sv.disabled=false}}}
-async function setSources(){const el=$('#setSources');let list=[];try{list=await api('/api/sources')}catch(e){el.textContent=e.message;return}
-  if(!list.length){el.innerHTML='<p class="help">No backups added yet.</p>';return}
-  el.innerHTML=`<table>${list.map(s=>`<tr><td>${esc(s.name)}${s.id===S.src?' <span class="help">(open now)</span>':''}</td><td class="mono help">${esc(s.remote?(s.remote+(s.local||'')):(s.local||''))}</td><td style="text-align:right"><button class="small ghost" data-rm="${esc(s.id)}">Remove</button></td></tr>`).join('')}</table>`;
-  $$('#setSources [data-rm]').forEach(b=>b.onclick=async()=>{if(!b.dataset.sure){b.dataset.sure='1';b.textContent='Remove from the list?';b.classList.add('primary');return}
-    b.disabled=true;try{await post('/api/sources/delete',{id:b.dataset.rm});toast('Removed from the list; the backup itself is untouched.');await setSources();if(b.dataset.rm===S.src)location.reload();else if(typeof loadSources==='function')loadSources()}catch(e){toastError(e);b.disabled=false}})}
+function themeSet(v){try{if(v==='system')localStorage.removeItem('theme');else localStorage.setItem('theme',v)}catch(e){}
+  if(v==='system')delete document.documentElement.dataset.theme;else document.documentElement.dataset.theme=v}
+function setTheme(){const v=document.documentElement.dataset.theme||'system';$$('input[name=setTheme]').forEach(i=>{i.checked=i.value===v;i.onchange=()=>themeSet(i.value)})}
+function setUpdates(){const st=UPD.st;const mode=!st?'mention':!st.check?'off':st.auto?'auto':'mention';
+  const autoOk=!!st&&'auto' in st;$('#setUpdAuto').disabled=!autoOk;$('#setUpdAutoNote').textContent=autoOk?'(when no restore or preparation runs)':'(not available in this version yet)';
+  $$('input[name=setUpd]').forEach(i=>{i.checked=i.value===mode;i.onchange=async()=>{try{updRender(await post('/api/update/settings',{check:i.value!=='off',auto:i.value==='auto'}));setUpdates()}catch(e){toastError(e);setUpdates()}}});
+  $('#setUpdState').textContent=$('#updState')?$('#updState').textContent:''}
 async function setCache(){const el=$('#setCache');let c;try{c=await api('/api/cache')}catch(e){el.textContent='Could not read the cache: '+e.message;return}
   el.innerHTML=`<p class="help" style="margin:0 0 6px">Downloaded backup data the app keeps so it does not fetch it twice. Everything here is downloaded again when needed; clearing it never undoes the file lists or the preparation.</p>
     <div class="row" style="gap:8px"><span>In use: <b>${human(c.bytes)}</b></span><span class="mono help">${esc(c.path)}</span><button class="small" id="setClear" ${c.bytes?'':'disabled'}>Clear the cache</button><span id="setCacheMsg" class="status"></span></div>
     ${c.parts.filter(p=>p.bytes).length>1?`<table style="margin-top:4px">${c.parts.filter(p=>p.bytes).map(p=>`<tr><td>${esc(p.label)}</td><td class="num">${human(p.bytes)}</td></tr>`).join('')}</table>`:''}`;
   const b=$('#setClear');b.onclick=async()=>{b.disabled=true;$('#setCacheMsg').innerHTML='<span class="spin"></span> Clearing…';
     try{const r=await post('/api/cache/clear',{});toast(`Cleared ${human(r.freed)}${r.left?` (${human(r.left)} still in use)`:''}.`,{kind:'ok'});setCache()}catch(e){$('#setCacheMsg').textContent=e.message;b.disabled=false}}}
-function openSettings(){$('#dlgSettings').showModal();SET.editing=null;setConns();setSources();setCache();updPoll(false)}
+function openSettings(){$('#dlgSettings').showModal();SET.editing=null;setConns();setTheme();setCache();updPoll(false).then(setUpdates)}
+$('#setUpdCheck').onclick=async()=>{$('#setUpdState').innerHTML='<span class="spin"></span> checking…';const st=await updPoll(true);setUpdates();if(!st)$('#setUpdState').textContent='updates are not available in this version'};
 $('#settingsBtn').onclick=openSettings;$('#settingsClose').onclick=()=>$('#dlgSettings').close();
 updPoll(false);
 $('#quit').onclick=async()=>{if(!confirm('Stop Callido Restore? Running restore jobs are saved and can be resumed later.'))return;try{await api('/api/quit')}catch(e){}document.body.innerHTML='<p style="padding:30px;font-family:sans-serif">Callido Restore has stopped. You can close this tab.</p>'};

@@ -337,6 +337,8 @@ class H(BaseHTTPRequestHandler):
                     return self._json({"error": f"“{name}” is a {existing} connection, not {want}. Pick that connection, or use a new name."}, 400)
                 if kind == "drive":
                     cid, csec = (body.get("client_id") or "").strip(), (body.get("client_secret") or "").strip()
+                    if not cid and body.get("keep_key"):            # sign in again with the connection's own key (Settings), never drop it
+                        cid, csec = rclone.drive_key(name)
                     if cid and google.client_id_error(cid): return self._json({"error": google.client_id_error(cid)}, 400)
                     if cid and not csec: return self._json({"error": "the client secret is missing"}, 400)
                     args = None
