@@ -988,11 +988,11 @@ async function tabRestore(){const el=$('#tab-restore');
     const el=$('#rsErrors');if(!el)return;el.innerHTML=`<h4 style="font-size:12px;color:var(--muted)">Errors (${n.toLocaleString()})${job.state==='running'?' so far':''}</h4><div class="tablewrap"><table>${job.errors.slice(0,500).map(e=>`<tr><td class="mono">${esc(e.path)}</td><td title="${esc(e.error)}">${esc(plainError(e.error))}</td></tr>`).join('')}</table></div>`};
   if(restoreRun)watchRestore(restoreRun.id);                                 // a restore that runs already keeps its bar after a re-render
   else if(S.queued&&mapOk)startQueued();
-  $('#rsGo').onclick=async()=>{if(S.queued){S.queued=null;toast('The queued restore was cancelled.');tabRestore();return}
+  $('#rsGo').onclick=async()=>{const fromCmp=S.cmpGo;S.cmpGo=false;   // started from the comparison (which has just shown what is there): no second question; cleared at once so an early return never carries it over
+    if(S.queued){S.queued=null;toast('The queued restore was cancelled.');tabRestore();return}
     const its=items();const dest=oneMode()?oneDest():'';
     if(!oneMode()&&its.some(x=>!x.dest)){toast('Choose a target for every shared folder in step 3.',{kind:'warn'});return}
     const chk=await checkAll();if(chk.bad){toast(chk.reason||'Fix the marked targets in step 3 first.',{kind:'warn',ms:8000});return}
-    const fromCmp=S.cmpGo;S.cmpGo=false;   // started from the comparison, which has just shown what is there: no second question
     if(chk.nonEmpty&&!fromCmp&&!confirm(`${chk.nonEmpty} target folder${chk.nonEmpty>1?'s':''} already ${chk.nonEmpty>1?'have':'has'} files. Files already there are skipped and nothing is deleted. Continue?`))return;
     const skip=$('#rsMeta').checked;
     if(!prep.complete&&!(await prepState()).complete){S.queued={src:S.src,sel:JSON.stringify(S.basket),its,dest,skip};toast('Queued: the restore starts by itself when the backup is prepared.');tabRestore();return}
