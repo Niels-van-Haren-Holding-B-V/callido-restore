@@ -468,6 +468,19 @@ def remote_info(cache=False):
     return {n + ":": _info(c or {}) for n, c in dump.items()}
 
 
+def drive_key(name):
+    """(client_id, client_secret) of a Google Drive connection's own key, or ("", "") when it has none. Server side only: used to
+    sign in again with the same key (Settings → Google Drive → Sign in again); never sent to the UI."""
+    name = name.rstrip(":")
+    if DAEMON.available():
+        try: cfg = DAEMON.rc("config/get", name=name) or {}
+        except (DaemonGone, RcloneError): cfg = None
+        if cfg is not None: return cfg.get("client_id", ""), cfg.get("client_secret", "")
+    try: cfg = (json.loads(_run(["config", "dump"]) or "{}") or {}).get(name) or {}
+    except ValueError: cfg = {}
+    return cfg.get("client_id", ""), cfg.get("client_secret", "")
+
+
 def _info(cfg):
     """What the UI may know about one connection: its type, whether it has an own Google key, and for an SMB connection the
     address and user it connects with (for the Edit form). Never a password, secret or token."""

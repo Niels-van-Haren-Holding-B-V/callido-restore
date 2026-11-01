@@ -177,6 +177,9 @@ class H(BaseHTTPRequestHandler):
                 try: line = rclone.version() or "rclone not found"
                 except (rclone.RcloneError, OSError): line = "rclone not found"
                 return self._json({"name": APP_NAME, "tagline": TAGLINE, "notice": NOTICE, "version": VERSION, "rclone": line, "rclone_path": RCLONE, "config": str(paths.CONF_DIR)})
+            if u.path == "/api/cache":                             # Settings: where the download cache is and what it holds
+                from callido_restore import cachedir
+                return self._json(cachedir.usage({sid: s.name for sid, s in SOURCES.items()}))
             if u.path == "/api/quit":
                 threading.Timer(0.3, _exit_app).start(); return self._json({"ok": True})
             if u.path == "/api/ls":   # directory picker helper
@@ -323,6 +326,12 @@ class H(BaseHTTPRequestHandler):
         u = urlparse(self.path); n = int(self.headers.get("Content-Length") or 0)
         body = json.loads(self.rfile.read(n) or b"{}")
         try:
+            if u.path == "/api/cache/clear":                       # {part?}: a backup's id or "updates"; all when absent
+                from callido_restore import cachedir
+                busy = [j for j in JOBS.values() if j["state"] == "running"]
+                if busy: return self._json({"error": f"Wait until '{busy[0]['label']}' has finished: it may be reading from the cache."}, 409)
+                try: return self._json(cachedir.clear(body.get("part") or None))
+                except ValueError as e: return self._json({"error": str(e)}, 400)
             if u.path == "/api/update/settings":                   # {mode: auto|mention|off}, or {check: bool, auto: bool} (the UI)
                 from callido_restore import update
                 if "auto" in body and "mode" not in body:
@@ -366,6 +375,8 @@ class H(BaseHTTPRequestHandler):
                     return self._json({"error": f"“{name}” is a {existing} connection, not {want}. Pick that connection, or use a new name."}, 400)
                 if kind == "drive":
                     cid, csec = (body.get("client_id") or "").strip(), (body.get("client_secret") or "").strip()
+                    if not cid and body.get("keep_key"):            # sign in again with the connection's own key (Settings), never drop it
+                        cid, csec = rclone.drive_key(name)
                     if cid and google.client_id_error(cid): return self._json({"error": google.client_id_error(cid)}, 400)
                     if cid and not csec: return self._json({"error": "the client secret is missing"}, 400)
                     args = None
@@ -444,6 +455,8 @@ class H(BaseHTTPRequestHandler):
             if u.path == "/api/restore/resume":
                 jf = job_file(body.get("id"))
                 if jf is None: return self._json({"error": "not a job id"}, 400)
+                running = [j for j in JOBS.values() if j["state"] == "running" and (j["id"] == body.get("id") or j["label"].startswith("restore"))]
+                if running: return self._json({"error": "A restore is already running: stop it first, or wait until it has finished."}, 409)
                 if not jf.is_file(): return self._json({"error": "no such saved job"}, 404)
                 d = json.loads(jf.read_text()); b = backup_for(d["src"]); dest = d.get("dest") or ""
                 err = restore_target_error(b.src, d["items"], dest, create=False)     # source check again, roots still there
