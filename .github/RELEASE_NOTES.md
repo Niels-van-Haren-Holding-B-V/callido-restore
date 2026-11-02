@@ -1,5 +1,9 @@
 **Callido Restore** restores files from a Synology Hyper Backup (`.hbk`) without Hyper Backup or a working NAS. It reads the backup's own metadata, shows every backup run on a timeline, and restores the folders you pick to a NAS share or a local folder. Files already at the destination are never overwritten or deleted, and the backup source is only read.
 
+## What's new in 1.2.6
+
+- **Windows: a shared folder whose name ends in a period (like "… B.V.") loads**, and is listed once instead of three times (#232).
+
 ## What's new in 1.2.5
 
 - **Restores no longer stall on large videos.** With files of a few hundred MB or more, the restore spent hours at full CPU without downloading or uploading anything, and its progress stopped being saved ("last update … min ago"). It now plans those files in moments (#230).

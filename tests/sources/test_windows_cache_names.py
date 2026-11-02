@@ -20,7 +20,7 @@ class Names(unittest.TestCase):
             self.assertFalse(w.endswith((".", " ")) and n not in ("plain.txt",), w)
         self.assertEqual(local_name("Holding B.V.", windows=True), "Holding B.V．")
         self.assertEqual(local_name("Holding B.V", windows=True), "Holding B.V")             # a different share stays different
-        self.assertEqual(local_rel("Config/@Share/Holding B.V./2333.db.2334", windows=True), "Config/@Share/Holding B.V．/2333.db.2334")
+        self.assertEqual(local_rel("Config/@Share/Holding B.V./1201.db.1202", windows=True), "Config/@Share/Holding B.V．/1201.db.1202")
 
     def test_posix_unchanged(self):
         self.assertEqual(local_name("Holding B.V.", windows=False), "Holding B.V.")
@@ -43,18 +43,18 @@ class Fetch(unittest.TestCase):
         self.s = Source("s1", "s1", self.local, ["gdrive:b.hbk"])
 
     def test_fetch_lands_under_the_windows_name_and_is_found(self):
-        rel = "Config/@Share/Holding B.V./2333.db.2334"
+        rel = "Config/@Share/Holding B.V./1201.db.1202"
         got = self.s.ensure(rel)
-        self.assertEqual(got, self.s.cache_dir / "Config/@Share/Holding B.V．/2333.db.2334"); self.assertEqual(got.read_bytes(), b"db")
+        self.assertEqual(got, self.s.cache_dir / "Config/@Share/Holding B.V．/1201.db.1202"); self.assertEqual(got.read_bytes(), b"db")
         self.assertEqual(self.dsts[0].parent, self.s.cache_dir / ".fetch")            # rclone wrote a plain name, outside the share folders
         self.assertRegex(self.dsts[0].name, r"^[0-9a-f]{32}\.part$")
         self.assertEqual(self.s.locate(rel), got); self.assertEqual(self.s.ensure(rel), got); self.assertEqual(len(self.dsts), 1)
-        self.assertEqual(sorted(self.s.listdir("Config/@Share/Holding B.V.")), ["2333.db.2334"])
+        self.assertEqual(sorted(self.s.listdir("Config/@Share/Holding B.V.")), ["1201.db.1202"])
 
     def test_no_extra_shares_from_the_cache(self):
         share = self.s.cache_dir / "Config/@Share"
         (share / "Holding B.V").mkdir(parents=True)                                   # the empty folder the old fetch left behind
-        (share / "Holding B.V．").mkdir(); (share / "Holding B.V．" / "2333.db.2334").write_bytes(b"db")
+        (share / "Holding B.V．").mkdir(); (share / "Holding B.V．" / "1201.db.1202").write_bytes(b"db")
         self.assertEqual(sorted(self.s.listdir("Config/@Share")), ["Holding B.V.", "homes"])
         self.assertNotIn(".fetch", self.s.listdir(""))
 
