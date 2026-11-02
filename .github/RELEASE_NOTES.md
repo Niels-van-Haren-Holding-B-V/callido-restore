@@ -4,6 +4,7 @@
 
 - **Large videos download faster, and you can see it.** Past the first few parts of a big file, the restore fetched the rest one piece at a time and did not report them: the download list said "waiting" and the download speed showed 0 while data was coming in. Those parts now download many at once, with their progress and speed shown (#236).
 - **Windows: a file or folder name with a backslash** is handled the way rclone handles it (#235).
+- **"Check for updates" works again on the Mac.** Every check failed because the app could not find the Mac's root certificates, and the page kept showing "checking…" instead of the reason. It now uses the Mac's own certificate list, and a failed check says why (#238). This update has to be installed by hand once; after that, updates are found again.
 
 ## What's new in 1.2.6
 
