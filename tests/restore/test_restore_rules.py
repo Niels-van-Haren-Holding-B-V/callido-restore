@@ -7,7 +7,7 @@
 * The restore loop itself (local and remote target) leaves an existing file with a different size or mtime unchanged and
   counts it as skipped.
 """
-import inspect, json, os, shutil, subprocess, tempfile, unittest
+import inspect, json, os, shutil, subprocess, tempfile, time, unittest
 from pathlib import Path
 from unittest import mock
 
@@ -468,6 +468,34 @@ class RestoreCache(unittest.TestCase):
         self.assertTrue(keep.exists())                                    # not a bucket: never touched
         self.assertEqual(sorted(q.name for q in (cache / "Pool").rglob("*.bucket.*")), [])  # emptied at the end
         self.assertLess(max(sizes), 100 * 60)                             # bounded: never all 100 buckets at once (look-ahead 40 + limit)
+
+class LookAheadLargeFiles(unittest.TestCase):
+    def test_a_window_of_large_videos_is_planned_in_moments_with_each_bucket_once(self):
+        # A window of large videos, each with hundreds of thousands of chunks in a few thousand buckets: the look-ahead tested
+        # "bucket already listed?" on a list and appended every chunk's bucket, so it spent hours at 100 % CPU on one window
+        # with no download and no upload (a restore of a folder with GoPro and drone videos)
+        d = Path(tempfile.mkdtemp()); self.addCleanup(shutil.rmtree, d, True)
+        cache = d / "cache"; dest = d / "dest"; (dest / "share").mkdir(parents=True)
+        p = mock.patch.object(paths, "JOBS_DIR", d / "jobs"); p.start(); self.addCleanup(p.stop)
+        fetched = []
+        class Src:
+            id = "bigvideos"; cache_dir = cache
+            def in_cache(self, q): return Path(q).resolve().is_relative_to(cache.resolve())
+            def locate(self, rel): return (cache / rel) if (cache / rel).is_file() else None
+            def listdir(self, rel): return {}
+            def ensure(self, rel, progress=None, **kw):
+                q = cache / rel; q.parent.mkdir(parents=True, exist_ok=True); q.write_bytes(b"b"); fetched.append(rel); return q
+        CH = 200_000                                                      # chunks per file, 64 per bucket
+        class Pool(_FakePool):
+            def plan(self, off): return [(off * 10_000 + c // 64, c % 64) for c in range(CH)], None
+            def bucket_name(self, b, kind): return f"Pool/0/{b // 2048}/{b % 2048}.bucket.1"
+        b = _Backup.__new__(_Backup); b.src = Src(); b._fake_pool = Pool(str(dest))
+        b.restore_plan = lambda items, skip_meta=True: [{"share": "share", "path": f"v{n}.mp4", "off": n, "size": 4, "mtime": 0} for n in range(6)]
+        t0 = time.monotonic()
+        res = b.restore([{"share": "share", "ver": 1, "path": "", "is_dir": True}], str(dest), {"id": "tv", "label": "restore", "started": 0.0})
+        self.assertEqual(res["restored"], 6)
+        self.assertLess(time.monotonic() - t0, 30)                        # the list version: far beyond this (quadratic in chunks)
+        self.assertEqual(len(fetched), len(set(fetched)))                 # each bucket fetched once
 
 class DownloadBars(unittest.TestCase):
     def test_files_waiting_for_their_data_get_a_download_bar_by_file_name(self):
