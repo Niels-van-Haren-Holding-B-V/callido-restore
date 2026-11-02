@@ -91,7 +91,10 @@ JOBS_DIR = CONF_DIR / "jobs"
 # A backup name a Windows folder or file cannot hold. Windows drops a trailing period or space without an error ("B.V." becomes
 # "B.V") and refuses control characters and <>:"|?*; rclone's local backend writes those the way below. The app cache and a local
 # copy of a backup use the same names as rclone on Windows, so a file rclone fetched is found under the name the app looks for.
-_WIN_MAP = {**{c: chr(0x2400 + c) for c in range(32)}, **{ord(c): chr(ord(c) + 0xFEE0) for c in '<>:"|?*'}}
+# Not covered (a missed match only means a fetch, never a wrong file): a name that already holds one of the substitutes (rclone
+# quotes it with "‛", read back here as the plain character), and a copy made by Explorer over SMB, which uses the SFM
+# private-use substitutes (U+F001...) instead.
+_WIN_MAP = {**{c: chr(0x2400 + c) for c in range(32)}, **{ord(c): chr(ord(c) + 0xFEE0) for c in '<>:"|?*\\'}}
 _WIN_UNMAP = {ord(v): chr(k) for k, v in _WIN_MAP.items()}
 
 
