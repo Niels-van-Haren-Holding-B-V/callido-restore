@@ -527,6 +527,46 @@ class DownloadBars(unittest.TestCase):
         self.assertIn({"kind": "bucket", "name": "1.bucket.1", "done": 50, "total": 100, "rate": 25}, seen[0])
         self.assertEqual(job["transfers"], [])                                    # cleared at the end
 
+    def test_a_large_file_beyond_the_look_ahead_is_downloaded_with_progress(self):
+        # one video in 200 buckets, more than the look-ahead queues (64): the extractor used to fetch the rest itself, one at a
+        # time and unreported, so the page showed "waiting" bars and 0 B/s while it downloaded. Now every bucket goes through
+        # the restore's fetch (progress reported, file bar with bytes), each once, with the next ones in flight
+        d = Path(tempfile.mkdtemp()); self.addCleanup(shutil.rmtree, d, True)
+        cache = d / "cache"; dest = d / "dest"; (dest / "share").mkdir(parents=True)
+        p = mock.patch.object(paths, "JOBS_DIR", d / "jobs"); p.start(); self.addCleanup(p.stop)
+        N = 200; fetched = []; unreported = []; seen = {}; job = {"id": "tl", "label": "restore", "started": 0.0}
+        import threading; act = threading.Lock(); live = [0, 0]                   # downloads running now, the most at once
+        class Src:
+            id = "large"; cache_dir = cache
+            def in_cache(self, q): return True
+            def locate(self, rel): return (cache / rel) if (cache / rel).is_file() else None
+            def listdir(self, rel): return {f"{b}.bucket.1": {"size": 100} for b in range(N)}
+            def ensure(self, rel, progress=None, **kw):
+                if progress is None: unreported.append(rel)
+                else:
+                    progress(50, 25)
+                    if rel.endswith("/150.bucket.1"): seen["at150"] = [dict(t) for t in job["transfers"]]
+                with act: live[0] += 1; live[1] = max(live[1], live[0])
+                time.sleep(0.005)
+                with act: live[0] -= 1
+                fetched.append(rel); q = cache / rel; q.parent.mkdir(parents=True, exist_ok=True); q.write_bytes(b"b" * 100); return q
+        class Pool(_FakePool):
+            def plan(self, off): return [(b, 0) for b in range(N)], None
+            def bucket_name(self, b, kind): return f"Pool/0/0/{b}.bucket.1"
+            def extract(self2, off, out, opener=None, **kw):              # reads its buckets in order, like PoolReader.extract
+                for b in range(N): opener(b)
+                return super().extract(off, out, **kw)
+        b = _Backup.__new__(_Backup); b.src = Src(); b._fake_pool = Pool(str(dest))
+        b.restore_plan = lambda items, skip_meta=True: [{"share": "share", "path": "big.mp4", "off": 0, "size": 4, "mtime": 0}]
+        res = b.restore([{"share": "share", "ver": 1, "path": "", "is_dir": True}], str(dest), job)
+        self.assertEqual(res["restored"], 1)
+        self.assertEqual(unreported, [])
+        self.assertEqual(len(fetched), N); self.assertEqual(len(set(fetched)), N)
+        bar = [t for t in seen["at150"] if t["kind"] == "download" and t["name"] == "share/big.mp4"]
+        self.assertEqual(len(bar), 1); self.assertGreater(bar[0]["done"], 0)
+        self.assertEqual(job["moved"]["download"], N * 100)                      # every bucket counted in the download bytes
+        self.assertGreater(live[1], 4)                                            # in parallel, not one at a time
+
 class AlreadyThereNeedsNoDownload(unittest.TestCase):
     def test_files_at_the_target_are_skipped_without_fetching_their_data(self):
         # the check of what is restored already must not wait for downloads (the user: "can't that be quicker by a listing"): a file already at the target

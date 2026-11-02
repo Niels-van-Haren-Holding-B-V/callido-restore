@@ -636,18 +636,20 @@ class PoolReader:
             except KeyError:
                 if not self.v1: raise            # partial v2 map: fall back to the v1 map for this file
         return [self.locate1(g) for g in rec["ids"]], rec
-    def read_chunk(self, b, i, fh_cache, job=None):
+    def read_chunk(self, b, i, fh_cache, job=None, opener=None):
+        """chunk i of bucket b. ``opener(b)`` -> local path of the bucket's data file, when the caller fetches buckets its own way
+        (the restore: with progress, and the next ones queued); default Source.ensure, one at a time and unreported"""
         clen, off, ulen, h = self.entries(b, job)[i]
         fh = fh_cache.get(b)
         if fh is None:
-            fh = fh_cache[b] = open(self.bucket_data_path(b, job), "rb")
+            fh = fh_cache[b] = open(opener(b) if opener else self.bucket_data_path(b, job), "rb")
         fh.seek(off); raw = fh.read(clen)
         data = lz4_decompress(raw, ulen)
         if hashlib.md5(data).digest() != h[:16]: raise ValueError(f"md5 mismatch bucket {b} entry {i}")
         return data
-    def extract(self, off, out_path, size=None, mtime=None, job=None, fh_cache=None, cancelled=None):
+    def extract(self, off, out_path, size=None, mtime=None, job=None, fh_cache=None, cancelled=None, opener=None):
         """Write one pooled file to out_path. Returns bytes written. ``cancelled()`` true (Stop) ends it between two chunks
-        (Stopped), so a large file does not hold up a Stop until it is complete."""
+        (Stopped), so a large file does not hold up a Stop until it is complete. ``opener``: see read_chunk."""
         own = fh_cache is None
         if own: fh_cache = {}
         try:
@@ -663,7 +665,7 @@ class PoolReader:
                 with open(tmp, "wb") as f:
                     for b, i in locs:
                         if cancelled and cancelled(): raise Stopped("stopped")
-                        d = self.read_chunk(b, i, fh_cache, job); f.write(d); n += len(d)
+                        d = self.read_chunk(b, i, fh_cache, job, opener); f.write(d); n += len(d)
             if size is not None and n != size: raise ValueError(f"size mismatch: wrote {n}, expected {size}")
             os.replace(tmp, out_path)
             if mtime: os.utime(out_path, (mtime, mtime))

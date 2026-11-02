@@ -801,6 +801,7 @@ class Backup:
                 with dl_lock:
                     if bk not in downloaded:
                         sz = path.stat().st_size; downloaded[bk] = (path, sz); dl_size[0] += sz
+            return path
         def evict(limit=None):
             """delete cached buckets, oldest first, until the cache holds at most limit bytes; buckets the next files need or
             that are being downloaded stay (limit 0 at the end of a restore: everything goes)"""
@@ -839,6 +840,31 @@ class Backup:
             with lock: win[:] = w; publish_tx()                            # the file bars know the window before any fetch reports
             for bk in order:
                 if bk not in pending and len(pending) < prof.prefetch: pending[bk] = ex.submit(fetch, bk)
+        reading = {"order": [], "pos": {}, "ready": {}}        # the buckets of the file being extracted, in the order it reads them; fetched ones
+        def bucket_path(bk):
+            """pool.extract's way to a bucket: through fetch() (a bar, counted in the download speed), with the next buckets of the
+            same file kept in flight (prof.prefetch). The look-ahead above covers a file's first buckets only; without this a large
+            video's other buckets (thousands) came one at a time inside extract, unreported: "waiting" bars and 0 B/s"""
+            for k in [k for k, fut in pending.items() if fut.done() and not fut.exception()]:
+                reading["ready"][k] = pending.pop(k).result()                # done: off the in-flight count, its path kept
+            if bk in reading["ready"]: path = reading["ready"].pop(bk)
+            else: path = None
+            p = reading["pos"].get(bk)
+            if p is not None:
+                for nb in reading["order"][p + 1:]:
+                    if len(pending) >= prof.prefetch: break
+                    if nb not in pending and nb not in got: pending[nb] = ex.submit(fetch, nb)
+            if path is None:
+                fut = pending.get(bk)
+                if fut is None or (fut.done() and fut.exception()):     # a failed prefetch is tried once more here (extract retries too)
+                    fut = pending[bk] = ex.submit(fetch, bk)
+                while not fut.done():
+                    if stop_now(): raise Stopped("stopped")
+                    concurrent.futures.wait([fut], timeout=0.5)
+                path = fut.result()
+            with dl_lock:
+                if bk in downloaded: downloaded.move_to_end(bk)
+            return path
         # Uploads to a remote target run UPLOAD_WORKERS at a time (each rclone process opens its own SMB session; one file at a
         # time spent most of its time on that set-up). Reading the backup stays in this thread (the reader's file handles are
         # not shared). The saved position is the oldest file whose upload has not finished, so a resume never skips one.
@@ -970,10 +996,12 @@ class Backup:
             (a Stop during the check resumes with the check)"""
             if not again:
                 with lock: cur[0] = i; publish_tx()
-            there = is_there(f)
+            there = is_there(f); reading.update(order=[], pos={}, ready={})
             if f["off"] is not None and f["off"] >= 0 and not there:       # a file already at the target needs no backup data
                 try:
-                    for bk, _ in pool.plan(f["off"])[0]:
+                    order = list(dict.fromkeys(bk for bk, _ in pool.plan(f["off"])[0]))
+                    reading["order"] = order; reading["pos"] = {bk: k for k, bk in enumerate(order)}
+                    for bk in order:
                         fut = pending.get(bk)
                         while fut and not fut.done():                          # a large file waits for many buckets: Stop must not
                             if job.get("cancel"): raise Stopped("stopped")    # wait for all of them
@@ -998,7 +1026,7 @@ class Backup:
                 # the NAS gets the file under its own name (rel) from the upload below
                 out = os.path.join(stage[root], str(i)); os.makedirs(stage[root], exist_ok=True); ok = False
                 for attempt in range(3):
-                    try: pool.extract(f["off"], out, size=f["size"], mtime=f["mtime"], job=None, fh_cache=fh_cache, cancelled=stop_now); ok = True; break
+                    try: pool.extract(f["off"], out, size=f["size"], mtime=f["mtime"], job=None, fh_cache=fh_cache, cancelled=stop_now, opener=bucket_path); ok = True; break
                     except Stopped: raise
                     except Exception as e:
                         if attempt < 2 and not isinstance(e, KeyError):  # KeyError = chunk not in pool map: retrying will not help
@@ -1016,7 +1044,7 @@ class Backup:
                 if remote_dest or os.path.lexists(out):   # (remote files not yet at the target went to the upload threads above)
                     already_there(f, existing[root].get(rel) if remote_dest else local_size(out)); break
                 tmp = os.path.join(stage[root], rel); os.makedirs(os.path.dirname(tmp), exist_ok=True)
-                pool.extract(f["off"], tmp, size=f["size"], mtime=f["mtime"], job=None, fh_cache=fh_cache, cancelled=stop_now)
+                pool.extract(f["off"], tmp, size=f["size"], mtime=f["mtime"], job=None, fh_cache=fh_cache, cancelled=stop_now, opener=bucket_path)
                 if not place_file(tmp, out):     # appeared since the check above: kept
                     already_there(f, local_size(out)); break
                 restored(f); break
