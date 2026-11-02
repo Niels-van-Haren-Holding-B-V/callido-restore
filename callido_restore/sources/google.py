@@ -1,6 +1,7 @@
 """Google OAuth client checks that need no sign-in. A wrong client id or secret otherwise only shows up as an error page in the
 browser halfway through the consent flow."""
 import json, re, urllib.error, urllib.parse, urllib.request
+from callido_restore import tls
 
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 CLIENT_ID = re.compile(r"^[0-9]+-[a-z0-9]+\.apps\.googleusercontent\.com$")
@@ -20,7 +21,7 @@ def client_check(client_id, client_secret, timeout=10):
     data = urllib.parse.urlencode({"client_id": client_id, "client_secret": client_secret, "grant_type": "refresh_token", "refresh_token": "x"}).encode()
     req = urllib.request.Request(TOKEN_URL, data=data, method="POST", headers={"Content-Type": "application/x-www-form-urlencoded"})
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as r: r.read()
+        with urllib.request.urlopen(req, timeout=timeout, context=tls.context()) as r: r.read()
         return ""
     except urllib.error.HTTPError as e:
         try: err = json.loads(e.read() or b"{}").get("error", "")

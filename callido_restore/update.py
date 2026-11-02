@@ -8,7 +8,7 @@ Security model (docs/HANDOVER.md, "Release signing"):
   file's SHA-256 matches its line in the signed list, the release tag is strictly newer than ``about.VERSION`` (no downgrade or
   replay of an old signed release), and the file name is this platform's. Anything else stops the update and deletes the
   download. Without a public key in the app, updates are only offered as a link to the release page.
-* HTTPS only, certificates verified (Python's default context), to ``api.github.com`` for the release and to GitHub's
+* HTTPS only, certificates verified (``tls.context()``: Python's defaults plus the macOS system roots), to ``api.github.com`` for the release and to GitHub's
   release-asset hosts for the files; the repository is ``about.REPO``.
 
 ``status()`` answers at once from a state file and checks in the background at most once a day; network errors are silent. The
@@ -21,7 +21,7 @@ a helper that waits for this process to end; when the bundle is not writable or 
 for a manual drag. On Windows it hands over to ``update_windows`` (msiexec upgrade in place, then restart).
 """
 import hashlib, json, os, platform, re, shutil, subprocess, sys, tempfile, threading, time, urllib.error, urllib.parse, urllib.request
-from callido_restore import ed25519, paths
+from callido_restore import ed25519, paths, tls
 from callido_restore.about import REPO, UPDATE_PUBLIC_KEYS, VERSION
 
 API = f"https://api.github.com/repos/{REPO}/releases/latest"
@@ -130,7 +130,7 @@ def _check_url(url, hosts):
 
 def _open(url, hosts, timeout):
     _check_url(url, hosts)
-    r = urllib.request.urlopen(urllib.request.Request(url, headers={**UA, "Accept": "application/octet-stream"}), timeout=timeout)
+    r = urllib.request.urlopen(urllib.request.Request(url, headers={**UA, "Accept": "application/octet-stream"}), timeout=timeout, context=tls.context())
     _check_url(r.geturl(), hosts)                                     # redirects must stay on GitHub too
     return r
 
@@ -139,7 +139,7 @@ def latest_release(timeout=10):
     """The latest published release as GitHub returns it (tag_name, name, body, html_url, assets[name, browser_download_url])."""
     _check_url(API, {"api.github.com"})
     req = urllib.request.Request(API, headers={**UA, "Accept": "application/vnd.github+json"})
-    with urllib.request.urlopen(req, timeout=timeout) as r: return json.loads(r.read())
+    with urllib.request.urlopen(req, timeout=timeout, context=tls.context()) as r: return json.loads(r.read())
 
 
 def _asset(rel, name):
