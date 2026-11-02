@@ -20,6 +20,7 @@ class Names(unittest.TestCase):
             self.assertFalse(w.endswith((".", " ")) and n not in ("plain.txt",), w)
         self.assertEqual(local_name("Holding B.V.", windows=True), "Holding B.V．")
         self.assertEqual(local_name("Holding B.V", windows=True), "Holding B.V")             # a different share stays different
+        self.assertEqual(local_name("back\\slash", windows=True), "back\uff3cslash")             # rclone: ＼ on Windows
         self.assertEqual(local_rel("Config/@Share/Holding B.V./2333.db.2334", windows=True), "Config/@Share/Holding B.V．/2333.db.2334")
 
     def test_posix_unchanged(self):
