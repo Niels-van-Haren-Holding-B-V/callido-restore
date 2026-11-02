@@ -4,7 +4,7 @@ import fnmatch, json, os, re, subprocess, threading, time, uuid
 from pathlib import Path
 from callido_restore import paths
 from callido_restore.core.hbkmeta import rev_of
-from callido_restore.paths import RCLONE, WINDOWS, is_local_abs, is_remote_path, ui_path  # noqa: F401  (is_remote_path is re-exported)
+from callido_restore.paths import RCLONE, WINDOWS, backup_name, is_local_abs, is_remote_path, local_rel, ui_path  # noqa: F401  (is_remote_path is re-exported)
 from callido_restore.sources import rclone
 
 class Source:
@@ -26,6 +26,10 @@ class Source:
         # Fetched metadata and pool objects land here, not in self.local / extra.
         self.cache_dir = paths.CACHE_DIR / sid
         self.cache_dir.mkdir(parents=True, exist_ok=True)
+        for left in (self.cache_dir / ".fetch").glob("*.part"):   # a fetch cut off by a quit: the app's own temporary file
+            try:
+                if time.time() - left.stat().st_mtime > 3600: left.unlink()
+            except OSError: pass
 
     def read_roots(self):
         """Configured folders. Read-only: the backup, extra roots, or a user-made mirror."""
@@ -40,11 +44,11 @@ class Source:
 
     def locate(self, rel):
         """Existing readable file, or None. Does not download or modify anything."""
-        cached = self.cache_dir / rel
+        cached = self.cache_dir / local_rel(rel)            # Windows: "B.V." is held as "B.V．" (paths.local_name)
         if cached.is_file():
             return cached
         for root in self.read_roots():
-            q = root / rel
+            q = root / local_rel(rel)
             if q.is_file():
                 return q
         return None
@@ -56,7 +60,7 @@ class Source:
         except (TypeError, ValueError):
             return False
         for root in (self.cache_dir, *self.read_roots()):
-            p = root / rel
+            p = root / local_rel(rel)
             try:
                 if p.is_file() and p.stat().st_size == expected:
                     return True
@@ -159,15 +163,17 @@ class Source:
             if rel in self._list and not refresh: return self._list[rel]
         ents = {}
         for root in [self.cache_dir, *self.read_roots()]:          # a file fetched into the app cache is local too
-            p = root / rel if rel else root
+            p = root / local_rel(rel) if rel else root
             if not p.is_dir(): continue
             try: it = list(p.iterdir())
             except OSError: continue
             for e in it:
                 try: st = e.stat()
                 except OSError: continue
-                if e.name in ents: continue
-                ents[e.name] = {"size": st.st_size if e.is_file() else 0, "dir": e.is_dir(), "local": True, "remote": False}
+                name = backup_name(e.name)
+                if name in ents: continue
+                if root == self.cache_dir and e.is_dir() and (not any(e.iterdir()) or (not rel and e.name == ".fetch")): continue   # an empty cache folder holds nothing, .fetch is the app's own
+                ents[name] = {"size": st.st_size if e.is_file() else 0, "dir": e.is_dir(), "local": True, "remote": False}
         for name, e in self._remote_entries(rel, refresh).items():
             ent = ents.setdefault(name, {"size": e["size"], "dir": e["dir"], "local": False, "remote": False})
             ent["remote"] = True
@@ -202,9 +208,12 @@ class Source:
             return found
         if not self.remotes:
             raise FileNotFoundError(f"not in local copy: {rel}")
-        dest = self.cache_dir / rel
+        dest = self.cache_dir / local_rel(rel)
         dest.parent.mkdir(parents=True, exist_ok=True)
-        tmp = dest.with_name(dest.name + ".part"); errs = []
+        # rclone writes a plain temporary name outside the backup's folders: rclone itself maps names on Windows (a folder "B.V."
+        # became "B.V．" for rclone but "B.V" for Python, so the fetched file was never found and the fetch retried until it failed)
+        fetch_dir = self.cache_dir / ".fetch"; fetch_dir.mkdir(exist_ok=True)
+        tmp = fetch_dir / f"{uuid.uuid4().hex}.part"; errs = []
         for attempt in range(4):                       # outer retry: 4 rounds over all remotes, growing pauses
             for remote in self.remotes:
                 if job: job["message"] = f"fetching {rel} from {remote.split(':')[0]}" + (f" (retry {attempt})" if attempt else "")
@@ -218,7 +227,7 @@ class Source:
                 except rclone.RcloneError as e:
                     ok = False; errs.append(f"{remote}: {str(e)[-160:]}")
                 if ok:
-                    tmp.rename(dest)
+                    os.replace(tmp, dest)
                     parent = Path(rel).parent.as_posix().strip("/")          # listing keys use "/" (Windows: not "\\")
                     with self._lock: self._list.pop("" if parent == "." else parent, None)   # that listing is stale now (root key is "")
                     return dest
