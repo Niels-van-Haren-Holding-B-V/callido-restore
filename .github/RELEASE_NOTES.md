@@ -1,5 +1,12 @@
 **Callido Restore** restores files from a Synology Hyper Backup (`.hbk`) without Hyper Backup or a working NAS. It reads the backup's own metadata, shows every backup run on a timeline, and restores the folders you pick to a NAS share or a local folder. Files already at the destination are never overwritten or deleted, and the backup source is only read.
 
+## What's new in 1.2.5
+
+- **Stop during a large file, once more.** If you pressed Stop at the exact moment the last part of a big file had been downloaded, the app could still read that whole file before pausing. It now pauses right there (#228).
+- **Compare names a target folder that does not exist yet.** "Compare with the targets" now says which target folder is not there yet, instead of only counting all its files as missing (#227).
+
+On Windows, if you still have 1.2.0 or 1.2.1, install this version once by hand (`CallidoRestore-x64.msi` below); from 1.2.2 on, updates install themselves.
+
 ## What's new in 1.2.4
 
 - **Stop works at once, also in the middle of a large file.** Stop used to wait until a big video had been downloaded and unpacked completely; now it ends that file's downloads and its read right away, and the restore pauses at that file. Resume starts it again (#225).
