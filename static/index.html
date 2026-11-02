@@ -360,7 +360,8 @@ function mdLite(s){return esc(s||'').split(/\n{2,}/).filter(b=>b.trim()).map(b=>
   if(L.every(l=>/^\s*[*-] /.test(l)))return '<ul style="margin:4px 0;padding-left:20px">'+L.map(l=>'<li>'+inl(l.replace(/^\s*[*-] /,''))+'</li>').join('')+'</ul>';
   const m=/^(#{1,4}) (.*)$/.exec(L[0]);if(m&&L.length===1)return `<p style="margin:8px 0 4px"><b>${inl(m[2])}</b></p>`;
   return '<p style="margin:4px 0">'+L.map(inl).join('<br>')+'</p>'}).join('')}
-async function updFetch(check){try{const r=await fetch('/api/update'+(check?'?check=1':''));if(!r.ok)return null;const j=await r.json();return j&&!j.error?j:null}catch(e){return null}}
+// a status always has current; its error is why the last check failed (shown), not a failed request
+async function updFetch(check){try{const r=await fetch('/api/update'+(check?'?check=1':''));if(!r.ok)return null;const j=await r.json();return j&&j.current?j:null}catch(e){return null}}
 function updRender(st){UPD.st=st;const n=$('#updNote');if(!n)return;
   if(!st||!st.available){n.style.display='none'}else{n.style.display='inline-flex';$('#updText').textContent=`Version ${st.latest} is available`;
     $('#updMore').textContent=st.installable?"What's new · Update now":"What's new · Download"}

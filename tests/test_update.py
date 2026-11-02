@@ -51,7 +51,7 @@ class Fixture(unittest.TestCase):
         self.rel = {"tag_name": tag, "name": tag, "body": "notes", "html_url": base,
                     "assets": [{"name": u.rsplit("/", 1)[1], "browser_download_url": u, "size": len(b)} for u, b in self.files.items()]}
 
-    def fake_open(self, req, timeout=None):
+    def fake_open(self, req, timeout=None, context=None):
         url = req.full_url if hasattr(req, "full_url") else req
         if url not in self.files: raise urllib.error.URLError("not found")
         return Resp(self.files[url], "https://objects.githubusercontent.com/x")
@@ -137,7 +137,7 @@ class UpdateTests(Fixture):
         with self.assertRaises(RuntimeError): update._check_url("https://example.com/x", update.ASSET_HOSTS)
         rel = dict(self.rel, assets=[{"name": "SHA256SUMS", "browser_download_url": "https://github.com/someone-else/repo/releases/download/v9/SHA256SUMS"}])
         with self.assertRaises(RuntimeError): update._asset(rel, "SHA256SUMS")
-        redirect = lambda req, timeout=None: Resp(b"x", "https://evil.example/x")
+        redirect = lambda req, timeout=None, context=None: Resp(b"x", "https://evil.example/x")
         with mock.patch.object(update.urllib.request, "urlopen", side_effect=redirect), self.assertRaises(RuntimeError) as cm:
             update.download_verified(self.rel, "CallidoRestore-arm64.dmg")
         self.assertIn("not a GitHub release host", str(cm.exception))
