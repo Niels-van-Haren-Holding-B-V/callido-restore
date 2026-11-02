@@ -825,13 +825,16 @@ class Backup:
             root, rel = file_target(f, items, dest)
             return rel in existing[root] if is_remote_path(root) else os.path.lexists(os.path.join(root, rel))
         def prefetch_from(i):
-            w = []; order = []
+            # order: each bucket once, in the order the files need them. A large video has hundreds of thousands of chunks in a few
+            # thousand buckets: a set for the "seen" test (a list scan here, with every chunk's bucket appended, took hours per window)
+            w = []; order = []; seen = set()
             for j, f in enumerate(files[i:i + 40], i):
                 if f["off"] is None or f["off"] < 0 or is_there(f): continue
                 try: locs, _ = pool.plan(f["off"])
                 except Exception: continue
                 bks = sorted({bk for bk, _ in locs}); w.append((j, f, bks))
-                order += [bk for bk, _ in locs if bk not in order]
+                for bk, _ in locs:
+                    if bk not in seen: seen.add(bk); order.append(bk)
             with dl_lock: upcoming.clear(); upcoming.update(order)         # what eviction keeps
             with lock: win[:] = w; publish_tx()                            # the file bars know the window before any fetch reports
             for bk in order:
