@@ -2,6 +2,7 @@
 
 ## What's new in 1.2.5
 
+- **Restores no longer stall on large videos.** With files of a few hundred MB or more, the restore spent hours at full CPU without downloading or uploading anything, and its progress stopped being saved ("last update … min ago"). It now plans those files in moments (#230).
 - **Stop during a large file, once more.** If you pressed Stop at the exact moment the last part of a big file had been downloaded, the app could still read that whole file before pausing. It now pauses right there (#228).
 - **Compare names a target folder that does not exist yet.** "Compare with the targets" now says which target folder is not there yet, instead of only counting all its files as missing (#227).
 
