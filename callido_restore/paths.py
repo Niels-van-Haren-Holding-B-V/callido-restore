@@ -86,3 +86,33 @@ INDEX_DIR = CONF_DIR / "index"
 CACHE_DIR = CONF_DIR / "cache"   # downloaded bytes only; never a configured source folder
 
 JOBS_DIR = CONF_DIR / "jobs"
+
+
+# A backup name a Windows folder or file cannot hold. Windows drops a trailing period or space without an error ("B.V." becomes
+# "B.V") and refuses control characters and <>:"|?*; rclone's local backend writes those the way below. The app cache and a local
+# copy of a backup use the same names as rclone on Windows, so a file rclone fetched is found under the name the app looks for.
+_WIN_MAP = {**{c: chr(0x2400 + c) for c in range(32)}, **{ord(c): chr(ord(c) + 0xFEE0) for c in '<>:"|?*'}}
+_WIN_UNMAP = {ord(v): chr(k) for k, v in _WIN_MAP.items()}
+
+
+def local_name(name, windows=None):
+    """One path component of the backup as a local file system holds it. POSIX: unchanged."""
+    if not (WINDOWS if windows is None else windows) or not name: return name
+    out = name.translate(_WIN_MAP)
+    if out[-1] == ".": out = out[:-1] + "．"
+    elif out[-1] == " ": out = out[:-1] + "␠"
+    return out
+
+
+def backup_name(name, windows=None):
+    """The inverse of ``local_name``: a name read from a local folder back to the backup's name."""
+    if not (WINDOWS if windows is None else windows) or not name: return name
+    if name[-1] == "．": name = name[:-1] + "."
+    elif name[-1] == "␠": name = name[:-1] + " "
+    return name.translate(_WIN_UNMAP)
+
+
+def local_rel(rel, windows=None):
+    """A '/'-separated path of the backup, each component through ``local_name``."""
+    if not (WINDOWS if windows is None else windows): return rel
+    return "/".join(local_name(p, True) for p in rel.split("/"))
