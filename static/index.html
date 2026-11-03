@@ -920,7 +920,7 @@ async function tabRestore(){const el=$('#tab-restore');
     $('#wzMap').style.opacity=oneMode()?'.45':'';$('#wzRemHelp').textContent=ONNAS?(SHARES.length||!NAS._loaded?'':'the app cannot write into any shared folder yet; see the rows below'):local?'type the full path of a mounted share or local folder per row':SHARES.length||!rem()?'':'no shares found on this connection';
     if(ONNAS)nasHints()};
   // On the NAS: what a backup folder still needs before it can be restored to the shared folder of the same name.
-  const nasHints=()=>{if(!NAS._loaded)return;const u=esc(NAS._user||'callido-restore');ROWS.forEach((b,i)=>{const el=$(`.mapNas[data-i="${i}"]`);if(!el)return;const n=esc(b.share),s=NAS[b.share];
+  const nasHints=()=>{if(!NAS._loaded)return;const u=esc(NAS._user||'sc-callido-restore');ROWS.forEach((b,i)=>{const el=$(`.mapNas[data-i="${i}"]`);if(!el)return;const n=esc(b.share),s=NAS[b.share];
     const msg=s&&s.writable?'':s?`The app may not write into <b>${n}</b> yet. In DSM: Control Panel → Shared Folder → ${n} → Edit → Permissions → choose <b>System internal user</b> → <b>${u}</b> → tick Read/Write → Save. Then press Refresh.`
       :`There is no shared folder <b>${n}</b> on this NAS. In DSM: Control Panel → Shared Folder → Create → name it <b>${n}</b>; on its Permissions step choose <b>System internal user</b> → <b>${u}</b> → tick Read/Write. Then press Refresh. Or pick another shared folder.`;
     el.innerHTML=msg;el.style.display=msg&&!$(`.mapShare[data-i="${i}"]`).value?'':'none'})};

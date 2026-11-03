@@ -18,7 +18,7 @@ There are two ways to install it on a Synology; one is enough:
   on the NAS only. The installation asks nothing and there is no password to enter: the app restores straight into the
   shared folders of this NAS. DSM 7 runs every package that does not come from Synology as its own user, so give the app
   Read/Write once per shared folder you restore into (Control Panel → Shared Folder → Edit → Permissions → *System internal
-  user* → `callido-restore`). A shared folder from the backup that is not on the NAS yet must be created first (with that
+  user* → `sc-callido-restore`). A shared folder from the backup that is not on the NAS yet must be created first (with that
   permission); the restore screen says per folder what is still needed. It needs SynoCommunity's Python 3.14: first add their package source (Package Center → Settings → Package
   Sources → Add: name `SynoCommunity`, location `https://packages.synocommunity.com`), then install **Python 3.14** from
   the *Community* tab. See `packaging/synology/README.md`.
@@ -29,7 +29,7 @@ There are two ways to install it on a Synology; one is enough:
 
 1. In **Package Center**, install **Container Manager**.
 2. In **File Station**, create a folder for the app's settings, for example `docker/callido-restore` on `volume1`.
-3. In **Container Manager → Project → Create**: name `callido-restore`, path the folder from step 2, source *Create
+3. In **Container Manager → Project → Create**: name `sc-callido-restore`, path the folder from step 2, source *Create
    docker-compose.yml*, and paste:
 
    ```yaml
