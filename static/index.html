@@ -921,7 +921,7 @@ async function tabRestore(){const el=$('#tab-restore');
     if(ONNAS)nasHints()};
   // On the NAS: what a backup folder still needs before it can be restored to the shared folder of the same name.
   const nasHints=()=>{if(!NAS._loaded)return;const u=esc(NAS._user||'sc-callido-restore');ROWS.forEach((b,i)=>{const el=$(`.mapNas[data-i="${i}"]`);if(!el)return;const n=esc(b.share),s=NAS[b.share];
-    const msg=s&&s.writable?'':s?`The app may not write into <b>${n}</b> yet. In DSM: Control Panel → Shared Folder → ${n} → Edit → Permissions → choose <b>System internal user</b> → <b>${u}</b> → tick Read/Write → Save. Then press Refresh.`
+    const msg=s&&s.writable?'':s?`The app may not write into <b>${n}</b> yet${s.why?` (DSM says: ${esc(s.why)})`:''}. If ${u} is already listed with Read/Write, look for a <b>Deny</b> entry for it (or for an “unknown user”): Deny beats Allow, so remove it.`+` To give access, in DSM: Control Panel → Shared Folder → ${n} → Edit → Permissions → choose <b>System internal user</b> → <b>${u}</b> → tick Read/Write → Save. Then press Refresh.`
       :`There is no shared folder <b>${n}</b> on this NAS. In DSM: Control Panel → Shared Folder → Create → name it <b>${n}</b>; on its Permissions step choose <b>System internal user</b> → <b>${u}</b> → tick Read/Write. Then press Refresh. Or pick another shared folder.`;
     el.innerHTML=msg;el.style.display=msg&&!$(`.mapShare[data-i="${i}"]`).value?'':'none'})};
   const fillRows=()=>{ROWS.forEach((b,i)=>{const m=MAP[key(b)]||{};const sel=$(`.mapShare[data-i="${i}"]`);const want=(m.share&&SHARES.includes(m.share))?m.share:(SHARES.includes(b.share)?b.share:'');
