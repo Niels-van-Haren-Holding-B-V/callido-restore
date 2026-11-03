@@ -4,6 +4,9 @@
 
 - **Run it on the NAS itself.** Callido Restore can now run on a Synology (or any Docker host) and be opened from any browser in your network, with a password. A restore then goes straight from the backup into the NAS's shared folders: no computer has to stay on, and the data no longer crosses the network twice. Two ways to install it: the Synology package below (`callido-restore_<processor>-7.1_1.3.0-1.spk`, Package Center → Manual Install; `x64` for Intel/AMD models, `aarch64` and `armv7` for ARM models; it needs **Python 3.14** from SynoCommunity: add the package source `https://packages.synocommunity.com` and install Python 3.14 from the Community tab first) or the container `ghcr.io/niels-van-haren-holding-b-v/callido-restore:1.3.0` for Container Manager. See [docs/NAS.md](https://github.com/Niels-van-Haren-Holding-B-V/callido-restore/blob/main/docs/NAS.md) (#243, #244).
 - On the NAS, the Google Drive sign-in opens in your own browser; you paste the address it ends on back into the app.
+- **The Synology package lives inside DSM.** Open it from the DSM main menu; your DSM login (administrators) is the access check, with no port or password of its own. It restores straight into the NAS's shared folders: give its user `sc-callido-restore` Read/Write once per shared folder (Control Panel → Shared Folder → Edit → Permissions → System internal user). The restore screen says per folder what is still needed (#246, #247).
+- **A download from Google Drive that stops moving no longer holds up the restore.** After 10 minutes without data it is stopped and tried again; a file that keeps failing is reported as an error and the restore goes on (#247).
+- **Reopening the app comes back where you were**: the same backup run and the same tab (#247).
 
 ## What's new in 1.2.9
 
