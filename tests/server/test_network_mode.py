@@ -111,6 +111,9 @@ class Server(unittest.TestCase):
 
     def test_a_burst_of_requests_gets_one_401_and_the_rest_429(self):
         from concurrent.futures import ThreadPoolExecutor
+        # the server's listen backlog is 5: Linux drops the other connects and the client resends them about 1 s later, past a
+        # 1 s delay, so the window is made longer than any resend (the lock itself is tested on auth.attempt)
+        self.enterContext(mock.patch.object(auth, "FAIL_DELAY", (0, 300)))
         with ThreadPoolExecutor(20) as ex: codes = list(ex.map(lambda i: self.req("POST", "/api/login", {"password": f"x{i}"})[0], range(20)))
         self.assertEqual(codes.count(401), 1); self.assertEqual(codes.count(429), 19)
 
