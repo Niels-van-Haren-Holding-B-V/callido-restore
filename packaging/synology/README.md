@@ -32,10 +32,11 @@ files whose names differ only in case.
 
 ## Install
 
-Package Center → **Manual Install** → the `.spk` for the NAS's processor (`x64` for Intel/AMD, `aarch64` for 64-bit ARM,
-`armv7` for 32-bit ARM). Package Center installs Python 3.12 from SynoCommunity first if the source
-`https://packages.synocommunity.com` is added (Package Center → Settings → Package Sources); without it, install their
-Python 3.12 package by hand first.
+1. Package Center → Settings → Package Sources → Add: name `SynoCommunity`, location `https://packages.synocommunity.com`.
+2. Install **Python 3.12** from the *Community* tab (the package depends on it; a Manual Install does not download
+   dependencies by itself and stops with "install python312 first").
+3. Package Center → **Manual Install** → the `.spk` for the NAS's processor (`x64` for Intel/AMD, `aarch64` for 64-bit ARM,
+   `armv7` for 32-bit ARM).
 
 The password comes from the install wizard. To change it, edit `/var/packages/callido-restore/var/password` over SSH (one line)
 and restart the package in Package Center. The package and the Docker image (`docs/NAS.md`) both use port 8765: use one.
