@@ -1,0 +1,72 @@
+name: synology-package
+# The Synology package (packaging/synology, a SynoCommunity spksrc recipe), built in spksrc's own build image at a pinned
+# commit. A pull request that touches the recipe builds the x64 package from its own commit; a v* tag builds every DSM 7
+# architecture from the tag's source archive and attaches the .spk files to the GitHub release (Package Center → Manual Install).
+on:
+  push: { tags: ['v*'] }
+  pull_request:
+    paths: ['packaging/synology/**', '.github/workflows/spk.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  SPKSRC_COMMIT: 81e3aba01a5fc99516fc8595b9ba726bb4500af1   # SynoCommunity/spksrc master, 2026-11-02 (python312, rclone 1.75.2)
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: ${{ fromJSON(startsWith(github.ref, 'refs/tags/v') && '["x64-7.1", "aarch64-7.1", "armv7-7.1"]' || '["x64-7.1"]') }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (node24)
+      - name: spksrc at the pinned commit, with this recipe
+        run: |
+          git init -q spksrc && git -C spksrc fetch -q --depth 1 https://github.com/SynoCommunity/spksrc.git "$SPKSRC_COMMIT" && git -C spksrc checkout -q FETCH_HEAD
+          cp -R packaging/synology/spk spksrc/spk/callido-restore
+          cp -R packaging/synology/cross spksrc/cross/callido-restore
+          v=$(python3 -c "import re;print(re.search(r'VERSION = \"([^\"]+)\"', open('callido_restore/about.py').read())[1])")
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            test "v$v" = "$GITHUB_REF_NAME" || { echo "about.py says $v, the tag is $GITHUB_REF_NAME"; exit 1; }
+            echo "CALLIDO_GIT_HASH=" >> "$GITHUB_ENV"
+          else
+            echo "CALLIDO_GIT_HASH=${{ github.event.pull_request.head.sha || github.sha }}" >> "$GITHUB_ENV"
+          fi
+          sed -i "s/^PKG_VERS = .*/PKG_VERS = $v/" spksrc/cross/callido-restore/Makefile
+          sed -i "s/^SPK_VERS = .*/SPK_VERS = $v/" spksrc/spk/callido-restore/Makefile
+      - name: Build (${{ matrix.arch }})
+        run: |
+          docker run --rm -e CALLIDO_GIT_HASH -v "$PWD/spksrc:/spksrc" -w /spksrc ghcr.io/synocommunity/spksrc bash -c '
+            set -e; make setup >/dev/null
+            make -C cross/callido-restore digests
+            make -C spk/callido-restore arch-${{ matrix.arch }}' 2>&1 | tail -n 400
+          ls -la spksrc/packages; test -n "$(ls spksrc/packages/*.spk)"
+      - name: Package contents
+        run: |
+          for f in spksrc/packages/*.spk; do echo "== $f"; tar -xOf "$f" INFO; tar -xOf "$f" package.tgz > /tmp/package.tgz; tar -tf /tmp/package.tgz | grep -E 'share/callido-restore/callido_restore/__main__.py|bin/rclone$|static/login.html'; done
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2 (node24)
+        with:
+          name: spk-${{ matrix.arch }}
+          path: spksrc/packages/*.spk
+          if-no-files-found: error
+
+  attach:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2 (node24)
+        with:
+          pattern: spk-*
+          path: spk
+          merge-multiple: true
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
+        with:
+          fail_on_unmatched_files: true
+          files: spk/*.spk

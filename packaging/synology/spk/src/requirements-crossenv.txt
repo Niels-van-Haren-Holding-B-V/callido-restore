@@ -1,0 +1,2 @@
+# Generated for callido-restore: its only compiled dependency
+lz4==4.4.4
