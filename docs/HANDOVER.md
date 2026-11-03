@@ -106,7 +106,7 @@ retried for that release and stays offered for a click; on macOS it never opens 
   key in a later release. If the private key leaks: remove its public key from `UPDATE_PUBLIC_KEYS` at once and release; apps
   that still trust it can be updated only from the release page.
 * **macOS install.** The app downloads the disk image itself (no quarantine flag, checked on a real Mac), mounts it, copies the
-  new app next to the running one and restarts through a helper that swaps the bundles after the app has quit (the old one is
+  new app next to the running one and restarts through a helper (started detached, `update.spawn_detached`, so the app's own `pkill -P` on quit does not end it) that swaps the bundles after the app has quit (the old one is
   put back if the swap fails). When the app's folder is not writable it opens the verified disk image for a manual drag.
   **Windows install** (`update_windows.py`, hbk-5): `msiexec /i … /passive` upgrades in place (same UpgradeCode), then restarts.
 * **Never during work.** `/api/update/install` refuses while a restore, a preparation or another update runs; a paused restore

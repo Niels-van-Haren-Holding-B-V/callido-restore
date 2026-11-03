@@ -312,6 +312,15 @@ def mac_swap_script(app, new_app, pid):
             f"open {q(app)}")
 
 
+def spawn_detached(script):
+    """Start a shell script that outlives this process and is not its child. Quitting the app ends its own children
+    (``pkill -P``, see server.api._exit_app), which used to take the swap helper with it: the new app stayed staged as
+    ``.<name>.app.new`` and nothing reopened. The outer shell starts the script in the background and exits at once, so
+    the script is handed to launchd before the app quits."""
+    subprocess.run(["/bin/sh", "-c", f"( {script} ) </dev/null >/dev/null 2>&1 &"], start_new_session=True,
+                   stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10)
+
+
 def install_mac(dmg, exit_app, open_fallback=True):
     """Replace this app with the verified disk image's app and restart; returns {'opened': dmg} when it falls back to a
     manual drag (not the frozen app, the bundle's folder not writable, or a step failed). Without ``open_fallback`` (an
@@ -336,8 +345,7 @@ def install_mac(dmg, exit_app, open_fallback=True):
     finally:
         subprocess.run(["hdiutil", "detach", mnt], capture_output=True); shutil.rmtree(mnt, ignore_errors=True)
     log(f"new app staged next to {app}; restarting")
-    subprocess.Popen(["/bin/sh", "-c", mac_swap_script(app, new_app, os.getpid())], start_new_session=True,
-                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    spawn_detached(mac_swap_script(app, new_app, os.getpid()))
     exit_app(0)
     return {"restarting": app}
 
