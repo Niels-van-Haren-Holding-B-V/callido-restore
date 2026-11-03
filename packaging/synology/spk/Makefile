@@ -3,7 +3,7 @@ SPK_VERS = 1.3.0
 SPK_REV = 1
 SPK_ICON = src/callido-restore.png
 
-PYTHON_PACKAGE = python312
+PYTHON_PACKAGE = python314
 
 WHEELS = src/requirements-crossenv.txt
 

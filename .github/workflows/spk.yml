@@ -12,7 +12,7 @@ permissions:
   contents: read
 
 env:
-  SPKSRC_COMMIT: 81e3aba01a5fc99516fc8595b9ba726bb4500af1   # SynoCommunity/spksrc master, 2026-11-02 (python312, rclone 1.75.2)
+  SPKSRC_COMMIT: 81e3aba01a5fc99516fc8595b9ba726bb4500af1   # SynoCommunity/spksrc master, 2026-11-02 (python314, rclone 1.75.2)
 
 jobs:
   build:

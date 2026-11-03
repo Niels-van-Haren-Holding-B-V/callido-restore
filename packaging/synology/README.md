@@ -5,7 +5,7 @@ NAS as a service (network mode, `--listen 0.0.0.0 --port 8765`, see `docs/NAS.md
 
 * `cross/` → `spksrc/cross/callido-restore`: the app's source archive (`callido_restore/`, `static/`, `LICENSE`) of the
   release `PKG_VERS` (or of one commit with `CALLIDO_GIT_HASH=<sha>` in the environment), installed to `share/callido-restore`.
-* `spk/` → `spksrc/spk/callido-restore`: the package. Python 3.12 is SynoCommunity's `python312` package (installed by
+* `spk/` → `spksrc/spk/callido-restore`: the package. Python 3.14 is SynoCommunity's `python314` package (installed by
   Package Center as a dependency); `lz4` is cross-compiled as a wheel; rclone is spksrc's `cross/rclone`, the same release
   as the desktop apps. The install wizard asks for the sign-in password (kept in the package's `var/password`, mode 600; an
   upgrade keeps it) and explains the shared-folder permission for the package's system user `callido-restore`.
@@ -33,8 +33,8 @@ files whose names differ only in case.
 ## Install
 
 1. Package Center → Settings → Package Sources → Add: name `SynoCommunity`, location `https://packages.synocommunity.com`.
-2. Install **Python 3.12** from the *Community* tab (the package depends on it; a Manual Install does not download
-   dependencies by itself and stops with "install python312 first").
+2. Install **Python 3.14** from the *Community* tab (the package depends on it; a Manual Install does not download
+   dependencies by itself and stops with "install python314 first").
 3. Package Center → **Manual Install** → the `.spk` for the NAS's processor (`x64` for Intel/AMD, `aarch64` for 64-bit ARM,
    `armv7` for 32-bit ARM).
 

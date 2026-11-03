@@ -13,9 +13,9 @@ There are two ways to install it on a Synology; use one, not both (they use the 
 
 * **Package** (Package Center → Manual Install of `callido-restore_<processor>-7.1_<version>.spk` from the
   [Releases](https://github.com/Niels-van-Haren-Holding-B-V/callido-restore/releases)): every DSM 7 model, including
-  those without Container Manager. It needs SynoCommunity's Python 3.12: first add their package source (Package
+  those without Container Manager. It needs SynoCommunity's Python 3.14: first add their package source (Package
   Center → Settings → Package Sources → Add: name `SynoCommunity`, location `https://packages.synocommunity.com`), then
-  install **Python 3.12** from the *Community* tab, or let Package Center offer it when you install the `.spk`. See
+  install **Python 3.14** from the *Community* tab, or let Package Center offer it when you install the `.spk`. See
   `packaging/synology/README.md`. Its password comes from the install wizard; to
   change it, edit `/var/packages/callido-restore/var/password` over SSH and restart the package in Package Center.
 * **Container** (below): DSM 7.2 models with Container Manager. To run it next to the package anyway, change the host side
