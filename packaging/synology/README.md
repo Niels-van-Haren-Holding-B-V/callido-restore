@@ -1,14 +1,26 @@
 # Synology package (.spk)
 
 A [SynoCommunity spksrc](https://github.com/SynoCommunity/spksrc) recipe for Callido Restore on DSM 7: the app runs on the
-NAS as a service (network mode, `--listen 0.0.0.0 --port 8765`, see `docs/NAS.md`) and is opened from a browser.
+NAS as a service and opens **inside DSM**, from the DSM main menu.
+
+* The service listens on the NAS's loopback only (`--listen 127.0.0.1 --port 18765`, `CALLIDO_DSM=1`): not reachable from
+  the network, no firewall rule, no password of its own.
+* DSM's web server is the way in: `src/app/index.cgi` (`/webman/3rdparty/callido-restore/index.cgi/…`) runs
+  `src/app/dsm_cgi.py`, which lets in a DSM administrator with a valid DSM session (DSM's `authenticate.cgi`, with the
+  SynoToken the page fetches from `/webman/login.cgi`) and forwards the request to the app. The app serves its page with
+  that prefix, and the page sends its calls there. `src/app/config` is the DSM main menu entry.
+* No install wizard, no password: the installation asks nothing. Restores go straight into the shared folders of this NAS
+  (`/volumeN/<share>`, listed by `/api/nas/shares`). DSM 7 runs a third-party package as its own user (`callido-restore`),
+  so an administrator gives that user Read/Write per shared folder: Control Panel → Shared Folder → Edit → Permissions →
+  System internal user. A package cannot create a shared folder itself; for a folder from the backup that is not on the
+  NAS, the app says to create it (with that permission) first. Restored files belong to `callido-restore`; anyone with
+  rights on the shared folder can use them as usual.
 
 * `cross/` → `spksrc/cross/callido-restore`: the app's source archive (`callido_restore/`, `static/`, `LICENSE`) of the
   release `PKG_VERS` (or of one commit with `CALLIDO_GIT_HASH=<sha>` in the environment), installed to `share/callido-restore`.
 * `spk/` → `spksrc/spk/callido-restore`: the package. Python 3.14 is SynoCommunity's `python314` package (installed by
   Package Center as a dependency); `lz4` is cross-compiled as a wheel; rclone is spksrc's `cross/rclone`, the same release
-  as the desktop apps. The install wizard asks for the sign-in password (kept in the package's `var/password`, mode 600; an
-  upgrade keeps it) and explains the shared-folder permission for the package's system user `callido-restore`.
+  as the desktop apps.
 
 Settings, connections (`rclone.conf`), saved restores and the download cache live in `/var/packages/callido-restore/var`
 (the service's `HOME`).
@@ -38,8 +50,7 @@ files whose names differ only in case.
 3. Package Center → **Manual Install** → the `.spk` for the NAS's processor (`x64` for Intel/AMD, `aarch64` for 64-bit ARM,
    `armv7` for 32-bit ARM).
 
-The password comes from the install wizard. To change it, edit `/var/packages/callido-restore/var/password` over SSH (one line)
-and restart the package in Package Center. The package and the Docker image (`docs/NAS.md`) both use port 8765: use one.
+After the installation: DSM main menu → **Callido Restore**. Only DSM administrators can open it.
 
 ## SynoCommunity
 

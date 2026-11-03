@@ -53,3 +53,4 @@ jobs:
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.description=Callido Restore for a NAS: restore files from a Synology Hyper Backup in the browser
             org.opencontainers.image.licenses=MIT
+            org.opencontainers.image.vendor=Callido B.V.

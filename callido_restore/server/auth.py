@@ -6,7 +6,7 @@ password sets an HttpOnly, SameSite=Strict cookie. Sessions live in memory (a re
 after ``SESSION_DAYS`` without use. Wrong passwords are slowed down per client address. The password comes from the
 environment (``CALLIDO_PASSWORD``) or a file (``--password-file``); network mode refuses to start without one.
 """
-import hmac, secrets, threading, time
+import hmac, os, secrets, threading, time
 
 COOKIE = "callido_session"
 SESSION_DAYS = 30
@@ -26,6 +26,24 @@ def enable(password):
 
 
 def enabled(): return _state["password"] is not None
+
+
+def remote():
+    """The page is used from another computer: network mode (a password), or the Synology package, where DSM's web server
+    passes requests on to the app on the NAS's loopback (CALLIDO_DSM=1, DSM checks the login). Then Quit and the in-app
+    update are off, and the Google sign-in is handed over from the user's browser."""
+    return enabled() or os.environ.get("CALLIDO_DSM") == "1"
+
+
+def dsm_key_ok(header):
+    """The Synology package (CALLIDO_DSM=1): the app listens on the NAS's loopback, where any process on the NAS could reach
+    it; only requests from the package's CGI carry the key from CALLIDO_DSM_SECRET_FILE (written at each service start).
+    Always true elsewhere."""
+    if os.environ.get("CALLIDO_DSM") != "1": return True
+    f = os.environ.get("CALLIDO_DSM_SECRET_FILE")
+    try: key = open(f).read().strip() if f else ""
+    except OSError: key = ""
+    return bool(key) and bool(header) and hmac.compare_digest(header.encode(), key.encode())
 
 
 def _cookie_value(cookie_header):

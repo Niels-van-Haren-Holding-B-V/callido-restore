@@ -1,6 +1,6 @@
 """Restore destinations: never overwrite or delete anything already there (T8). ``place_file`` moves a staged file into place
 atomically, ``file_target``/``restore_roots`` map backup folders to destinations (H8), ``restore_target_error`` validates them."""
-import json, os, subprocess
+import glob, json, os, subprocess
 from pathlib import Path
 from callido_restore.oscompat import popen_kw
 from callido_restore.paths import RCLONE
@@ -105,3 +105,18 @@ def destination_sizes(dest):
     except rclone.RcloneError as e:
         raise RuntimeError(f"cannot list the destination {dest}: {e}")
     return {e["Path"]: e.get("Size") for e in entries}
+
+def nas_shares(volumes="/volume[0-9]*"):
+    """The Synology package: the shared folders of this NAS (the top-level folders of each volume, without DSM's own
+    ``@``/``#``/``.`` folders) and whether this app's user may write into each. A third-party package on DSM 7 runs as its own
+    user; an administrator gives it Read/Write per shared folder (Control Panel → Shared Folder → Permissions → System internal
+    user). DSM's ACLs are enforced by the kernel, so ``os.access`` answers for them too. A name on two volumes is listed once."""
+    out, seen = [], set()
+    for vol in sorted(glob.glob(volumes)):
+        try: names = sorted(os.listdir(vol))
+        except OSError: continue
+        for n in names:
+            p = os.path.join(vol, n)
+            if n[:1] in "@#." or n == "lost+found" or n in seen or os.path.islink(p) or not os.path.isdir(p): continue
+            seen.add(n); out.append({"name": n, "path": p, "writable": os.access(p, os.W_OK | os.X_OK)})
+    return out
