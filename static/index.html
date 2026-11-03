@@ -307,7 +307,11 @@ const WD={msg:'',cls:''};   // last result of the NAS connect in the restore wiz
 function wdNameInput(el){if(WD.editing&&el.value.trim()!==WD.editing){WD.editing=null;const p=$('#wdPass'),b=$('#wdConnect');if(p)p.placeholder='';if(b)b.textContent='Connect'}}
 const LOCAL_EG=/^Win/.test(navigator.platform)?'Z:':'/Volumes';   // example local path in placeholders: a mapped drive on Windows
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
-const S={src:null,info:null,ver:null,snaps:{},indexing:{},tab:'changes',range:365,basket:JSON.parse(localStorage.getItem('basket')||'[]')};
+// Reopening the page (the NAS version is a browser tab) comes back where it was: the source, the selected run and the tab
+// are remembered in this browser. Storage can be unavailable (private window): then it simply starts fresh.
+const mem={get:k=>{try{return localStorage.getItem(k)}catch(e){return null}},set:(k,v)=>{try{localStorage.setItem(k,v)}catch(e){}}};
+const TABS=['changes','timeline','browse','search','compare','restore'];
+const S={src:null,info:null,ver:null,snaps:{},indexing:{},tab:TABS.includes(mem.get('tab'))?mem.get('tab'):'changes',range:365,basket:JSON.parse(localStorage.getItem('basket')||'[]')};
 // Every request goes through track(): an in-flight counter shows the header activity pill once a request runs longer than
 // 200 ms (most waits are a fresh rclone process talking to Google Drive or the NAS), with a text derived from the endpoint, and
 // the button that triggered it is disabled meanwhile. Listings that the Restore tab re-requests on every render are cached 30 s.
@@ -567,7 +571,8 @@ async function openSource(refresh){const id=$('#srcSel').value;if(!id)return;S.s
   try{const j=await api('/api/open',{src:id,refresh:refresh===true?1:0,job:1});const job=await waitJob(j.id,m=>{const el=$('#openMsg');if(el)el.textContent=m});
     if(job.state==='error')throw new Error(job.error);S.info=await api('/api/open',{src:id});await loadRemotes();}catch(e){$('#overview').innerHTML=`<div class="alert">Could not open: ${esc(e.message)}</div>`;$('#srcStatus').textContent='';return}
   $('#srcStatus').textContent='';renderOverview();renderVersions();renderFlow();prepWatch();
-  if(S.info.readable&&S.info.versions.length){const last=S.info.versions[S.info.versions.length-1];selectVersion(last.id)}}
+  if(S.info.readable&&S.info.versions.length){const last=S.info.versions[S.info.versions.length-1];const kept=S.info.versions.find(v=>String(v.id)===mem.get('ver:'+id));
+    await selectVersion((kept||last).id);if(S.tab!=='changes'){const s=$('#snap');if(s)s.scrollIntoView({block:'start'})}}}   // the remembered run, else the latest
 function renderOverview(){const i=S.info,t=i.task||{},r=i.ransomware;let h='';
   if(r.locked_files>0||i.problems.length){h+=`<div class="alert"><b>${r.locked_files>0?'Ransomware-encrypted backup.':'Problems.'}</b> ${r.locked_files>0?`${r.locked_files} metadata files carry the <code>${esc(r.examples[0]?.split('.').pop())}</code> suffix and are unreadable (e.g. ${r.examples.slice(0,3).map(esc).join(', ')}).`:''} ${i.problems.map(esc).join(' · ')}</div>`}
   const locked=i.shares.reduce((a,s)=>a+(s.locked||0),0);
@@ -616,7 +621,7 @@ function renderVersions(){const all=S.info.versions;if(!all.length){$('#verChart
       else showTip(e,`<b>${g.vs.length} versions</b> v${g.vs[0].id}–v${g.vs[g.vs.length-1].id}<br>${dd(g.vs[0].ts)} → ${dd(g.vs[g.vs.length-1].ts)}<br>${g.st.has?`new ${g.st.new.toLocaleString()} · modified ${g.st.mod.toLocaleString()} · removed ${g.st.rem.toLocaleString()}`:'no statistics'}<br><i>click to zoom in</i>`)};b.onmouseleave=hideTip});}
 addEventListener('resize',()=>{if(S.info)renderVersions()});
 // ---------- snapshot
-async function selectVersion(id){S.ver=id;$('#verInput').value=id;$('#verList').value=id;renderVersions();$('#snap').style.display='';
+async function selectVersion(id){S.ver=id;if(S.src)mem.set('ver:'+S.src,String(id));$('#verInput').value=id;$('#verList').value=id;renderVersions();$('#snap').style.display='';
   const v=S.info.versions.find(x=>x.id===id);const st=v.stats;
   renderFlow();$('#snapHead').innerHTML=`<h2 style="margin:0">Run ${id} <span class="help">· ${dt(v.ts)} UTC · ${esc(v.status)}</span></h2>${st?`<span class="muted">${st.new.toLocaleString()} new · ${st.mod.toLocaleString()} modified · ${st.rem.toLocaleString()} removed · ${st.total.toLocaleString()} files · ${human(st.src_size)}</span>`:''}`;
   await refreshShares();showTab(S.tab);}
@@ -636,7 +641,7 @@ async function runIndex(share){const el=$('#jobStatus');pendingBar(el,'Starting�
   el.textContent=job.state==='error'?'Error: '+job.error:'';const errs=(job.result||[]).filter(r=>!r.ok);if(errs.length)el.textContent=errs.map(e=>e.share+': '+e.error).join(' · ');
   names.forEach(n=>delete S.indexing[n]);S.info=await api('/api/open',{src:S.src});renderVersions();await refreshShares();showTab(S.tab)}
 $$('.tabs button').forEach(b=>b.onclick=()=>showTab(b.dataset.t));
-function showTab(t){S.tab=t;renderFlow();$$('.tabs button').forEach(b=>b.classList.toggle('on',b.dataset.t===t));$$('[id^=tab-]').forEach(d=>d.style.display=d.id==='tab-'+t?'':'none');
+function showTab(t){S.tab=t;mem.set('tab',t);renderFlow();$$('.tabs button').forEach(b=>b.classList.toggle('on',b.dataset.t===t));$$('[id^=tab-]').forEach(d=>d.style.display=d.id==='tab-'+t?'':'none');
   ({changes:tabChanges,timeline:tabTimeline,browse:tabBrowse,search:tabSearch,compare:tabCompare,restore:tabRestore})[t]();}
 const indexedShares=()=>Object.values(S.snaps).filter(i=>i.indexed).map(i=>i.share);
 function needLoad(el){if(!indexedShares().length){const can=Object.values(S.snaps).some(i=>!i.indexed&&i.available&&!i.locked);el.innerHTML=emptyState('Load the file list first','Each share (top-level folder) of this run has its own file list. Click a share above to load it, or load them all.',can?'<button class="primary" onclick="runIndex(\'*\')">Load all shares</button>':'');return true}return false}
