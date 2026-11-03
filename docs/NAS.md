@@ -29,7 +29,7 @@ There are two ways to install it on a Synology; one is enough:
 
 1. In **Package Center**, install **Container Manager**.
 2. In **File Station**, create a folder for the app's settings, for example `docker/callido-restore` on `volume1`.
-3. In **Container Manager → Project → Create**: name `sc-callido-restore`, path the folder from step 2, source *Create
+3. In **Container Manager → Project → Create**: name `callido-restore`, path the folder from step 2, source *Create
    docker-compose.yml*, and paste:
 
    ```yaml
