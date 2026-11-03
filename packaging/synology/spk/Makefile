@@ -12,9 +12,10 @@ DEPENDS = cross/callido-restore
 DEPENDS += cross/rclone
 
 MAINTAINER = Niels-van-Haren-Holding-B-V
-DESCRIPTION = "Restore files from a Synology Hyper Backup (.hbk) without Hyper Backup: browse every backup run on a timeline and restore the folders you pick straight into this NAS's shared folders. The backup can be on Google Drive or any rclone remote, on a share or on a disk. Not affiliated with or endorsed by Synology."
+# spksrc writes these into INFO through the shell: no parentheses in DESCRIPTION or CHANGELOG
+DESCRIPTION = "Restore files from a Synology Hyper Backup without Hyper Backup: browse every backup run on a timeline and restore the folders you pick straight into the shared folders of this NAS. The backup can be on Google Drive or any rclone remote, on a share or on a disk. Not affiliated with or endorsed by Synology."
 DISPLAY_NAME = Callido Restore
-CHANGELOG = "First package: the app runs on the NAS and is opened from a browser (sign-in with the password from the installation)."
+CHANGELOG = "First package: the app runs on the NAS and is opened from a browser, with the password chosen during the installation."
 
 HOMEPAGE  = https://github.com/Niels-van-Haren-Holding-B-V/callido-restore
 LICENSE   = MIT

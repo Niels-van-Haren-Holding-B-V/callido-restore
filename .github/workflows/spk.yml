@@ -39,19 +39,23 @@ jobs:
           sed -i "s/^PKG_VERS = .*/PKG_VERS = $v/" spksrc/cross/callido-restore/Makefile
           sed -i "s/^SPK_VERS = .*/SPK_VERS = $v/" spksrc/spk/callido-restore/Makefile
       - name: Build (${{ matrix.arch }})
+        shell: bash                       # -o pipefail: a failed build must fail the step, not hide behind tail
         run: |
           docker run --rm -e CALLIDO_GIT_HASH -v "$PWD/spksrc:/spksrc" -w /spksrc ghcr.io/synocommunity/spksrc bash -c '
             set -e; make setup >/dev/null
             make -C cross/callido-restore digests
             make -C spk/callido-restore arch-${{ matrix.arch }}' 2>&1 | tail -n 400
-          ls -la spksrc/packages; test -n "$(ls spksrc/packages/*.spk)"
+          ls -la spksrc/packages; ls spksrc/packages/callido-restore_*.spk
       - name: Package contents
+        shell: bash
         run: |
-          for f in spksrc/packages/*.spk; do echo "== $f"; tar -xOf "$f" INFO; tar -xOf "$f" package.tgz > /tmp/package.tgz; tar -tf /tmp/package.tgz | grep -E 'share/callido-restore/callido_restore/__main__.py|bin/rclone$|static/login.html'; done
+          for f in spksrc/packages/callido-restore_*.spk; do echo "== $f"; tar -xOf "$f" INFO; tar -xOf "$f" package.tgz > /tmp/package.tgz; tar -tf /tmp/package.tgz > /tmp/files.txt
+            for want in 'share/callido-restore/callido_restore/__main__.py$' 'bin/rclone$' 'share/callido-restore/static/login.html$' 'share/wheelhouse/lz4-'; do
+              grep -E "$want" /tmp/files.txt || { echo "missing in the package: $want"; exit 1; }; done; done
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2 (node24)
         with:
           name: spk-${{ matrix.arch }}
-          path: spksrc/packages/*.spk
+          path: spksrc/packages/callido-restore_*.spk
           if-no-files-found: error
 
   attach:
@@ -66,7 +70,18 @@ jobs:
           pattern: spk-*
           path: spk
           merge-multiple: true
-      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
-        with:
-          fail_on_unmatched_files: true
-          files: spk/*.spk
+      # build.yml (build-macos) creates the release with its name and notes; this only adds files to it, as build-windows does
+      - name: Attach to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          ls spk/callido-restore_*.spk
+          for i in $(seq 1 80); do
+            if gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              gh release upload "$TAG" spk/callido-restore_*.spk -R "$GITHUB_REPOSITORY" --clobber
+              exit 0
+            fi
+            echo "release $TAG not there yet (build-macos publishes it); waiting"; sleep 30
+          done
+          echo "release $TAG never appeared"; exit 1
