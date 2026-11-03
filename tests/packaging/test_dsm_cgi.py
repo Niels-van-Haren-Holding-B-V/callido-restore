@@ -7,6 +7,8 @@ from unittest import mock
 from callido_restore.server import api
 from callido_restore.server.api import H, LocalServer
 
+if os.name == "nt": raise unittest.SkipTest("the package's CGI runs on a Synology only (it uses grp/pwd)")
+
 ROOT = Path(__file__).resolve().parents[2]
 spec = importlib.util.spec_from_file_location("dsm_cgi", ROOT / "packaging/synology/spk/src/app/dsm_cgi.py")
 cgi = importlib.util.module_from_spec(spec); spec.loader.exec_module(cgi)
