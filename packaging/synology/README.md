@@ -37,6 +37,9 @@ Package Center → **Manual Install** → the `.spk` for the NAS's processor (`x
 `https://packages.synocommunity.com` is added (Package Center → Settings → Package Sources); without it, install their
 Python 3.12 package by hand first.
 
+The password comes from the install wizard. To change it, edit `/var/packages/callido-restore/var/password` over SSH (one line)
+and restart the package in Package Center. The package and the Docker image (`docs/NAS.md`) both use port 8765: use one.
+
 ## SynoCommunity
 
 The same two folders are what a pull request to SynoCommunity/spksrc adds (`spk/callido-restore`, `cross/callido-restore`
