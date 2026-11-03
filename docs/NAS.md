@@ -7,6 +7,17 @@ network once instead of twice (backup → computer → NAS over SMB).
 The NAS version is a Docker image for **Container Manager** (DSM 7.2 or later; Synology models with an Intel/AMD or 64-bit
 ARM processor that offer Container Manager in Package Center). The same image runs on any other Docker host.
 
+## Package or container
+
+There are two ways to install it on a Synology; use one, not both (they use the same port, 8765):
+
+* **Package** (Package Center → Manual Install of `callido-restore_<processor>-7.1_<version>.spk` from the
+  [Releases](https://github.com/Niels-van-Haren-Holding-B-V/callido-restore/releases)): every DSM 7 model, including
+  those without Container Manager. See `packaging/synology/README.md`. Its password comes from the install wizard; to
+  change it, edit `/var/packages/callido-restore/var/password` over SSH and restart the package in Package Center.
+* **Container** (below): DSM 7.2 models with Container Manager. To run it next to the package anyway, change the host side
+  of `ports`, for example `"8766:8765"`.
+
 ## Install on a Synology
 
 1. In **Package Center**, install **Container Manager**.

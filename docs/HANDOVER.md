@@ -58,6 +58,12 @@ chunk table, `2026-10-31-1530-claude-hbk6.md` for the end-to-end tests).
   a real pool and ground truth (`HBK_E2E=1` runs the app over HTTP, `HBK_E2E_STRESS=1` the large layouts,
   `HBK_E2E_CHUNK_INDEX=1` the chunk-table path; `tests/e2e/ui_drive.py` drives the UI in headless Chrome).
 
+## Synology package
+
+`packaging/synology/` is a SynoCommunity spksrc recipe (DSM 7, python312 dependency, lz4 wheel, spksrc's rclone); `.github/workflows/spk.yml`
+builds x64 on recipe PRs and x64/aarch64/armv7 on v* tags and attaches the .spk files to the release. The service runs network
+mode (password from the install wizard in `var/password`). Submitting it to SynoCommunity is a PR to their spksrc with the two
+folders and a `digests` file for the release archive (see `packaging/synology/README.md`).
 ## NAS (Docker)
 
 `packaging/docker/Dockerfile` runs the server in network mode (`CALLIDO_LISTEN=0.0.0.0`, `CALLIDO_PASSWORD` required, `HOME=/config`)

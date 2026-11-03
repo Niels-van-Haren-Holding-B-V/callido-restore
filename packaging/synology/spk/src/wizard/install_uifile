@@ -1,0 +1,32 @@
+[
+    {
+        "step_title": "Callido Restore",
+        "invalid_next_disabled": true,
+        "items": [
+            {
+                "desc": "Callido Restore runs on this NAS and is opened in a browser at http://&lt;this NAS&gt;:8765. Choose the password you will sign in with (at least 8 characters)."
+            },
+            {
+                "type": "password",
+                "subitems": [
+                    {
+                        "key": "wizard_password",
+                        "desc": "Password",
+                        "validator": {
+                            "allowBlank": false,
+                            "minLength": 8
+                        }
+                    }
+                ]
+            }
+        ]
+    },
+    {
+        "step_title": "Shared folders",
+        "items": [
+            {
+                "desc": "Restores are written by the system user <b>callido-restore</b>. After the installation, give it Read/Write permission on every shared folder you want to restore into: Control Panel &gt; Shared Folder &gt; Edit &gt; Permissions &gt; select <i>System internal user</i> &gt; callido-restore."
+            }
+        ]
+    }
+]
