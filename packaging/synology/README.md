@@ -10,10 +10,10 @@ NAS as a service and opens **inside DSM**, from the DSM main menu.
   SynoToken the page fetches from `/webman/login.cgi`) and forwards the request to the app. The app serves its page with
   that prefix, and the page sends its calls there. `src/app/config` is the DSM main menu entry.
 * No install wizard, no password: the installation asks nothing. Restores go straight into the shared folders of this NAS
-  (`/volumeN/<share>`, listed by `/api/nas/shares`). DSM 7 runs a third-party package as its own user (`callido-restore`),
+  (`/volumeN/<share>`, listed by `/api/nas/shares`). DSM 7 runs a third-party package as its own user (`sc-callido-restore`),
   so an administrator gives that user Read/Write per shared folder: Control Panel → Shared Folder → Edit → Permissions →
   System internal user. A package cannot create a shared folder itself; for a folder from the backup that is not on the
-  NAS, the app says to create it (with that permission) first. Restored files belong to `callido-restore`; anyone with
+  NAS, the app says to create it (with that permission) first. Restored files belong to `sc-callido-restore`; anyone with
   rights on the shared folder can use them as usual.
 
 * `cross/` → `spksrc/cross/callido-restore`: the app's source archive (`callido_restore/`, `static/`, `LICENSE`) of the
