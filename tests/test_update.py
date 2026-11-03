@@ -190,6 +190,22 @@ class UpdateTests(Fixture):
         self.assertEqual(os.listdir(app), ["v2"]); self.assertNotIn("X.app", os.listdir(app + ".old"))   # nothing moved into .old
 
 
+    @unittest.skipUnless(os.name == "posix" and shutil.which("sh") and shutil.which("pkill"), "needs a POSIX shell and pkill")
+    def test_swap_helper_survives_the_app_ending_its_children(self):
+        """The app quits with ``pkill -P <own pid>`` and ``os._exit``; the helper must still run after that (it was killed
+        with the app's other children, so an update never swapped or reopened the app)."""
+        import subprocess, sys, time
+        base = tempfile.mkdtemp(); self.addCleanup(shutil.rmtree, base, True)
+        done = os.path.join(base, "done")
+        app = ("import os, subprocess, sys; from callido_restore import update; "
+               f"update.spawn_detached('while kill -0 ' + str(os.getpid()) + ' 2>/dev/null; do sleep 0.1; done; touch {done}'); "
+               "subprocess.run(['pkill', '-P', str(os.getpid())]); os._exit(0)")
+        subprocess.run([sys.executable, "-c", app], check=True, timeout=30,
+                       cwd=os.path.dirname(os.path.dirname(os.path.abspath(update.__file__))))
+        deadline = time.time() + 10
+        while not os.path.exists(done) and time.time() < deadline: time.sleep(0.1)
+        self.assertTrue(os.path.exists(done), "the helper did not survive the app's exit")
+
 class Modes(Fixture):
     """The setting auto / mention / off, and the automatic install: same checks, waits for jobs, no retry after a failure."""
     def setUp(self):
