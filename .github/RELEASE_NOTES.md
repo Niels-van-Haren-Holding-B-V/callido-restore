@@ -1,5 +1,9 @@
 **Callido Restore** restores files from a Synology Hyper Backup (`.hbk`) without Hyper Backup or a working NAS. It reads the backup's own metadata, shows every backup run on a timeline, and restores the folders you pick to a NAS share or a local folder. Files already at the destination are never overwritten or deleted, and the backup source is only read.
 
+## What's new in 1.2.9
+
+- **Updates on the Mac install themselves again.** An update downloaded and checked the new version, but then the app only closed: the new version was never put in place and the app did not reopen. It now replaces the app and opens the new version (#241). Because the fix is in the update itself, install this version once by hand (`CallidoRestore-arm64.dmg` below); later updates install themselves.
+
 ## What's new in 1.2.8
 
 - **Keep running in the menu bar (Mac) or the notification area (Windows).** Closing the window no longer stops a restore: the app stays in the menu bar or notification area, and hovering over its icon shows how many files are done, the download and upload speeds and the current file. Click the icon (on Windows: right-click) for the same status and to show the window again or quit. Quitting the app (Cmd+Q on the Mac) works as before and still asks while a restore runs. It can be turned off in Settings → Window (#239).
