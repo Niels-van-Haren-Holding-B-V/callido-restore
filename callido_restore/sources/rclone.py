@@ -217,12 +217,13 @@ def forget(prefix=None):
 
 AUTH_URL = re.compile(r"https?://127\.0\.0\.1:\d+/auth\?state=\S+")
 
-def authorize_drive(client_id="", client_secret="", on_url=None, template=None, timeout=600, scope="drive.readonly"):
+def authorize_drive(client_id="", client_secret="", on_url=None, template=None, timeout=600, scope="drive.readonly", cancelled=None):
     """Run the Google sign-in with ``rclone authorize`` and return the token JSON rclone prints. The consent asks for ``scope``
     only (read-only by default: the app never writes to the Drive). rclone listens on 127.0.0.1 for
     Google's redirect and renders ``template`` (a Go HTML template, our own page instead of rclone's plain one) when it arrives;
     the browser is not opened by rclone but by ``on_url(url)``, so the app decides how. Without a client id rclone's shared
-    one is used. Raises RcloneError with rclone's last lines when the sign-in fails or the user never completes it."""
+    one is used. Raises RcloneError with rclone's last lines when the sign-in fails or the user never completes it.
+    ``cancelled()`` true (the job's Stop / the sign-in dialog's Cancel) ends rclone at once, which frees its port for a next try."""
     args = [RCLONE, "authorize", "drive"]
     if client_id: args += [client_id, client_secret or ""]
     args += ["--drive-scope", scope, "--auth-no-open-browser"]
@@ -230,6 +231,14 @@ def authorize_drive(client_id="", client_secret="", on_url=None, template=None, 
     p = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, text=True, **popen_kw())
     lines, token, grab, opened = [], [], False, False
     timer = threading.Timer(timeout, p.kill); timer.start()
+    stop = [False]
+    if cancelled:
+        def watch():
+            while p.returncode is None and not stop[0]:
+                if cancelled():
+                    stop.append("cancelled"); p.kill(); return
+                time.sleep(0.3)
+        threading.Thread(target=watch, daemon=True, name="authorize-cancel").start()
     try:
         for line in p.stdout:
             line = line.rstrip("\n"); lines.append(line)
@@ -243,9 +252,10 @@ def authorize_drive(client_id="", client_secret="", on_url=None, template=None, 
             if line.endswith("--->"): grab = True
         p.wait()
     finally:
-        timer.cancel()
+        timer.cancel(); stop[0] = True
         if p.returncode is None: p.kill()                 # on_url failed before the wait: no sign-in is left waiting
     tok = "\n".join(token).strip()
+    if "cancelled" in stop: raise RcloneError("the sign-in was cancelled")
     if p.returncode != 0 or not tok:
         tail = "\n".join(l for l in lines[-6:] if l.strip())
         raise RcloneError(("the sign-in did not finish within %d s" % timeout) if p.returncode == -9 else (tail[-400:] or "rclone authorize failed"))

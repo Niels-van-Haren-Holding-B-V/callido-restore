@@ -20,6 +20,7 @@ ARM processor that offer Container Manager in Package Center). The same image ru
        image: ghcr.io/niels-van-haren-holding-b-v/callido-restore:latest
        container_name: callido-restore
        restart: unless-stopped
+       user: "1026:100"                                  # your DSM user's id and the group "users" (see below)
        ports:
          - "8765:8765"
        environment:
@@ -31,6 +32,11 @@ ARM processor that offer Container Manager in Package Center). The same image ru
 
    Add one `volumes` line per shared folder you want to restore into, with the same path on both sides. To allow every
    shared folder at once, use `- /volume1:/volume1`.
+
+   `user` makes the app run as you, so restored files belong to you and every DSM user with access to the folder can
+   change or delete them, as with files copied over SMB. `1026` is the first user created on a Synology; for another user,
+   find the number with `id <name>` over SSH. That user needs Read/Write access to the settings folder and to every
+   shared folder you mount. Without a `user` line the app runs as root and restored files belong to root.
 4. Click **Next** and **Done**. The image is downloaded and started.
 5. Open `http://<your NAS>:8765` in a browser (for example `http://nas:8765` or `http://192.0.2.10:8765`) and sign in with
    the password.
@@ -61,6 +67,8 @@ continues with *Resume*.
   `https://restore.example:443` to `http://localhost:8765`).
 * The container can write to every folder you mount. Mount only the shared folders you restore into.
 * Wrong passwords are slowed down (up to 30 s between tries); a session lasts 30 days, or until the container restarts.
+  Behind DSM's reverse proxy every browser reaches the app from the proxy's address, so a mistyped password there makes
+  everyone wait; on a NAS with one user that does not matter.
 
 ## Other Docker hosts
 

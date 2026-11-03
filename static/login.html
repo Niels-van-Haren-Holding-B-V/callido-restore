@@ -30,6 +30,9 @@ button:disabled{opacity:.6;cursor:default}
   <div id="err" role="alert"></div>
 </form>
 <script>
+// A link from another site (the DSM portal, a bookmark tool) arrives without the SameSite=Strict cookie, so this page shows
+// although the session is valid; a same-site request carries it, and then the app itself opens.
+fetch('/api/about').then(r=>{if(r.ok)location.replace('/')}).catch(()=>{});
 document.getElementById('f').addEventListener('submit',async e=>{
   e.preventDefault();const go=document.getElementById('go'),err=document.getElementById('err');go.disabled=true;err.textContent='';
   try{const r=await fetch('/api/login',{method:'POST',body:JSON.stringify({password:document.getElementById('pw').value})});

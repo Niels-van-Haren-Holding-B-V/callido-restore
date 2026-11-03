@@ -49,24 +49,44 @@ def valid(cookie_header):
     return True
 
 
+def _wait(client, now):
+    n, last = _state["fails"].get(client, (0, 0.0))
+    return max(0.0, last + FAIL_DELAY[min(n, len(FAIL_DELAY) - 1)] - now)
+
+
 def wait_before_try(client):
     """Seconds this client must still wait before it may try a password again (0: may try now)."""
+    with _lock: return _wait(client, time.time())
+
+
+def attempt(password, client):
+    """One sign-in try: ("ok", token, 0) for the right password, ("wrong", None, wait) for a wrong one, ("wait", None, wait)
+    when the client may not try yet (the password is then not looked at). Checking the wait, counting the
+    try and comparing happen under one lock: the server answers requests in parallel threads, and a check before the lock let
+    a burst of simultaneous guesses all pass the same open slot."""
+    if not enabled(): return "wait", None, 0.0
+    now = time.time()
     with _lock:
-        n, last = _state["fails"].get(client, (0, 0.0))
-    return max(0.0, last + FAIL_DELAY[min(n, len(FAIL_DELAY) - 1)] - time.time())
+        wait = _wait(client, now)
+        if wait > 0: return "wait", None, wait
+        _sweep(now)
+        if hmac.compare_digest((password or "").encode(), _state["password"].encode()):
+            _state["fails"].pop(client, None)
+            tok = secrets.token_urlsafe(32); _state["sessions"][tok] = now + SESSION_DAYS * 86400
+            return "ok", tok, 0.0
+        n, _ = _state["fails"].get(client, (0, 0.0)); _state["fails"][client] = (n + 1, now)
+        return "wrong", None, _wait(client, now)
 
 
 def login(password, client):
     """A new session token for the right password, else None (and the client waits longer before the next try)."""
-    if not enabled(): return None
-    if wait_before_try(client) > 0: return None
-    ok = hmac.compare_digest((password or "").encode(), _state["password"].encode())
-    with _lock:
-        if not ok:
-            n, _ = _state["fails"].get(client, (0, 0.0)); _state["fails"][client] = (n + 1, time.time()); return None
-        _state["fails"].pop(client, None)
-        tok = secrets.token_urlsafe(32); _state["sessions"][tok] = time.time() + SESSION_DAYS * 86400
-    return tok
+    return attempt(password, client)[1]
+
+
+def _sweep(now):
+    """Forget expired sessions and failed tries older than a day (called under the lock, on each sign-in)."""
+    for t in [t for t, exp in _state["sessions"].items() if exp < now]: del _state["sessions"][t]
+    for c in [c for c, (_, last) in _state["fails"].items() if now - last > 86400]: del _state["fails"][c]
 
 
 def logout(cookie_header):

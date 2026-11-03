@@ -1029,8 +1029,10 @@ const sleepOrWake=ms=>new Promise(res=>{let t=null;const done=()=>{clearTimeout(
 // waits for the address the browser ended on, which the user pastes here.
 function signInAsk(job){const d=$('#dlgSignIn');if(d.open||d.dataset.job===job.id)return;d.dataset.job=job.id;
   $('#signInLink').href=job.auth_url;$('#signInUrl').value='';$('#signInErr').textContent='';d.showModal();
-  $('#signInGo').onclick=async()=>{$('#signInErr').textContent='';try{await post('/api/rclone/sign_in_return',{job:job.id,url:$('#signInUrl').value});d.close()}catch(e){$('#signInErr').textContent=e.message}};
-  $('#signInCancel').onclick=async()=>{d.close();try{await fetch('/api/job/cancel?id='+encodeURIComponent(job.id))}catch(e){}}}
+  // closing the dialog any way but Continue (Cancel, Esc) ends the sign-in on the NAS, so rclone frees its port for a next try
+  d.dataset.done='';d.onclose=()=>{if(!d.dataset.done)fetch('/api/job/cancel?id='+encodeURIComponent(job.id)).catch(()=>{})};
+  $('#signInGo').onclick=async()=>{$('#signInErr').textContent='';try{await post('/api/rclone/sign_in_return',{job:job.id,url:$('#signInUrl').value});d.dataset.done='1';d.close()}catch(e){$('#signInErr').textContent=e.message}};
+  $('#signInCancel').onclick=()=>d.close()}
 async function waitJob(id,onMsg,ms=1000,onJob){for(let miss=0;;){let x=null;try{x=await api('/api/job',{id});miss=0}catch(e){if(/no such job/i.test(e.message)||++miss>60)return{state:'error',error:e.message}}
   if(x&&x.auth_url&&x.state==='running')signInAsk(x);if(x&&onJob)onJob(x);if(x&&x.state!=='running')return x;if(x&&onMsg)onMsg(x.message||'');await sleepOrWake(ms)}}
 // A bar redrawn while the mouse button is down under it swallows the click (press and release land on two different elements),

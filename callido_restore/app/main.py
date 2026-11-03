@@ -124,7 +124,7 @@ def main():
         from callido_restore.server import auth
         pw = os.environ.get("CALLIDO_PASSWORD")
         if a.password_file:
-            try: pw = Path(a.password_file).read_text().strip()
+            try: pw = Path(a.password_file).read_text().rstrip("\r\n")    # the file's line end only; spaces are part of it, as in the variable
             except OSError as e: raise SystemExit(f"cannot read the password file: {e}")
         if not pw: raise SystemExit("network mode (--listen) needs a password: set CALLIDO_PASSWORD or --password-file")
         try: auth.enable(pw)

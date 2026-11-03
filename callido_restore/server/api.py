@@ -418,11 +418,10 @@ class H(BaseHTTPRequestHandler):
         try:
             if u.path == "/api/login":                             # network mode: {password} -> a session cookie
                 if not auth.enabled(): return self._json({"ok": True})
-                client = self.client_address[0]; wait = auth.wait_before_try(client)
-                if wait > 0: return self._json({"error": f"Too many wrong passwords. Try again in {max(1, round(wait))} s.", "wait": round(wait)}, 429)
-                tok = auth.login(body.get("password"), client)
+                result, tok, wait = auth.attempt(body.get("password"), self.client_address[0])
+                if result == "wait":                                # not tried: still waiting after earlier wrong passwords
+                    return self._json({"error": f"Too many wrong passwords. Try again in {max(1, round(wait))} s.", "wait": round(wait)}, 429)
                 if not tok:
-                    wait = auth.wait_before_try(client)
                     return self._json({"error": "Wrong password." + (f" Try again in {wait:.0f} s." if wait >= 1 else ""), "wait": round(wait)}, 401)
                 https = (self.headers.get("X-Forwarded-Proto") or "").lower() == "https"
                 return self._send(200, jdump({"ok": True}), extra={"Set-Cookie": auth.set_cookie(tok, secure=https)})
@@ -519,7 +518,8 @@ class H(BaseHTTPRequestHandler):
                             job["message"] = "Signing in… a browser window opens for the Google sign-in. When it says “Signed in”, close it and come back to this window."
                             import webbrowser
                             on_url = lambda u: webbrowser.open(u)
-                        try: token = rclone.authorize_drive(cid, csec, on_url=on_url, template=_bundled("static/oauth.html"))
+                        try: token = rclone.authorize_drive(cid, csec, on_url=on_url, template=_bundled("static/oauth.html"),
+                                                            cancelled=lambda: bool(job.get("cancel")))
                         except rclone.RcloneError as e: raise RuntimeError("Google sign-in failed: " + str(e))
                         params = {"scope": "drive.readonly", "token": token}
                         if cid: params.update(client_id=cid, client_secret=csec)

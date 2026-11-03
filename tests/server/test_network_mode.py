@@ -34,6 +34,15 @@ class Sessions(unittest.TestCase):
         with mock.patch.object(auth.time, "time", return_value=auth.time.time() + 60):
             self.assertTrue(auth.login(PW, "192.0.2.6"))
 
+    def test_simultaneous_guesses_get_one_try(self):
+        """The server answers in parallel threads: a burst of wrong passwords at the same moment is one try, the rest must wait."""
+        from concurrent.futures import ThreadPoolExecutor
+        start = threading.Barrier(40)
+        def guess(i):
+            start.wait(); return auth.attempt(f"wrong-{i}", "192.0.2.9")[0]
+        with ThreadPoolExecutor(40) as ex: results = list(ex.map(guess, range(40)))
+        self.assertEqual(results.count("wrong"), 1); self.assertEqual(results.count("wait"), 39)
+
     def test_an_expired_session_is_gone(self):
         tok = auth.login(PW, "192.0.2.8")
         with mock.patch.object(auth.time, "time", return_value=auth.time.time() + (auth.SESSION_DAYS + 1) * 86400):
@@ -99,6 +108,11 @@ class Server(unittest.TestCase):
         c.request("GET", "/api/sources", headers={"Host": "localhost:8765", "X-Forwarded-Host": "restore.example",
                                                   "Origin": "https://restore.example", "Cookie": session})
         r = c.getresponse(); r.read(); c.close(); self.assertEqual(r.status, 200)
+
+    def test_a_burst_of_requests_gets_one_401_and_the_rest_429(self):
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(20) as ex: codes = list(ex.map(lambda i: self.req("POST", "/api/login", {"password": f"x{i}"})[0], range(20)))
+        self.assertEqual(codes.count(401), 1); self.assertEqual(codes.count(429), 19)
 
     def test_too_many_tries_answers_wait(self):
         self.req("POST", "/api/login", {"password": "wrong"})
