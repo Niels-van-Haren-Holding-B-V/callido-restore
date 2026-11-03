@@ -58,6 +58,13 @@ chunk table, `2026-10-31-1530-claude-hbk6.md` for the end-to-end tests).
   a real pool and ground truth (`HBK_E2E=1` runs the app over HTTP, `HBK_E2E_STRESS=1` the large layouts,
   `HBK_E2E_CHUNK_INDEX=1` the chunk-table path; `tests/e2e/ui_drive.py` drives the UI in headless Chrome).
 
+## NAS (Docker)
+
+`packaging/docker/Dockerfile` runs the server in network mode (`CALLIDO_LISTEN=0.0.0.0`, `CALLIDO_PASSWORD` required, `HOME=/config`)
+for Synology Container Manager or any Docker host; `.github/workflows/docker.yml` builds it for amd64 and arm64 and publishes it to
+GHCR on a v* tag (the GHCR package must be made public once in the repository's package settings). User guide: `docs/NAS.md`.
+Not covered yet: a native .spk for models without Container Manager; the in-app update is off on the NAS (a new image instead).
+
 ## Known limitations
 
 * Not signed: macOS Gatekeeper ("Open Anyway") and Windows SmartScreen ("Run anyway") on first start. Signing is parked by Niels.

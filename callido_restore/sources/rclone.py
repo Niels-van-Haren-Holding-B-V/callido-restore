@@ -244,6 +244,7 @@ def authorize_drive(client_id="", client_secret="", on_url=None, template=None, 
         p.wait()
     finally:
         timer.cancel()
+        if p.returncode is None: p.kill()                 # on_url failed before the wait: no sign-in is left waiting
     tok = "\n".join(token).strip()
     if p.returncode != 0 or not tok:
         tail = "\n".join(l for l in lines[-6:] if l.strip())

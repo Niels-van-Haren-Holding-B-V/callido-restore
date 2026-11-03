@@ -2,7 +2,7 @@
 
 # Callido Restore
 
-Restore files from a Synology Hyper Backup, without Hyper Backup. For macOS and Windows.
+Restore files from a Synology Hyper Backup, without Hyper Backup. For macOS, Windows and the NAS itself (Docker).
 
 <br clear="left">
 
@@ -68,6 +68,9 @@ The [user guide](docs/USER-GUIDE.md) has the details.
 [Releases](https://github.com/Niels-van-Haren-Holding-B-V/callido-restore/releases), drag the app to Applications and open it.
 The app is not notarized, so macOS blocks the first start: on macOS 15 and later click *Done*, then go to System Settings →
 Privacy & Security and click *Open Anyway*; on older macOS right-click the app → Open.
+
+**Synology NAS** (or any Docker host): run it on the NAS itself with Container Manager and open it from a browser; a restore
+then goes straight from the backup into the NAS's shared folders. See [docs/NAS.md](docs/NAS.md).
 
 **Windows 10 and 11** (x64; Windows on Arm runs it through emulation): download `CallidoRestore-x64.msi` from
 [Releases](https://github.com/Niels-van-Haren-Holding-B-V/callido-restore/releases), save it on the PC's own disk (not a network
