@@ -271,8 +271,6 @@ class H(BaseHTTPRequestHandler):
                 from callido_restore import appsettings
                 return self._json({**appsettings.load(), "tray_available": appsettings.TRAY_AVAILABLE[0], "network": auth.remote(),
                                    "dsm": os.environ.get("CALLIDO_DSM") == "1",       # the Synology package: "this NAS" is the target
-                                   # the DSM user who opened it (set by the package's CGI, whose key every request needs there)
-                                   "dsm_user": self.headers.get("X-Callido-Dsm-User") if os.environ.get("CALLIDO_DSM") == "1" else None,
                                    "platform": "windows" if paths.WINDOWS else "mac" if sys.platform == "darwin" else "other"})
             if u.path == "/api/update":                            # is a newer release published (answers at once; checks daily in the background)
                 from callido_restore import update
@@ -315,6 +313,11 @@ class H(BaseHTTPRequestHandler):
                     elif pp.exists(): out["error"] = "destination exists but is not a folder"
                     elif not pp.parent.is_dir(): out["error"] = f"the folder above it does not exist: {pp.parent} (is the share mounted?)"
                 return self._json(out)
+            if u.path == "/api/nas/shares":                        # the Synology package: this NAS's shared folders are the targets
+                if os.environ.get("CALLIDO_DSM") != "1": return self._json({"error": "only in the Synology package"}, 404)
+                import pwd
+                from callido_restore.restore.destination import nas_shares
+                return self._json({"shares": nas_shares(), "user": pwd.getpwuid(os.getuid()).pw_name})
             if u.path == "/api/remotes":
                 try: pairs = rclone.remotes(cache=True)
                 except rclone.RcloneError: pairs = []
