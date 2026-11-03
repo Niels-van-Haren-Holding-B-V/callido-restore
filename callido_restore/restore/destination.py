@@ -110,7 +110,8 @@ def nas_shares(volumes="/volume[0-9]*"):
     """The Synology package: the shared folders of this NAS (the top-level folders of each volume, without DSM's own
     ``@``/``#``/``.`` folders) and whether this app's user may write into each. A third-party package on DSM 7 runs as its own
     user; an administrator gives it Read/Write per shared folder (Control Panel → Shared Folder → Permissions → System internal
-    user). DSM's ACLs are enforced by the kernel, so ``os.access`` answers for them too. A name on two volumes is listed once."""
+    user). Whether it may write is tried, not guessed from mode bits: a hidden folder is created and removed at once, so DSM's
+    ACLs (a Deny entry beats an Allow) decide; ``why`` holds DSM's answer when it refuses. A name on two volumes is listed once."""
     out, seen = [], set()
     for vol in sorted(glob.glob(volumes)):
         try: names = sorted(os.listdir(vol))
@@ -118,5 +119,15 @@ def nas_shares(volumes="/volume[0-9]*"):
         for n in names:
             p = os.path.join(vol, n)
             if n[:1] in "@#." or n == "lost+found" or n in seen or os.path.islink(p) or not os.path.isdir(p): continue
-            seen.add(n); out.append({"name": n, "path": p, "writable": os.access(p, os.W_OK | os.X_OK)})
+            seen.add(n); why = _write_refused(p); out.append({"name": n, "path": p, "writable": not why, "why": why})
     return out
+
+def _write_refused(folder):
+    """None when this process may create a folder in ``folder`` (tried with a hidden name, removed at once), else the reason."""
+    probe = os.path.join(folder, f".callido-restore-write-check-{os.getpid()}")
+    try: os.mkdir(probe)
+    except FileExistsError: pass
+    except OSError as e: return e.strerror or str(e)
+    try: os.rmdir(probe)
+    except OSError: pass
+    return None

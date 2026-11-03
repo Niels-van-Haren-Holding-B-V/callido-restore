@@ -223,8 +223,11 @@ class LocalServer(ThreadingHTTPServer):
     company networks) the app took that long to open. This bind skips the lookup.
     A port in use must make bind fail, so a second launch finds the running app (app.main: _already_running). On Windows
     SO_REUSEADDR (which http.server turns on) lets a second socket take a port that is in use, so there the address is
-    used exclusively; macOS and Linux keep reuse, so a start right after Quit does not wait for TIME_WAIT."""
+    used exclusively; macOS and Linux keep reuse, so a start right after Quit does not wait for TIME_WAIT.
+    The listen backlog is 64, not socketserver's 5: a page that opens many requests at once (or several browsers on a NAS)
+    otherwise has connections dropped or reset by the kernel while the threads take the first ones."""
     allow_reuse_address = os.name != "nt"
+    request_queue_size = 64
     def server_bind(self):
         if os.name == "nt": self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
         socketserver.TCPServer.server_bind(self)
