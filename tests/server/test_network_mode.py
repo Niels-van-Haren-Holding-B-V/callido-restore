@@ -122,21 +122,6 @@ class Server(unittest.TestCase):
         st, _, body = self.req("POST", "/api/login", {"password": PW}); self.assertEqual(st, 429); self.assertIn(b"Try again", body)
 
 
-class RestoreRoot(unittest.TestCase):
-    """The NAS package passes its install wizard's shared folder through a file (names may hold spaces)."""
-    def test_from_the_environment_or_the_file(self):
-        import os, tempfile
-        with mock.patch.dict(os.environ, {}, clear=False):
-            os.environ.pop("CALLIDO_RESTORE_ROOT", None); os.environ.pop("CALLIDO_RESTORE_ROOT_FILE", None)
-            self.assertIsNone(api.restore_root())
-            with tempfile.NamedTemporaryFile("w", suffix="restore_root", delete=False) as f: f.write("/volume1/My Restore\n")
-            self.addCleanup(os.unlink, f.name)
-            os.environ["CALLIDO_RESTORE_ROOT_FILE"] = f.name; self.assertEqual(api.restore_root(), "/volume1/My Restore")
-            os.environ["CALLIDO_RESTORE_ROOT"] = "/volume2/Restore"; self.assertEqual(api.restore_root(), "/volume2/Restore")
-            os.environ.pop("CALLIDO_RESTORE_ROOT"); os.environ["CALLIDO_RESTORE_ROOT_FILE"] = f.name + ".missing"
-            self.assertIsNone(api.restore_root())
-
-
 class _FakeRclone(BaseHTTPRequestHandler):
     """rclone authorize's local listener: /auth sends the browser to Google; / receives Google's answer."""
     got = []

@@ -148,17 +148,6 @@ def dsm_page(html, prefix):
     return html.replace(b"<head>", b"<head>\n<script>window.CALLIDO_PREFIX=" + json.dumps(prefix).encode() + b";</script>", 1)
 
 
-def restore_root():
-    """The NAS package's restore folder (its install wizard's shared folder): CALLIDO_RESTORE_ROOT, or the first line of the
-    file CALLIDO_RESTORE_ROOT_FILE (how the package passes it: a folder name may hold spaces). None elsewhere."""
-    root = os.environ.get("CALLIDO_RESTORE_ROOT")
-    f = os.environ.get("CALLIDO_RESTORE_ROOT_FILE")
-    if not root and f:
-        try: root = Path(f).read_text().splitlines()[0].strip()
-        except (OSError, IndexError): root = None
-    return root or None
-
-
 def remote_sign_in(job, local_url):
     """Network mode: rclone waits for Google's answer on the NAS's own 127.0.0.1, which the user's browser cannot reach. The
     job gets the Google page instead (``auth_url``: the redirect rclone's /auth gives); after the consent the browser is sent
@@ -281,8 +270,7 @@ class H(BaseHTTPRequestHandler):
             if u.path == "/api/app/settings":                      # the app window's settings and what this platform offers
                 from callido_restore import appsettings
                 return self._json({**appsettings.load(), "tray_available": appsettings.TRAY_AVAILABLE[0], "network": auth.remote(),
-                                   # the NAS package's restore folder from its install wizard (the default target there)
-                                   "restore_root": restore_root(),
+                                   "dsm": os.environ.get("CALLIDO_DSM") == "1",       # the Synology package: "this NAS" is the target
                                    "platform": "windows" if paths.WINDOWS else "mac" if sys.platform == "darwin" else "other"})
             if u.path == "/api/update":                            # is a newer release published (answers at once; checks daily in the background)
                 from callido_restore import update
@@ -297,8 +285,8 @@ class H(BaseHTTPRequestHandler):
             if u.path == "/api/quit":
                 if auth.remote(): return self._json({"error": "On the NAS the app keeps running; stop it in Container Manager or Package Center."}, 409)
                 threading.Timer(0.3, _exit_app).start(); return self._json({"ok": True})
-            if u.path == "/api/ls":   # directory picker helper (on the NAS package it starts in the restore folder)
-                p = Path(os.path.expanduser(q.get("path") or restore_root() or "~"))
+            if u.path == "/api/ls":   # directory picker helper
+                p = Path(os.path.expanduser(q.get("path") or "~"))
                 if not p.is_dir(): p = p.parent
                 items = sorted([e.name for e in p.iterdir() if e.is_dir() and not e.name.startswith(".")], key=str.lower)
                 return self._json({"path": ui_path(p), "parent": ui_path(p.parent), "dirs": items})

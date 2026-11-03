@@ -9,9 +9,10 @@ NAS as a service and opens **inside DSM**, from the DSM main menu.
   `src/app/dsm_cgi.py`, which lets in a DSM administrator with a valid DSM session (DSM's `authenticate.cgi`, with the
   SynoToken the page fetches from `/webman/login.cgi`) and forwards the request to the app. The app serves its page with
   that prefix, and the page sends its calls there. `src/app/config` is the DSM main menu entry.
-* The install wizard asks for the shared folder to restore into (`SERVICE_WIZARD_SHARENAME`): DSM creates it if needed and
-  gives the package user Read/Write; the app offers it as the default target. Other shared folders need Read/Write for
-  the system user `callido-restore` (Control Panel → Shared Folder → Permissions).
+* No install wizard: the installation asks nothing. Restores go to **this NAS** through an SMB connection to `127.0.0.1`
+  with the user's own DSM account, entered once in the app, as the Mac and Windows apps connect to a NAS. The app then
+  writes with that user's rights into any shared folder and creates the folders it needs; the files belong to that user.
+  DSM's SMB service must be on (Control Panel → File Services → SMB).
 
 * `cross/` → `spksrc/cross/callido-restore`: the app's source archive (`callido_restore/`, `static/`, `LICENSE`) of the
   release `PKG_VERS` (or of one commit with `CALLIDO_GIT_HASH=<sha>` in the environment), installed to `share/callido-restore`.

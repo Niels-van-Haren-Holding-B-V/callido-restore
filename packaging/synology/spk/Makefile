@@ -25,12 +25,8 @@ LICENSE   = MIT
 STARTABLE = yes
 REQUIRED_MIN_DSM = 7.0
 
-WIZARDS_DIR = src/wizard
-
 SERVICE_USER  = auto
 SERVICE_SETUP = src/service-setup.sh
-# the restore folder: DSM creates the shared folder if needed and gives the package user Read/Write on it (data share worker)
-SERVICE_WIZARD_SHARENAME = wizard_restore_share
 
 # Inside DSM: the app listens on the NAS's loopback only and DSM's web server is the way in (src/app/index.cgi, DSM login),
 # so there is no port of its own, no firewall rule and no password; the DSM main menu entry is src/app/config.

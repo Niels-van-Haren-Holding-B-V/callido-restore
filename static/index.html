@@ -834,6 +834,9 @@ $('#basketBtn').onclick=()=>openBasket();$('#basketClear').onclick=()=>{if(!S.ba
 $('#basketGo').onclick=()=>{openBasket(false);showTab('restore');const s=$('#snap');if(s)s.scrollIntoView({behavior:'smooth'})};
 document.addEventListener('click',e=>{const p=$('#basketPanel');if(p.classList.contains('open')&&!p.contains(e.target)&&e.target!==$('#basketBtn')&&!e.target.closest('.toast'))p.classList.remove('open')});
 async function tabRestore(){const el=$('#tab-restore');
+  // On the NAS itself (the Synology package) the target is "this NAS": an SMB connection to 127.0.0.1 with the user's own DSM
+  // account, as the Mac and Windows apps connect to the NAS. It writes with that user's rights, into any shared folder.
+  const AS=await api('/api/app/settings').catch(()=>({}));const ONNAS=!!(AS&&AS.dsm);const THISNAS='this-nas';
   const prep=await prepState();let pool=prep.pool||{};prepPillRender(prep);
   // Running jobs decide the state of the buttons that start one: while a job of that kind runs its button is disabled and the
   // job's own progress is shown; the buttons come back when the job ends (pollJob's done callback re-renders this tab).
@@ -871,7 +874,7 @@ async function tabRestore(){const el=$('#tab-restore');
          <li><b>SMB</b>: Control Panel → File Services → SMB → Enable SMB service. Then connect below with the NAS address, that user and its password.</li>
          <li><b>Another protocol</b> (SFTP, WebDAV, NFS): enable it under File Services, then either mount the share in Finder (Go → Connect to Server) and choose “a mounted share / local path” above, or create the connection with <code>rclone config</code> in Terminal; any rclone connection appears in the list. On Windows: map the share as a network drive in File Explorer and use that drive letter.</li>
        </ol>
-       <div class="row"><label class="f">connection name <input id="wdName" value="${esc(WD.editing||'nas')}" style="width:90px" oninput="wdNameInput(this)"></label><label class="f">NAS address (IP or name) <input id="wdHost" style="width:160px" value="${WD.editing?esc(WD.host||''):''}"></label><label class="f">user <input id="wdUser" style="width:120px" value="${WD.editing?esc(WD.user||''):''}"></label><label class="f">password <input id="wdPass" type="password" style="width:140px" placeholder="${WD.editing?'unchanged':''}"></label><button class="small" id="wdConnect">${WD.editing?'Save and test':'Connect'}</button></div>
+       <div class="row">${ONNAS&&!WD.editing?`<input id="wdName" type="hidden" value="${THISNAS}"><input id="wdHost" type="hidden" value="127.0.0.1"><span class="help" style="align-self:center">This NAS, with your DSM account:</span>`:`<label class="f">connection name <input id="wdName" value="${esc(WD.editing||'nas')}" style="width:90px" oninput="wdNameInput(this)"></label><label class="f">NAS address (IP or name) <input id="wdHost" style="width:160px" value="${WD.editing?esc(WD.host||''):''}"></label>`}<label class="f">user <input id="wdUser" style="width:120px" value="${WD.editing?esc(WD.user||''):''}"></label><label class="f">password <input id="wdPass" type="password" style="width:140px" placeholder="${WD.editing?'unchanged':''}"></label><button class="small" id="wdConnect">${WD.editing?'Save and test':'Connect'}</button></div>
        <div id="wdConn" class="status ${WD.cls}">${esc(WD.msg)}</div>
        <p class="help" style="margin:4px 0 0">The app never deletes anything on the NAS. It creates the target folder and writes the restored files; a target inside the backup itself is refused.</p>
      </details>
@@ -913,12 +916,10 @@ async function tabRestore(){const el=$('#tab-restore');
     ROWS.forEach((b,i)=>{const d=rowDest(i);$(`.mapTo[data-i="${i}"]`).textContent=d?'→ '+d+'/…':local?'→ type a folder':'→ choose a share';$(`.mapStat[data-i="${i}"]`).textContent='';
       if(persist)MAP[key(b)]={share:$(`.mapShare[data-i="${i}"]`).value,sub:$(`.mapSub[data-i="${i}"]`).value,path:$(`.mapPath[data-i="${i}"]`).value}});
     if(persist){MAP._rem=rem();MAP._one=oneMode();MAP._onePath=oneDest();saveMap()}
-    $('#wzMap').style.opacity=oneMode()?'.45':'';$('#wzRemHelp').textContent=local?(RROOT?`on this NAS the app writes to ${RROOT} (chosen at installation); another shared folder needs Read/Write for the user callido-restore in DSM`:'type the full path of a mounted share or local folder per row'):SHARES.length||!rem()?'':'no shares found on this connection'};
-  // On a NAS package (network mode) the install wizard's restore folder is the default target: <folder>/<share> per row.
-  const AS=await api('/api/app/settings').catch(()=>({}));const RROOT=(AS&&AS.restore_root)||'';
+    $('#wzMap').style.opacity=oneMode()?'.45':'';$('#wzRemHelp').textContent=local?'type the full path of a mounted share or local folder per row':SHARES.length||!rem()?'':'no shares found on this connection'};
   const fillRows=()=>{ROWS.forEach((b,i)=>{const m=MAP[key(b)]||{};const sel=$(`.mapShare[data-i="${i}"]`);const want=(m.share&&SHARES.includes(m.share))?m.share:(SHARES.includes(b.share)?b.share:'');
       sel.innerHTML=`<option value="">(choose a share)</option>`+SHARES.map(x=>`<option ${x===want?'selected':''}>${esc(x)}</option>`).join('');
-      $(`.mapSub[data-i="${i}"]`).value=m.sub||'';$(`.mapPath[data-i="${i}"]`).value=m.path||(RROOT?`${RROOT}/${b.share}`:'')});updRows()};
+      $(`.mapSub[data-i="${i}"]`).value=m.sub||'';$(`.mapPath[data-i="${i}"]`).value=m.path||''});updRows()};
   const onEdit=()=>updRows(true);$$('.mapShare,.mapSub,.mapPath').forEach(e=>{e.onchange=onEdit;e.oninput=onEdit});
   $('#wzOne').checked=!!MAP._one;$('#wzOnePath').value=MAP._onePath||'';$('#wzOne').onchange=onEdit;$('#wzOnePath').oninput=onEdit;
   const loadShares=async()=>{SHARES=[];if(rem()){$('#wzRemHelp').innerHTML='<span class="spin"></span> Listing the shares…';$('#wzRem').disabled=true;$$('.mapShare').forEach(s=>s.disabled=true);
@@ -927,7 +928,7 @@ async function tabRestore(){const el=$('#tab-restore');
   try{const r=await api('/api/remotes');const srcRems=((S.info&&S.info.source&&S.info.source.remotes)||[]).map(x=>x.split(':')[0]+':');
     // default connection: a NAS-style remote (SMB, SFTP, WebDAV, FTP) first, then any remote that is not the backup's own, then the first one
     const types=r.types||{};const nasLike=['smb','sftp','webdav','ftp'].map(t=>r.remotes.find(x=>types[x]===t)).find(Boolean);
-    const pref=MAP._rem!=null?MAP._rem:RROOT?'':(nasLike||r.remotes.find(x=>!srcRems.includes(x))||r.remotes[0]||'');   // on the NAS: its own folders
+    const pref=MAP._rem!=null?MAP._rem:(ONNAS&&r.remotes.includes(THISNAS+':'))?THISNAS+':':(nasLike||r.remotes.find(x=>!srcRems.includes(x))||r.remotes[0]||'');   // on the NAS: this NAS first
     $('#wzRem').innerHTML=r.remotes.map(x=>`<option ${x===pref?'selected':''}>${esc(x)}</option>`).join('')+`<option value="" ${pref===''?'selected':''}>a mounted share / local path</option>`;
     // Edit: an SMB connection's address, user and password can change (a VPN address, a new user); the name stays, so the
     // targets and saved restores that use it keep working. The form below does it; the password may stay empty to keep it.
