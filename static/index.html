@@ -187,6 +187,8 @@ footer.madeBy img{width:18px;height:18px;border-radius:5px;vertical-align:middle
     <label><input type="radio" name="setUpd" value="mention"> Only mention them: a notice in the header, you choose when to install</label><br>
     <label><input type="radio" name="setUpd" value="off"> Don't check for updates</label>
     <div class="row" style="margin-top:6px"><button id="setUpdCheck" class="small">Check now</button><span id="setUpdState" class="help"></span></div></section>
+  <section class="setSec" id="setWinSec" style="display:none"><h4>Window</h4><label><input type="checkbox" id="setTray"> <span id="setTrayText">Keep running in the menu bar when the window is closed</span></label>
+    <p class="help" id="setTrayHelp" style="margin:4px 0 0"></p></section>
   <section class="setSec"><h4>Download cache</h4><div id="setCache"><span class="spin"></span> Loading…</div></section>
   <div class="row" style="justify-content:flex-end;margin-top:10px"><button id="settingsClose" class="small">Close</button></div></dialog>
 <dialog id="dlgAbout" style="max-width:520px"><h3 style="margin-top:0">Callido Restore</h3><div id="aboutBody" class="help">loading…</div>
@@ -445,7 +447,13 @@ async function setCache(){const el=$('#setCache');let c;try{c=await api('/api/ca
       $('#setClearNo').onclick=()=>setCache();return}
     b.disabled=true;$('#setCacheMsg').innerHTML='<span class="spin"></span> Clearing…';
     try{const r=await post('/api/cache/clear',{});toast(`Cleared ${human(r.freed)}${r.left?` (${human(r.left)} still in use)`:''}.`,{kind:'ok'});setCache()}catch(e){$('#setCacheMsg').textContent=e.message;b.disabled=false}}}
-function openSettings(){$('#dlgSettings').showModal();SET.editing=null;setConns();setTheme();setCache();if(UPD.st){updRender(UPD.st);setUpdates()}updPoll(false).then(setUpdates)}
+// the app window's "keep running" setting (app/tray.py); offered only in the app window, once its icon works
+async function setWindow(){const sec=$('#setWinSec');let a;try{a=await api('/api/app/settings')}catch(e){return}
+  sec.style.display=a.tray_available?'':'none';if(!a.tray_available)return;const win=a.platform==='windows';
+  $('#setTrayText').textContent=win?'Keep running in the notification area (next to the clock) when the window is closed':'Keep running in the menu bar when the window is closed';
+  $('#setTrayHelp').textContent=(win?'Click the icon to open the window again, right-click it to quit. ':'Click the icon in the menu bar to open the window again or to quit. ')+'Hovering it shows the restore: files done, download and upload speed and the current file.';
+  const c=$('#setTray');c.checked=!!a.tray;c.onchange=async()=>{try{await post('/api/app/settings',{tray:c.checked})}catch(e){c.checked=!c.checked;toastError(e)}}}
+function openSettings(){$('#dlgSettings').showModal();SET.editing=null;setConns();setTheme();setCache();setWindow();if(UPD.st){updRender(UPD.st);setUpdates()}updPoll(false).then(setUpdates)}
 $('#setUpdCheck').onclick=async()=>{$('#setUpdState').innerHTML='<span class="spin"></span> checking…';const st=await updPoll(true);setUpdates();if(!st)$('#setUpdState').textContent='updates are not available in this version'};
 $('#settingsBtn').onclick=openSettings;$('#settingsClose').onclick=()=>$('#dlgSettings').close();
 updPoll(false);

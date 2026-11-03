@@ -2,7 +2,8 @@
 frozen. Usage: python -m callido_restore [--port 8765] [--browser | --no-window] [--smoke]"""
 import argparse, os, subprocess, sys, threading
 from pathlib import Path
-from callido_restore import paths
+from callido_restore import appsettings, paths
+from callido_restore.app import tray as _tray
 from callido_restore.about import APP_NAME, VERSION
 from callido_restore.paths import RCLONE, _bundled, _resource_roots
 from callido_restore.restore.jobs import JOBS
@@ -49,12 +50,15 @@ def run_window(port, smoke=False):
     webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] = True
     url = f"http://127.0.0.1:{port}"
     win = webview.create_window(APP_NAME, url, width=1360, height=880, min_size=(900, 600), text_select=True)
-    result = {}
-    def closing():                                               # warn before closing while a job (e.g. a restore) runs
-        running = [j["label"] for j in JOBS.values() if j["state"] == "running"]
-        if not running or smoke: return True
-        return bool(win.create_confirmation_dialog(APP_NAME, f"{len(running)} job(s) still running: {running[0]}. "
-                                                   "Quit anyway? Restore jobs are saved and can be resumed later."))
+    result = {}; quitting = [False]
+    tray = None if smoke else _make_tray(win, quitting)
+    def closing():
+        # The "keep running" setting: closing the window hides it; the menu-bar / tray icon brings it back or quits. On macOS
+        # only the close button or Cmd+W hides; Cmd+Q, the Dock's Quit and logging out quit as before.
+        if quitting[0] or smoke: return True                   # Quit from the icon's menu: already asked there
+        if tray and tray.shown and (sys.platform != "darwin" or _tray.mac_close_was_the_window()):
+            win.hide(); tray.dock(False); return False
+        return _may_quit(win)
     win.events.closing += closing
     if smoke:
         guard = threading.Timer(30, lambda: (_log("smoke: window never loaded"), _exit_app(2)))
@@ -64,8 +68,36 @@ def run_window(port, smoke=False):
             finally: _log(f"smoke: page loaded, title={result.get('title')!r}"); win.destroy()
         win.events.loaded += loaded
         guard.start()
-    webview.start(private_mode=False)                          # keep the page's local storage (restore selection, last run) across restarts
+    def started():
+        if tray is None: return
+        try:
+            if sys.platform == "darwin": _tray.mac_watch_events()
+            if appsettings.get("tray"): tray.start()
+            appsettings.TRAY_AVAILABLE[0] = True
+            appsettings.on_change(lambda d: tray.start() if d.get("tray") else tray.stop())
+        except Exception as e: _log(f"tray: not available ({e}); closing the window quits the app")
+    webview.start(started, private_mode=False)                 # keep the page's local storage (restore selection, last run) across restarts
+    if tray: tray.stop()
     return result.get("title")
+
+def _may_quit(win):
+    """True when nothing runs, or the user agrees to quit while a job (e.g. a restore) runs."""
+    running = [j["label"] for j in JOBS.values() if j["state"] == "running"]
+    if not running: return True
+    return bool(win.create_confirmation_dialog(APP_NAME, f"{len(running)} job(s) still running: {running[0]}. "
+                                               "Quit anyway? Restore jobs are saved and can be resumed later."))
+
+def _make_tray(win, quitting):
+    """The menu-bar / notification-area icon (app/tray.py): Show brings the window back, Quit closes it the normal way (with the
+    question while a job runs)."""
+    def show(): tray.dock(True); win.show(); win.restore()
+    def quit_():
+        if any(j["state"] == "running" for j in JOBS.values()):
+            tray.dock(True); win.show()                                 # the question appears with the window
+            if not _may_quit(win): return
+        quitting[0] = True; win.destroy()
+    tray = _tray.Tray(show, quit_, lambda: list(JOBS.values()))
+    return tray
 
 def main():
     if len(sys.argv) > 1 and sys.argv[1] == "--mapper":           # child process of the pool preparation (pool/poolmap.py)
