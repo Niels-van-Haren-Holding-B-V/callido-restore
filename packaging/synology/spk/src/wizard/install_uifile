@@ -4,28 +4,25 @@
         "invalid_next_disabled": true,
         "items": [
             {
-                "desc": "Callido Restore runs on this NAS and is opened in a browser at http://&lt;this NAS&gt;:8765. Choose the password you will sign in with (at least 8 characters)."
-            },
-            {
-                "type": "password",
+                "type": "textfield",
+                "desc": "Restored files are written into this shared folder. It is created if it does not exist yet, and Callido Restore gets access to it automatically.",
                 "subitems": [
                     {
-                        "key": "wizard_password",
-                        "desc": "Password",
+                        "key": "wizard_restore_share",
+                        "desc": "Shared folder",
+                        "defaultValue": "Restore",
                         "validator": {
                             "allowBlank": false,
-                            "minLength": 8
+                            "regex": {
+                                "expr": "/^[\\w _.-]+$/",
+                                "errorText": "Only the name of a shared folder, no subfolders."
+                            }
                         }
                     }
                 ]
-            }
-        ]
-    },
-    {
-        "step_title": "Shared folders",
-        "items": [
+            },
             {
-                "desc": "Restores are written by the system user <b>callido-restore</b>. After the installation, give it Read/Write permission on every shared folder you want to restore into: Control Panel &gt; Shared Folder &gt; Edit &gt; Permissions &gt; select <i>System internal user</i> &gt; callido-restore."
+                "desc": "After the installation, open Callido Restore from the DSM main menu. Only DSM administrators can use it; it is not reachable from outside DSM."
             }
         ]
     }

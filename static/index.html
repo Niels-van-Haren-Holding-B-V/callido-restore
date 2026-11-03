@@ -6,6 +6,20 @@
 <link rel="icon" id="favicon" type="image/png">
 <title>Callido Restore</title>
 <script>try{const th=localStorage.getItem('theme');if(th==='light'||th==='dark')document.documentElement.dataset.theme=th}catch(e){}</script>
+<script>
+// Inside DSM (the Synology package): the app is reached only through DSM's web server at CALLIDO_PREFIX (set by the server
+// when the request came through the package's CGI). Every /api/ call goes to that prefix and carries DSM's SynoToken, which
+// DSM hands to a page of a logged-in session at /webman/login.cgi; the CGI checks the DSM session with it.
+(()=>{const P=window.CALLIDO_PREFIX;if(!P)return;
+  const tok=fetch('/webman/login.cgi',{credentials:'same-origin'}).then(r=>r.json()).then(j=>j.SynoToken||'').catch(()=>'');
+  window.CALLIDO_TOKEN=tok;const raw=window.fetch.bind(window);
+  const fix=u=>{const x=new URL(u,location.href);if(x.origin===location.origin&&x.pathname.startsWith('/api/'))x.pathname=P+x.pathname;return x};
+  window.fetch=async(u,o={})=>{const s=u instanceof Request?u.url:String(u);const x=fix(s);if(!x.pathname.startsWith(P+'/api/'))return raw(u,o);
+    const t=await tok;const h=new Headers(o.headers||{});if(t)h.set('X-SYNO-TOKEN',t);return raw(x.toString(),{...o,headers:h,credentials:'same-origin'})};
+  window.apiHref=async u=>{const x=fix(u);const t=await tok;if(t)x.searchParams.set('SynoToken',t);return x.toString()}})();
+// a link to an /api/ address (a file download): inside DSM it needs the prefix and the token, so it is resolved on click
+function apiLink(a){if(!window.CALLIDO_PREFIX)return true;window.apiHref(a.getAttribute('href')).then(u=>{const t=document.createElement('a');t.href=u;t.download='';document.body.appendChild(t);t.click();t.remove()});return false}
+</script>
 <style>
 :root{color-scheme:light dark;}:root[data-theme=light]{color-scheme:light}:root[data-theme=dark]{color-scheme:dark}
 :root{
@@ -311,9 +325,9 @@ async function track(p,q,run){const label=activityLabel(p,q);const btn=document.
 const CACHE_TTL=30000;const CACHEABLE=new Set(['/api/remotes']);const CACHE=new Map();
 const api=async(p,q={})=>{const u=new URL(p,location.origin);Object.entries(q).forEach(([k,v])=>v!==undefined&&v!==null&&v!==''&&u.searchParams.set(k,v));
   const key=u.toString();if(CACHEABLE.has(p)){const c=CACHE.get(key);if(c&&Date.now()-c.t<CACHE_TTL)return c.v}
-  return track(p,q,async()=>{const r=await fetch(u);if(r.status===401){location.reload();throw new Error('Sign in first.')}const j=await r.json();if(j&&j.error&&!(p==='/api/job'&&j.state))throw new Error(j.error);   // a failed job is an answer (state 'error'), not a failed call: waitJob/pollJob used to retry it as a miss (60 s, or for ever)
+  return track(p,q,async()=>{const r=await fetch(u);if(r.status===401&&!window.CALLIDO_PREFIX){location.reload();throw new Error('Sign in first.')}const j=await r.json();if(j&&j.error&&!(p==='/api/job'&&j.state))throw new Error(j.error);   // a failed job is an answer (state 'error'), not a failed call: waitJob/pollJob used to retry it as a miss (60 s, or for ever)
   if(CACHEABLE.has(p))CACHE.set(key,{t:Date.now(),v:j});return j})};
-const post=async(p,b)=>track(p,b,async()=>{const r=await fetch(p,{method:'POST',body:JSON.stringify(b)});if(r.status===401&&p!=='/api/login'){location.reload();throw new Error('Sign in first.')}const j=await r.json();if(j.error)throw new Error(j.error);if(p==='/api/rclone/connect')CACHE.clear();return j});
+const post=async(p,b)=>track(p,b,async()=>{const r=await fetch(p,{method:'POST',body:JSON.stringify(b)});if(r.status===401&&p!=='/api/login'&&!window.CALLIDO_PREFIX){location.reload();throw new Error('Sign in first.')}const j=await r.json();if(j.error)throw new Error(j.error);if(p==='/api/rclone/connect')CACHE.clear();return j});
 // Per-file check of a restore (pool map placer v3). "verified" in the result means: the file's place in the backup was confirmed by
 // its size and every block's checksum matched while reading (not a checksum of the whole file). "identical_copy": restored from an
 // identical copy's entries. "unverified": its place in the backup could not be confirmed. Shown only when the result has the counts.
@@ -899,10 +913,12 @@ async function tabRestore(){const el=$('#tab-restore');
     ROWS.forEach((b,i)=>{const d=rowDest(i);$(`.mapTo[data-i="${i}"]`).textContent=d?'→ '+d+'/…':local?'→ type a folder':'→ choose a share';$(`.mapStat[data-i="${i}"]`).textContent='';
       if(persist)MAP[key(b)]={share:$(`.mapShare[data-i="${i}"]`).value,sub:$(`.mapSub[data-i="${i}"]`).value,path:$(`.mapPath[data-i="${i}"]`).value}});
     if(persist){MAP._rem=rem();MAP._one=oneMode();MAP._onePath=oneDest();saveMap()}
-    $('#wzMap').style.opacity=oneMode()?'.45':'';$('#wzRemHelp').textContent=local?'type the full path of a mounted share or local folder per row':SHARES.length||!rem()?'':'no shares found on this connection'};
+    $('#wzMap').style.opacity=oneMode()?'.45':'';$('#wzRemHelp').textContent=local?(RROOT?`on this NAS the app writes to ${RROOT} (chosen at installation); another shared folder needs Read/Write for the user callido-restore in DSM`:'type the full path of a mounted share or local folder per row'):SHARES.length||!rem()?'':'no shares found on this connection'};
+  // On a NAS package (network mode) the install wizard's restore folder is the default target: <folder>/<share> per row.
+  const AS=await api('/api/app/settings').catch(()=>({}));const RROOT=(AS&&AS.restore_root)||'';
   const fillRows=()=>{ROWS.forEach((b,i)=>{const m=MAP[key(b)]||{};const sel=$(`.mapShare[data-i="${i}"]`);const want=(m.share&&SHARES.includes(m.share))?m.share:(SHARES.includes(b.share)?b.share:'');
       sel.innerHTML=`<option value="">(choose a share)</option>`+SHARES.map(x=>`<option ${x===want?'selected':''}>${esc(x)}</option>`).join('');
-      $(`.mapSub[data-i="${i}"]`).value=m.sub||'';$(`.mapPath[data-i="${i}"]`).value=m.path||''});updRows()};
+      $(`.mapSub[data-i="${i}"]`).value=m.sub||'';$(`.mapPath[data-i="${i}"]`).value=m.path||(RROOT?`${RROOT}/${b.share}`:'')});updRows()};
   const onEdit=()=>updRows(true);$$('.mapShare,.mapSub,.mapPath').forEach(e=>{e.onchange=onEdit;e.oninput=onEdit});
   $('#wzOne').checked=!!MAP._one;$('#wzOnePath').value=MAP._onePath||'';$('#wzOne').onchange=onEdit;$('#wzOnePath').oninput=onEdit;
   const loadShares=async()=>{SHARES=[];if(rem()){$('#wzRemHelp').innerHTML='<span class="spin"></span> Listing the shares…';$('#wzRem').disabled=true;$$('.mapShare').forEach(s=>s.disabled=true);
@@ -911,7 +927,7 @@ async function tabRestore(){const el=$('#tab-restore');
   try{const r=await api('/api/remotes');const srcRems=((S.info&&S.info.source&&S.info.source.remotes)||[]).map(x=>x.split(':')[0]+':');
     // default connection: a NAS-style remote (SMB, SFTP, WebDAV, FTP) first, then any remote that is not the backup's own, then the first one
     const types=r.types||{};const nasLike=['smb','sftp','webdav','ftp'].map(t=>r.remotes.find(x=>types[x]===t)).find(Boolean);
-    const pref=MAP._rem!=null?MAP._rem:(nasLike||r.remotes.find(x=>!srcRems.includes(x))||r.remotes[0]||'');
+    const pref=MAP._rem!=null?MAP._rem:RROOT?'':(nasLike||r.remotes.find(x=>!srcRems.includes(x))||r.remotes[0]||'');   // on the NAS: its own folders
     $('#wzRem').innerHTML=r.remotes.map(x=>`<option ${x===pref?'selected':''}>${esc(x)}</option>`).join('')+`<option value="" ${pref===''?'selected':''}>a mounted share / local path</option>`;
     // Edit: an SMB connection's address, user and password can change (a VPN address, a new user); the name stays, so the
     // targets and saved restores that use it keep working. The form below does it; the password may stay empty to keep it.
@@ -1055,7 +1071,7 @@ async function openDetail(share,ver,id){const d=await api('/api/file',{src:S.src
   <dl><dt>Type</dt><dd>${d.is_dir?'directory':'file'} · mode ${d.mode_oct}${d.is_exec?' (executable)':''}</dd><dt>Size</dt><dd>${d.size.toLocaleString()} B (${human(d.size)})</dd>
   <dt>Modified</dt><dd>${dt(d.mtime)} UTC</dd><dt>Changed</dt><dd>${dt(d.ctime)} UTC</dd><dt>Inode</dt><dd>${d.inode??''} · links ${d.nlink??''}</dd>
   <dt>Status</dt><dd>${esc(d.status)} in v${ver}</dd><dt>Storage</dt><dd class="mono">${d.off<0?`file_pool/${-d.off}.file`:`virtual_file offset ${d.off}`} · dedup ${d.dedup}</dd></dl>
-  <div class="row"><button class="small" id="dAdd">+ Restore this</button>${!d.is_dir?`<a class="small" href="/api/download?src=${encodeURIComponent(S.src)}&share=${encodeURIComponent(share)}&ver=${ver}&id=${d.id}" download><button class="small">Download file</button></a>`:''}</div>
+  <div class="row"><button class="small" id="dAdd">+ Restore this</button>${!d.is_dir?`<a class="small" href="/api/download?src=${encodeURIComponent(S.src)}&share=${encodeURIComponent(share)}&ver=${ver}&id=${d.id}" download onclick="return apiLink(this)"><button class="small">Download file</button></a>`:''}</div>
   ${!d.is_dir?`<details class="adv"><summary>Advanced</summary><button class="small" id="dExtract">Inspect stored bytes</button></details>`:''}
   <h4 style="margin:14px 0 4px;font-size:12.5px;color:var(--muted)">This file in the loaded runs</h4>
   <table>${h.map(x=>`<tr><td>v${x.ver} ${dd(x.ts)}</td><td>${x.present?`${esc(x.status)} · ${human(x.size)} · ${dt(x.mtime)}`:'<span class="muted">absent</span>'}</td></tr>`).join('')}</table><div id="dExtractOut"></div>`;

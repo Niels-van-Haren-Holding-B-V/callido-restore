@@ -138,6 +138,27 @@ def request_refusal(host, origin, fetch_site, server_port, path=None, fetch_mode
     return None
 
 
+DSM_PREFIX = re.compile(r"/webman/3rdparty/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\.cgi")
+
+
+def dsm_page(html, prefix):
+    """Inside DSM (the Synology package, CALLIDO_DSM=1) the page is served through the package's CGI at ``prefix``; the page
+    then sends its calls there (static/index.html, CALLIDO_PREFIX). Only that mode and only a /webman/3rdparty/... CGI path."""
+    if os.environ.get("CALLIDO_DSM") != "1" or not prefix or not DSM_PREFIX.fullmatch(prefix): return html
+    return html.replace(b"<head>", b"<head>\n<script>window.CALLIDO_PREFIX=" + json.dumps(prefix).encode() + b";</script>", 1)
+
+
+def restore_root():
+    """The NAS package's restore folder (its install wizard's shared folder): CALLIDO_RESTORE_ROOT, or the first line of the
+    file CALLIDO_RESTORE_ROOT_FILE (how the package passes it: a folder name may hold spaces). None elsewhere."""
+    root = os.environ.get("CALLIDO_RESTORE_ROOT")
+    f = os.environ.get("CALLIDO_RESTORE_ROOT_FILE")
+    if not root and f:
+        try: root = Path(f).read_text().splitlines()[0].strip()
+        except (OSError, IndexError): root = None
+    return root or None
+
+
 def remote_sign_in(job, local_url):
     """Network mode: rclone waits for Google's answer on the NAS's own 127.0.0.1, which the user's browser cannot reach. The
     job gets the Google page instead (``auth_url``: the redirect rclone's /auth gives); after the consent the browser is sent
@@ -252,12 +273,14 @@ class H(BaseHTTPRequestHandler):
             if u.path in ("/", "/index.html"):
                 page = _bundled("static/index.html")
                 if page is None: return self._send(500, b"UI not found", "text/plain; charset=utf-8")
-                return self._send(200, page.read_bytes(), "text/html; charset=utf-8")
+                return self._send(200, dsm_page(page.read_bytes(), self.headers.get("X-Callido-Prefix")), "text/html; charset=utf-8")
             if u.path == "/api/sources":
                 return self._json([s.to_json() for s in SOURCES.values()])
             if u.path == "/api/app/settings":                      # the app window's settings and what this platform offers
                 from callido_restore import appsettings
-                return self._json({**appsettings.load(), "tray_available": appsettings.TRAY_AVAILABLE[0],
+                return self._json({**appsettings.load(), "tray_available": appsettings.TRAY_AVAILABLE[0], "network": auth.remote(),
+                                   # the NAS package's restore folder from its install wizard (the default target there)
+                                   "restore_root": restore_root(),
                                    "platform": "windows" if paths.WINDOWS else "mac" if sys.platform == "darwin" else "other"})
             if u.path == "/api/update":                            # is a newer release published (answers at once; checks daily in the background)
                 from callido_restore import update
@@ -270,10 +293,10 @@ class H(BaseHTTPRequestHandler):
                 from callido_restore import cachedir
                 return self._json(cachedir.usage({sid: s.name for sid, s in SOURCES.items()}))
             if u.path == "/api/quit":
-                if auth.enabled(): return self._json({"error": "On the NAS the app keeps running; stop it in Container Manager or Package Center."}, 409)
+                if auth.remote(): return self._json({"error": "On the NAS the app keeps running; stop it in Container Manager or Package Center."}, 409)
                 threading.Timer(0.3, _exit_app).start(); return self._json({"ok": True})
-            if u.path == "/api/ls":   # directory picker helper
-                p = Path(os.path.expanduser(q.get("path") or "~"))
+            if u.path == "/api/ls":   # directory picker helper (on the NAS package it starts in the restore folder)
+                p = Path(os.path.expanduser(q.get("path") or restore_root() or "~"))
                 if not p.is_dir(): p = p.parent
                 items = sorted([e.name for e in p.iterdir() if e.is_dir() and not e.name.startswith(".")], key=str.lower)
                 return self._json({"path": ui_path(p), "parent": ui_path(p.parent), "dirs": items})
@@ -456,7 +479,7 @@ class H(BaseHTTPRequestHandler):
                 return self._json(update.set_check(bool(body.get("check", True))))
             if u.path == "/api/update/install":                    # a job: download, verify the signed checksum, install, restart
                 from callido_restore import update
-                if auth.enabled(): return self._json({"error": "On the NAS a new version comes with a new container image or package."}, 409)
+                if auth.remote(): return self._json({"error": "On the NAS a new version comes with a new container image or package."}, 409)
                 busy = update_busy()
                 if busy: return self._json({"error": f"Wait until the {busy} has finished or is paused; a paused restore continues after the update."}, 409)
                 st = update.status()
@@ -511,7 +534,7 @@ class H(BaseHTTPRequestHandler):
                             job["message"] = "Checking the key with Google…"
                             err = google.client_check(cid, csec)
                             if err: raise RuntimeError(err)
-                        if auth.enabled():                                  # on a NAS: the sign-in opens in the user's own browser (remote_sign_in)
+                        if auth.remote():                                   # on a NAS: the sign-in opens in the user's own browser (remote_sign_in)
                             job["message"] = "Signing in with Google…"
                             on_url = lambda u: remote_sign_in(job, u)
                         else:

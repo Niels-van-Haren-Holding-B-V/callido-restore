@@ -11,15 +11,16 @@ ARM processor that offer Container Manager in Package Center). The same image ru
 
 There are two ways to install it on a Synology; use one, not both (they use the same port, 8765):
 
-* **Package** (Package Center → Manual Install of `callido-restore_<processor>-7.1_<version>.spk` from the
+* **Package** (recommended; Package Center → Manual Install of `callido-restore_<processor>-7.1_<version>.spk` from the
   [Releases](https://github.com/Niels-van-Haren-Holding-B-V/callido-restore/releases)): every DSM 7 model, including
-  those without Container Manager. It needs SynoCommunity's Python 3.14: first add their package source (Package
-  Center → Settings → Package Sources → Add: name `SynoCommunity`, location `https://packages.synocommunity.com`), then
-  install **Python 3.14** from the *Community* tab, or let Package Center offer it when you install the `.spk`. See
-  `packaging/synology/README.md`. Its password comes from the install wizard; to
-  change it, edit `/var/packages/callido-restore/var/password` over SSH and restart the package in Package Center.
-* **Container** (below): DSM 7.2 models with Container Manager. To run it next to the package anyway, change the host side
-  of `ports`, for example `"8766:8765"`.
+  those without Container Manager. It runs **inside DSM**: you open it from the DSM main menu, DSM's own login is the
+  access check (administrators only), and it has no port, firewall rule or password of its own; the app itself listens
+  on the NAS only. The install wizard asks for the shared folder to restore into (created if needed, with access for the
+  app). It needs SynoCommunity's Python 3.14: first add their package source (Package Center → Settings → Package
+  Sources → Add: name `SynoCommunity`, location `https://packages.synocommunity.com`), then install **Python 3.14** from
+  the *Community* tab. See `packaging/synology/README.md`.
+* **Container** (below): any Docker host, or DSM 7.2 models with Container Manager; opened at `http://<NAS>:8765` with
+  its own password.
 
 ## Install on a Synology
 
