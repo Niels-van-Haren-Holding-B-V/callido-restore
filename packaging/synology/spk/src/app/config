@@ -1,0 +1,14 @@
+{
+    ".url": {
+        "com.synocommunity.packages.callido-restore": {
+            "title": "Callido Restore",
+            "desc": "Restore files from a Synology Hyper Backup",
+            "icon": "images/callido-restore-{0}.png",
+            "type": "url",
+            "url": "/webman/3rdparty/callido-restore/index.cgi/",
+            "allUsers": false,
+            "grantPrivilege": "local",
+            "advanceGrantPrivilege": false
+        }
+    }
+}
