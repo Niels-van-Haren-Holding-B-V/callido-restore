@@ -16,18 +16,22 @@ cgi = importlib.util.module_from_spec(spec); spec.loader.exec_module(cgi)
 
 class CGI(unittest.TestCase):
     def setUp(self):
-        p = mock.patch.dict(os.environ, {"CALLIDO_DSM": "1"}); p.start(); self.addCleanup(p.stop)
+        import tempfile
+        with tempfile.NamedTemporaryFile("w", delete=False) as f: f.write("k3y\n")
+        self.addCleanup(os.unlink, f.name)
+        p = mock.patch.dict(os.environ, {"CALLIDO_DSM": "1", "CALLIDO_DSM_SECRET_FILE": f.name}); p.start(); self.addCleanup(p.stop)
         self.srv = LocalServer(("127.0.0.1", 0), H)
         threading.Thread(target=self.srv.serve_forever, daemon=True).start()
         self.addCleanup(self.srv.server_close); self.addCleanup(self.srv.shutdown)
         self.addCleanup(setattr, cgi, "APP", cgi.APP); cgi.APP = ("127.0.0.1", self.srv.server_address[1])
 
-    def run_cgi(self, path, auth=lambda env: "admin", method="GET", body=b"", query="", **env):
+    def run_cgi(self, path, auth=lambda env: "admin", method="GET", body=b"", query="", key="k3y", **env):
         out = io.BytesIO(); seen = {}
         def a(e): seen.update(e); return auth(e)
-        e = {"PATH_INFO": path, "REQUEST_METHOD": method, "QUERY_STRING": query, "CONTENT_LENGTH": str(len(body)), **env}
+        e = {"PATH_INFO": path, "REQUEST_METHOD": method, "QUERY_STRING": query, "CONTENT_LENGTH": str(len(body)),
+             "HTTP_HOST": "nas:5000", "HTTP_X_SYNO_TOKEN": "T", **env}
         with mock.patch.object(cgi.sys, "stdout", mock.Mock(buffer=out)):
-            cgi.main(env=e, stdin=io.BytesIO(body), auth=a)
+            cgi.main(env=e, stdin=io.BytesIO(body), auth=a, secret=lambda: key)
         head, _, data = out.getvalue().partition(b"\r\n\r\n")
         return head.decode(), data, seen
 
@@ -42,10 +46,27 @@ class CGI(unittest.TestCase):
         self.assertIn("Status: 200", head); self.assertEqual(json.loads(body), [])
 
     def test_the_token_reaches_the_check_and_not_the_app(self):
-        _, _, seen = self.run_cgi("/api/sources", query="SynoToken=T0K&x=1")
+        _, _, seen = self.run_cgi("/api/sources", query="SynoToken=T0K&x=1", HTTP_X_SYNO_TOKEN="")
         self.assertEqual(seen["HTTP_X_SYNO_TOKEN"], "T0K")
         _, _, seen = self.run_cgi("/api/sources", HTTP_X_SYNO_TOKEN="H3D")
         self.assertEqual(seen["HTTP_X_SYNO_TOKEN"], "H3D")
+
+    def test_another_site_is_refused_whatever_dsm_s_csrf_setting(self):
+        for env in ({"HTTP_SEC_FETCH_SITE": "cross-site"}, {"HTTP_SEC_FETCH_SITE": "same-site"},
+                    {"HTTP_ORIGIN": "https://evil.example"}, {"HTTP_ORIGIN": "null"}, {"HTTP_ORIGIN": "http://nas:5001"}):
+            head, _, seen = self.run_cgi("/api/cache/clear", method="POST", body=b"{}", **env)
+            self.assertIn("Status: 403", head, env); self.assertEqual(seen, {}, env)          # not even DSM's check runs
+        head, _, _ = self.run_cgi("/api/sources", HTTP_ORIGIN="http://nas:5000", HTTP_SEC_FETCH_SITE="same-origin")
+        self.assertIn("Status: 200", head)
+
+    def test_no_token_no_access(self):
+        head, _, seen = self.run_cgi("/api/sources", HTTP_X_SYNO_TOKEN="")
+        self.assertIn("Status: 401", head); self.assertEqual(seen, {})
+
+    def test_the_app_refuses_requests_that_do_not_come_through_the_cgi(self):
+        head, _, _ = self.run_cgi("/api/sources", key="wrong"); self.assertIn("Status: 403", head)
+        head, _, _ = self.run_cgi("/", key="wrong"); self.assertIn("Status: 403", head)
+        head, _, _ = self.run_cgi("/api/sources", key=""); self.assertIn("Status: 503", head)        # no key file: not started
 
     def test_post_with_a_body_and_quit_is_refused(self):
         head, body, _ = self.run_cgi("/api/app/settings", method="POST", body=b'{"tray": false}', CONTENT_TYPE="application/json")

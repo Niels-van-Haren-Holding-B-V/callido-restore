@@ -9,7 +9,7 @@ ARM processor that offer Container Manager in Package Center). The same image ru
 
 ## Package or container
 
-There are two ways to install it on a Synology; use one, not both (they use the same port, 8765):
+There are two ways to install it on a Synology; one is enough:
 
 * **Package** (recommended; Package Center → Manual Install of `callido-restore_<processor>-7.1_<version>.spk` from the
   [Releases](https://github.com/Niels-van-Haren-Holding-B-V/callido-restore/releases)): every DSM 7 model, including

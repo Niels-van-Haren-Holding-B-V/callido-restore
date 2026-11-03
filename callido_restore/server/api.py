@@ -254,6 +254,8 @@ class H(BaseHTTPRequestHandler):
                               path if self.command == "GET" else None, self.headers.get("Sec-Fetch-Mode"),
                               self.headers.get("Sec-Fetch-Dest"), network=net)
         if why: self._send(403, jdump({"error": why})); return True
+        if not auth.dsm_key_ok(self.headers.get("X-Callido-Secret")):        # the Synology package: only through its CGI
+            self._send(403, jdump({"error": "refused: not through Callido Restore in DSM"})); return True
         if net and not auth.valid(self.headers.get("Cookie")):        # network mode (a NAS): everything but the sign-in needs a session
             if self.command == "GET" and path in PAGE_PATHS:
                 page = _bundled("static/login.html")

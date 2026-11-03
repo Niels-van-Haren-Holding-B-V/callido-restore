@@ -35,6 +35,17 @@ def remote():
     return enabled() or os.environ.get("CALLIDO_DSM") == "1"
 
 
+def dsm_key_ok(header):
+    """The Synology package (CALLIDO_DSM=1): the app listens on the NAS's loopback, where any process on the NAS could reach
+    it; only requests from the package's CGI carry the key from CALLIDO_DSM_SECRET_FILE (written at each service start).
+    Always true elsewhere."""
+    if os.environ.get("CALLIDO_DSM") != "1": return True
+    f = os.environ.get("CALLIDO_DSM_SECRET_FILE")
+    try: key = open(f).read().strip() if f else ""
+    except OSError: key = ""
+    return bool(key) and bool(header) and hmac.compare_digest(header.encode(), key.encode())
+
+
 def _cookie_value(cookie_header):
     for part in (cookie_header or "").split(";"):
         k, _, v = part.strip().partition("=")

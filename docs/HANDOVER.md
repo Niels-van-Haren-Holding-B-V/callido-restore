@@ -61,8 +61,9 @@ chunk table, `2026-10-31-1530-claude-hbk6.md` for the end-to-end tests).
 ## Synology package
 
 `packaging/synology/` is a SynoCommunity spksrc recipe (DSM 7, python312 dependency, lz4 wheel, spksrc's rclone); `.github/workflows/spk.yml`
-builds x64 on recipe PRs and x64/aarch64/armv7 on v* tags and attaches the .spk files to the release. The service runs network
-mode (password from the install wizard in `var/password`). Submitting it to SynoCommunity is a PR to their spksrc with the two
+builds x64 on recipe PRs and x64/aarch64/armv7 on v* tags and attaches the .spk files to the release. The service runs inside
+DSM: loopback only (127.0.0.1:18765, `CALLIDO_DSM=1`), reached through `app/index.cgi` (DSM administrator login, cross-site
+check, a key in `var/cgi_secret` the app requires); the install wizard's shared folder is the default restore target. Submitting it to SynoCommunity is a PR to their spksrc with the two
 folders and a `digests` file for the release archive (see `packaging/synology/README.md`).
 ## NAS (Docker)
 
