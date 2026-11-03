@@ -417,3 +417,45 @@ class StartFlags(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StalledDownload(unittest.TestCase):
+    """A Drive download whose bytes stop moving (a stuck connection, a daemon that stops answering) ends in an error the
+    caller retries, instead of a restore that waits forever."""
+    def run_copy(self, calls):
+        stopped = []
+        def call(method, params, timeout=None):
+            if method == "job/stop": stopped.append(params["jobid"]); return {}
+            return calls(method, params, timeout)
+        with mock.patch.object(rc.DAEMON, "available", return_value=True), \
+             mock.patch.object(type(rc.DAEMON), "running", new_callable=mock.PropertyMock, return_value=True), \
+             mock.patch.object(rc.DAEMON, "_call", side_effect=call):
+            with self.assertRaises(rc.RcloneError) as e:
+                rc.copyfile("gdrive:b/x.bucket", "/nonexistent-dir/x.part", progress=lambda *a: None, poll=0.01, stall_s=0.2)
+        return str(e.exception), stopped
+
+    def test_no_bytes_for_too_long(self):
+        def calls(method, params, timeout):
+            if method == "operations/copyfile": return {"jobid": 7}
+            if method == "job/status": self.assertTrue(timeout); return {"finished": False}
+            if method == "core/stats": return {"bytes": 1234, "speed": 0}
+            return {}
+        msg, stopped = self.run_copy(calls)
+        self.assertIn("stalled: no data arrived", msg); self.assertEqual(stopped, [7])
+
+    def test_daemon_stops_answering(self):
+        def calls(method, params, timeout):
+            if method == "operations/copyfile": return {"jobid": 8}
+            raise TimeoutError("timed out")                       # every status call goes unanswered
+        msg, stopped = self.run_copy(calls)
+        self.assertIn("stalled: rclone did not answer", msg)
+
+    def test_moving_bytes_are_not_a_stall(self):
+        n = [0]
+        def calls(method, params, timeout):
+            if method == "operations/copyfile": return {"jobid": 9}
+            if method == "job/status": n[0] += 1; return {"finished": n[0] > 40, "success": False, "error": "done"}
+            if method == "core/stats": return {"bytes": n[0] * 100}
+            return {}
+        msg, _ = self.run_copy(calls)                             # runs past stall_s, ends with rclone's own error
+        self.assertEqual(msg, "done")

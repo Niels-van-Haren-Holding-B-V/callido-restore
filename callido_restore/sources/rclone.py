@@ -554,11 +554,18 @@ def _fallback_copy(src, dst, timeout=None):
     _run(["copyto", src, str(dst), *transfer.COMMON], timeout=timeout)
 
 
-def copyfile(src, dst, progress=None, cancelled=None, poll=0.5, timeout=None):
+DOWNLOAD_STALL_S = 600   # a download whose bytes do not move for this long is stopped; the caller (Source.ensure) retries it
+RC_POLL_TIMEOUT = 60     # one status call to the daemon; no answer in this time counts as no progress, not as a hang
+
+
+def copyfile(src, dst, progress=None, cancelled=None, poll=0.5, timeout=None, stall_s=None):
     """Download one remote file ``src`` ("remote:path/file") to the local path ``dst`` through the daemon when it runs
     (``operations/copyfile`` as an async job; ``core/stats`` of its group gives bytes, speed and rclone's retry state, reported
     through ``progress(bytes_done, speed_bytes_per_s, note)`` where note is '' or 'rate-limited, retrying'), otherwise as one
-    rclone process. ``cancelled()`` true stops the job and raises Cancelled. Raises RcloneError when rclone fails."""
+    rclone process. ``cancelled()`` true stops the job and raises Cancelled. Raises RcloneError when rclone fails, and when
+    the copied bytes do not move for ``stall_s`` (DOWNLOAD_STALL_S): a stuck connection or a daemon that stopped answering
+    then ends in a retry instead of a restore that waits forever."""
+    stall_s = stall_s or DOWNLOAD_STALL_S
     dst = str(dst)
     if not DAEMON.available():
         return _fallback_copy(src, dst, timeout)
@@ -571,12 +578,19 @@ def copyfile(src, dst, progress=None, cancelled=None, poll=0.5, timeout=None):
     except DaemonGone:
         return _fallback_copy(src, dst, timeout)
     jobid = started.get("jobid")
-    t0 = time.time()
+    t0 = time.time(); moved = [time.time(), -1]               # when the byte count last changed, and that count
+    def stalled(why):
+        try: DAEMON.rc("job/stop", jobid=jobid, timeout=RC_POLL_TIMEOUT)
+        except RcloneError: pass
+        raise RcloneError(f"download of {src} stalled: {why} for {stall_s // 60} min")
     try:
         while True:
-            try: st = DAEMON.rc("job/status", jobid=jobid)
+            try: st = DAEMON.rc("job/status", jobid=jobid, timeout=RC_POLL_TIMEOUT)
             except DaemonGone:
                 return _fallback_copy(src, dst, timeout)          # the daemon died mid-copy: finish the old way
+            except RcloneError:                                   # no answer in time: try again, unless it has lasted too long
+                if time.time() - moved[0] > stall_s: stalled("rclone did not answer")
+                time.sleep(poll); continue
             if st.get("finished"):
                 if st.get("success"): break
                 raise RcloneError(st.get("error") or "copy failed")
@@ -588,10 +602,13 @@ def copyfile(src, dst, progress=None, cancelled=None, poll=0.5, timeout=None):
                 try: DAEMON.rc("job/stop", jobid=jobid)
                 except RcloneError: pass
                 raise RcloneError(f"copy of {src} timed out after {timeout:.0f} s")
+            try: stats = DAEMON.rc("core/stats", group=group, timeout=RC_POLL_TIMEOUT)
+            except RcloneError: stats = None                      # no answer: not progress (and not a reset of the byte count)
+            done = int((stats or {}).get("bytes") or 0)          # counts the in-flight bytes already; transferring[].bytes would double them
+            if stats is not None and done != moved[1]: moved[:] = [time.time(), done]
+            elif time.time() - moved[0] > stall_s: stalled("no data arrived")
+            stats = stats or {}
             if progress is not None:
-                try: stats = DAEMON.rc("core/stats", group=group)
-                except RcloneError: stats = {}
-                done = int(stats.get("bytes") or 0)              # counts the in-flight bytes already; transferring[].bytes would double them
                 speed = float(stats.get("speed") or 0.0)
                 err = str(stats.get("lastError") or "")
                 note = "rate-limited, retrying" if (stats.get("retryError") or any(w in err for w in RATE_LIMIT_WORDS)) and err else ""
