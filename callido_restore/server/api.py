@@ -13,6 +13,7 @@ from callido_restore.restore.destination import restore_target_error
 from callido_restore.restore.jobs import JOBS, log, start_job
 from callido_restore.sources import google, rclone
 from callido_restore.sources.source import SOURCES, add_source, save_sources
+from callido_restore.server import auth
 
 def jdump(o): return json.dumps(o, ensure_ascii=False).encode("utf-8")
 
@@ -98,9 +99,10 @@ LOCAL_HOSTS = {"127.0.0.1", "localhost", "[::1]"}
 
 
 PAGE_PATHS = ("/", "/index.html")
+NO_FRAME = {"X-Frame-Options": "DENY", "Cache-Control": "no-store"}
 
 
-def request_refusal(host, origin, fetch_site, server_port, path=None, fetch_mode=None, fetch_dest=None):
+def request_refusal(host, origin, fetch_site, server_port, path=None, fetch_mode=None, fetch_dest=None, network=False):
     """Why a request to the local API is refused, or None. The server listens on 127.0.0.1 only, but a web page in any
     browser on this computer can still send it requests:
     * DNS rebinding: a page on evil.example whose name re-points to 127.0.0.1 can read the answers; its requests carry
@@ -110,11 +112,14 @@ def request_refusal(host, origin, fetch_site, server_port, path=None, fetch_mode
     The app's own window and command-line tools (curl, the smoke tests) send neither header and pass.
     Opening the page itself from a link on another page (a top-level navigation to /) is allowed: it changes nothing, and the
     page's own calls that follow are same-origin. Only as the whole tab (Sec-Fetch-Dest document), never inside another
-    site's frame."""
+    site's frame.
+    ``network`` (the app on a NAS, ``--listen``): the Host is whatever name or address the NAS is reached by, so it is not
+    checked against 127.0.0.1; a rebinding page gets no session cookie (``auth``), and an Origin must be that same Host."""
     h = (host or "").strip().lower()
     name, _, port = h.rpartition(":") if not h.startswith("[") or "]:" in h else (h, "", "")
     if not name: name, port = h, ""
-    if name not in LOCAL_HOSTS or (port and port != str(server_port)):
+    if not h: return "refused: no Host"
+    if not network and (name not in LOCAL_HOSTS or (port and port != str(server_port))):
         return f"refused: Host {host!r} is not this app"
     if (path in PAGE_PATHS and (fetch_mode or "").lower() == "navigate" and (fetch_dest or "").lower() == "document"
             and not origin):
@@ -128,8 +133,45 @@ def request_refusal(host, origin, fetch_site, server_port, path=None, fetch_mode
         if (fetch_site or "").lower() not in ("same-origin", "none"): return "refused: a request from an opaque origin (sandboxed or local page)"
     elif origin:
         o = origin.lower().rstrip("/")
-        if o not in {f"http://{n}:{server_port}" for n in LOCAL_HOSTS}: return f"refused: Origin {origin!r} is not this app"
+        mine = {f"http://{h}", f"https://{h}"} if network else {f"http://{n}:{server_port}" for n in LOCAL_HOSTS}
+        if o not in mine: return f"refused: Origin {origin!r} is not this app"
     return None
+
+
+def remote_sign_in(job, local_url):
+    """Network mode: rclone waits for Google's answer on the NAS's own 127.0.0.1, which the user's browser cannot reach. The
+    job gets the Google page instead (``auth_url``: the redirect rclone's /auth gives); after the consent the browser is sent
+    to http://127.0.0.1:<port>/?code=..., which does not load on that computer. The user pastes that address and
+    ``finish_remote_sign_in`` delivers it to rclone here."""
+    import http.client
+    u = urlparse(local_url)
+    c = http.client.HTTPConnection(u.hostname, u.port, timeout=10)
+    try:
+        c.request("GET", u.path + ("?" + u.query if u.query else "")); r = c.getresponse(); google_url = r.getheader("Location"); r.read()
+    finally: c.close()
+    if not google_url or not google_url.startswith("https://accounts.google.com/"):
+        raise RuntimeError("rclone did not hand out the Google sign-in page")
+    job["auth_port"] = u.port; job["auth_url"] = google_url
+    job["auth_state"] = (parse_qs(urlparse(google_url).query).get("state") or [""])[0]
+    job["message"] = "Sign in with Google in the page that opens, then paste the address your browser ends up on."
+
+
+def finish_remote_sign_in(job, pasted):
+    """Hand the address the browser ended up on (http://127.0.0.1:<port>/?state=...&code=...) to rclone on this machine.
+    Only that one address is accepted: the job's own port on the loopback, path "/", with a state and a code."""
+    import http.client
+    u = urlparse((pasted or "").strip()); q = parse_qs(u.query)
+    if (u.scheme != "http" or u.hostname not in ("127.0.0.1", "localhost") or u.port != job.get("auth_port")
+            or u.path not in ("", "/") or "state" not in q or "code" not in q):
+        if "error" in q: raise ValueError("Google answered: " + q["error"][0])
+        raise ValueError("That is not the address the sign-in ended on. It starts with http://127.0.0.1:" + str(job.get("auth_port")) + "/?state=")
+    if q["state"][0] != job.get("auth_state"):
+        raise ValueError("That address belongs to an earlier sign-in. Use the link above once more and paste the new address.")
+    c = http.client.HTTPConnection("127.0.0.1", job["auth_port"], timeout=20)
+    try:
+        c.request("GET", "/?" + u.query); r = c.getresponse(); r.read()
+    finally: c.close()
+    job.pop("auth_url", None); job["message"] = "Signed in; saving the connection…"
 
 
 def update_busy(include_update=True):
@@ -183,11 +225,21 @@ class LocalServer(ThreadingHTTPServer):
 class H(BaseHTTPRequestHandler):
     def log_message(self, *a): pass
     def _refused(self):
-        why = request_refusal(self.headers.get("Host"), self.headers.get("Origin"), self.headers.get("Sec-Fetch-Site"), self.server.server_address[1],
-                              urlparse(self.path).path if self.command == "GET" else None, self.headers.get("Sec-Fetch-Mode"),
-                              self.headers.get("Sec-Fetch-Dest"))
-        if why: self._send(403, jdump({"error": why}))
-        return bool(why)
+        net = auth.enabled(); path = urlparse(self.path).path
+        # behind a reverse proxy (DSM's, for HTTPS) the page's origin is the proxy's address, which the proxy passes on; a
+        # cross-site page cannot set that header without a CORS preflight, which this server never allows
+        host = (self.headers.get("X-Forwarded-Host") or self.headers.get("Host")) if net else self.headers.get("Host")
+        why = request_refusal(host, self.headers.get("Origin"), self.headers.get("Sec-Fetch-Site"), self.server.server_address[1],
+                              path if self.command == "GET" else None, self.headers.get("Sec-Fetch-Mode"),
+                              self.headers.get("Sec-Fetch-Dest"), network=net)
+        if why: self._send(403, jdump({"error": why})); return True
+        if net and not auth.valid(self.headers.get("Cookie")):        # network mode (a NAS): everything but the sign-in needs a session
+            if self.command == "GET" and path in PAGE_PATHS:
+                page = _bundled("static/login.html")
+                self._send(200, page.read_bytes() if page else b"sign-in page missing", "text/html; charset=utf-8", NO_FRAME); return True
+            if self.command == "POST" and path == "/api/login": return False
+            self._send(401, jdump({"error": "Sign in first.", "login": True})); return True
+        return False
     def _send(self, code, body, ctype="application/json; charset=utf-8", extra=None):
         self.send_response(code); self.send_header("Content-Type", ctype); self.send_header("Content-Length", str(len(body)))
         for k, v in (extra or {}).items(): self.send_header(k, v)
@@ -218,6 +270,7 @@ class H(BaseHTTPRequestHandler):
                 from callido_restore import cachedir
                 return self._json(cachedir.usage({sid: s.name for sid, s in SOURCES.items()}))
             if u.path == "/api/quit":
+                if auth.enabled(): return self._json({"error": "On the NAS the app keeps running; stop it in Container Manager or Package Center."}, 409)
                 threading.Timer(0.3, _exit_app).start(); return self._json({"ok": True})
             if u.path == "/api/ls":   # directory picker helper
                 p = Path(os.path.expanduser(q.get("path") or "~"))
@@ -363,6 +416,25 @@ class H(BaseHTTPRequestHandler):
         u = urlparse(self.path); n = int(self.headers.get("Content-Length") or 0)
         body = json.loads(self.rfile.read(n) or b"{}")
         try:
+            if u.path == "/api/login":                             # network mode: {password} -> a session cookie
+                if not auth.enabled(): return self._json({"ok": True})
+                result, tok, wait = auth.attempt(body.get("password"), self.client_address[0])
+                if result == "wait":                                # not tried: still waiting after earlier wrong passwords
+                    return self._json({"error": f"Too many wrong passwords. Try again in {max(1, round(wait))} s.", "wait": round(wait)}, 429)
+                if not tok:
+                    return self._json({"error": "Wrong password." + (f" Try again in {wait:.0f} s." if wait >= 1 else ""), "wait": round(wait)}, 401)
+                https = (self.headers.get("X-Forwarded-Proto") or "").lower() == "https"
+                return self._send(200, jdump({"ok": True}), extra={"Set-Cookie": auth.set_cookie(tok, secure=https)})
+            if u.path == "/api/rclone/sign_in_return":             # network mode: {job, url} the address the Google sign-in ended on
+                j = JOBS.get(body.get("job") or "")
+                if not j or j.get("state") != "running" or not j.get("auth_port"): return self._json({"error": "No sign-in is waiting."}, 409)
+                try: finish_remote_sign_in(j, body.get("url"))
+                except ValueError as e: return self._json({"error": str(e)}, 400)
+                except OSError as e: return self._json({"error": f"The sign-in on the NAS has already ended ({e}). Start it again."}, 409)
+                return self._json({"ok": True})
+            if u.path == "/api/logout":
+                auth.logout(self.headers.get("Cookie"))
+                return self._send(200, jdump({"ok": True}), extra={"Set-Cookie": auth.clear_cookie()})
             if u.path == "/api/cache/clear":                       # {part?}: a backup's id or "updates"; all when absent
                 from callido_restore import cachedir
                 busy = [j for j in JOBS.values() if j["state"] == "running"]
@@ -384,6 +456,7 @@ class H(BaseHTTPRequestHandler):
                 return self._json(update.set_check(bool(body.get("check", True))))
             if u.path == "/api/update/install":                    # a job: download, verify the signed checksum, install, restart
                 from callido_restore import update
+                if auth.enabled(): return self._json({"error": "On the NAS a new version comes with a new container image or package."}, 409)
                 busy = update_busy()
                 if busy: return self._json({"error": f"Wait until the {busy} has finished or is paused; a paused restore continues after the update."}, 409)
                 st = update.status()
@@ -438,9 +511,15 @@ class H(BaseHTTPRequestHandler):
                             job["message"] = "Checking the key with Google…"
                             err = google.client_check(cid, csec)
                             if err: raise RuntimeError(err)
-                        job["message"] = "Signing in… a browser window opens for the Google sign-in. When it says “Signed in”, close it and come back to this window."
-                        import webbrowser
-                        try: token = rclone.authorize_drive(cid, csec, on_url=lambda u: webbrowser.open(u), template=_bundled("static/oauth.html"))
+                        if auth.enabled():                                  # on a NAS: the sign-in opens in the user's own browser (remote_sign_in)
+                            job["message"] = "Signing in with Google…"
+                            on_url = lambda u: remote_sign_in(job, u)
+                        else:
+                            job["message"] = "Signing in… a browser window opens for the Google sign-in. When it says “Signed in”, close it and come back to this window."
+                            import webbrowser
+                            on_url = lambda u: webbrowser.open(u)
+                        try: token = rclone.authorize_drive(cid, csec, on_url=on_url, template=_bundled("static/oauth.html"),
+                                                            cancelled=lambda: bool(job.get("cancel")))
                         except rclone.RcloneError as e: raise RuntimeError("Google sign-in failed: " + str(e))
                         params = {"scope": "drive.readonly", "token": token}
                         if cid: params.update(client_id=cid, client_secret=csec)

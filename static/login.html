@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Callido Restore</title>
+<style>
+:root{color-scheme:light dark;--bg:#f5f5f7;--panel:#fff;--ink:#1d1d1f;--muted:#6e6e73;--line:#d2d2d7;--accent:#6a4bc9;--bad:#d1382c;
+  --grad:linear-gradient(135deg,#6a4bc9 0%,#b55aa6 55%,#ef6b5b 100%)}
+@media (prefers-color-scheme:dark){:root{--bg:#1c1c1e;--panel:#2c2c2e;--ink:#f5f5f7;--muted:#a1a1a6;--line:#48484a;--accent:#a98cf5;--bad:#f0665b}}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:16px;background:var(--bg);color:var(--ink);
+  font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+form{width:100%;max-width:360px;background:var(--panel);border-radius:14px;padding:28px;box-shadow:0 2px 8px rgba(0,0,0,.08),0 24px 60px rgba(0,0,0,.12)}
+h1{margin:0 0 4px;font-size:22px;font-weight:650;background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
+p{margin:0 0 20px;color:var(--muted);font-size:13px}
+input{width:100%;padding:10px 12px;font:inherit;color:inherit;background:transparent;border:1px solid var(--line);border-radius:8px}
+input:focus{outline:2px solid var(--accent);outline-offset:1px}
+button{margin-top:14px;width:100%;padding:10px;font:inherit;font-weight:600;color:#fff;background:var(--accent);border:0;border-radius:8px;cursor:pointer}
+button:disabled{opacity:.6;cursor:default}
+#err{min-height:20px;margin-top:10px;color:var(--bad);font-size:13px}
+</style>
+</head>
+<body>
+<form id="f">
+  <h1>Callido Restore</h1>
+  <p>Enter the password set for this NAS.</p>
+  <input id="pw" type="password" autocomplete="current-password" aria-label="Password" placeholder="Password" required autofocus>
+  <button id="go" type="submit">Sign in</button>
+  <div id="err" role="alert"></div>
+</form>
+<script>
+// A link from another site (the DSM portal, a bookmark tool) arrives without the SameSite=Strict cookie, so this page shows
+// although the session is valid; a same-site request carries it, and then the app itself opens.
+fetch('/api/about').then(r=>{if(r.ok)location.replace('/')}).catch(()=>{});
+document.getElementById('f').addEventListener('submit',async e=>{
+  e.preventDefault();const go=document.getElementById('go'),err=document.getElementById('err');go.disabled=true;err.textContent='';
+  try{const r=await fetch('/api/login',{method:'POST',body:JSON.stringify({password:document.getElementById('pw').value})});
+    const j=await r.json();if(r.ok&&j.ok){location.replace('/');return}err.textContent=j.error||'Sign-in failed.'}
+  catch(x){err.textContent='The NAS does not answer.'}
+  go.disabled=false});
+</script>
+</body>
+</html>

@@ -110,12 +110,27 @@ def main():
         from callido_restore.pool import anchor
         return anchor._worker_main(sys.argv[2:])
     ap = argparse.ArgumentParser(description=f"{APP_NAME}: explore a Synology Hyper Backup and restore files from it")
-    ap.add_argument("--port", type=int, default=8765)
+    ap.add_argument("--port", type=int, default=int(os.environ.get("CALLIDO_PORT") or 8765))
+    ap.add_argument("--listen", default=os.environ.get("CALLIDO_LISTEN") or "127.0.0.1",
+                    help="address to listen on; anything but 127.0.0.1 is network mode (a NAS): server only, password required")
+    ap.add_argument("--password-file", default=os.environ.get("CALLIDO_PASSWORD_FILE"),
+                    help="network mode: file holding the password (or set CALLIDO_PASSWORD)")
     ap.add_argument("--no-browser", "--no-window", dest="no_window", action="store_true", help="server only (no window, no browser)")
     ap.add_argument("--browser", action="store_true", help="use the system browser instead of the app window")
     ap.add_argument("--smoke", action="store_true", help="open the window, wait for the page, close it and exit (build check)")
     a = ap.parse_args()
-    if getattr(sys, "frozen", False) and not a.smoke:      # .app bundle: no terminal, so keep a log file next to the settings (smoke: stdout)
+    network = a.listen not in ("127.0.0.1", "localhost", "::1")
+    if network:
+        from callido_restore.server import auth
+        pw = os.environ.get("CALLIDO_PASSWORD")
+        if a.password_file:
+            try: pw = Path(a.password_file).read_text().rstrip("\r\n")    # the file's line end only; spaces are part of it, as in the variable
+            except OSError as e: raise SystemExit(f"cannot read the password file: {e}")
+        if not pw: raise SystemExit("network mode (--listen) needs a password: set CALLIDO_PASSWORD or --password-file")
+        try: auth.enable(pw)
+        except ValueError as e: raise SystemExit(str(e))
+        a.no_window = True                                          # a NAS has no screen: the page is opened from other computers
+    if getattr(sys, "frozen", False) and not a.smoke and not network:      # .app bundle: no terminal, so keep a log file next to the settings (smoke: stdout)
         try:
             paths.CONF_DIR.mkdir(parents=True, exist_ok=True)
             sys.stdout = sys.stderr = open(paths.CONF_DIR / "app.log", "a", buffering=1)
@@ -133,16 +148,16 @@ def main():
         try: signal.signal(sig, lambda *_: _exit_app(0))
         except (ValueError, OSError): pass
     windowed = not a.no_window and not a.browser
-    try: srv = LocalServer(("127.0.0.1", a.port), H)
+    try: srv = LocalServer((a.listen, a.port), H)
     except OSError as e:
         if _already_running(a.port):
             _log(f"already running on port {a.port}; showing the running instance")
             if windowed: run_window(a.port, smoke=a.smoke)
             elif not a.no_window: _open_browser(a.port)
             return
-        raise SystemExit(f"cannot listen on 127.0.0.1:{a.port}: {e} (another program uses this port; try --port)")
-    _log(f"{APP_NAME} {VERSION} on http://127.0.0.1:{a.port}  (config: {paths.CONF_DIR})")
-    if not a.smoke: start_auto_update()                         # the automatic update setting (and the daily check)
+        raise SystemExit(f"cannot listen on {a.listen}:{a.port}: {e} (another program uses this port; try --port)")
+    _log(f"{APP_NAME} {VERSION} on http://{a.listen}:{a.port}{'  (network mode, sign-in required)' if network else ''}  (config: {paths.CONF_DIR})")
+    if not a.smoke and not network: start_auto_update()                         # the automatic update setting (and the daily check)
     if not windowed:
         if not a.no_window: threading.Timer(0.6, lambda: _open_browser(a.port)).start()
         try: srv.serve_forever()
