@@ -191,6 +191,14 @@ footer.madeBy img{width:18px;height:18px;border-radius:5px;vertical-align:middle
     <p class="help" id="setTrayHelp" style="margin:4px 0 0"></p></section>
   <section class="setSec"><h4>Download cache</h4><div id="setCache"><span class="spin"></span> Loading…</div></section>
   <div class="row" style="justify-content:flex-end;margin-top:10px"><button id="settingsClose" class="small">Close</button></div></dialog>
+<dialog id="dlgSignIn" style="max-width:560px;width:92vw"><h3 style="margin-top:0">Sign in with Google</h3>
+<ol class="help" style="padding-left:18px;margin:0 0 12px">
+<li><a id="signInLink" href="#" target="_blank" rel="noopener">Open the Google sign-in</a> and allow access.</li>
+<li>Your browser then shows a page that cannot be reached (its address starts with <code>http://127.0.0.1:</code>). That is expected: copy the whole address from the address bar.</li>
+<li>Paste it here.</li></ol>
+<input id="signInUrl" type="text" placeholder="http://127.0.0.1:53682/?state=…&amp;code=…" style="width:100%" autocomplete="off" spellcheck="false">
+<div id="signInErr" class="help" style="color:var(--bad);min-height:20px;margin-top:6px"></div>
+<div style="display:flex;gap:8px;justify-content:flex-end"><button id="signInCancel" type="button">Cancel</button><button id="signInGo" class="primary" type="button">Continue</button></div></dialog>
 <dialog id="dlgAbout" style="max-width:520px"><h3 style="margin-top:0">Callido Restore</h3><div id="aboutBody" class="help">loading…</div>
   <div id="aboutUpd" class="help" style="border-top:1px solid var(--line,#ddd);padding-top:8px;margin-top:8px"><label><input type="checkbox" id="updAuto"> Check for updates automatically (once a day)</label>
     <div class="row" style="margin-top:6px"><button id="updCheck" class="small">Check for updates</button><span id="updState"></span></div></div>
@@ -303,9 +311,9 @@ async function track(p,q,run){const label=activityLabel(p,q);const btn=document.
 const CACHE_TTL=30000;const CACHEABLE=new Set(['/api/remotes']);const CACHE=new Map();
 const api=async(p,q={})=>{const u=new URL(p,location.origin);Object.entries(q).forEach(([k,v])=>v!==undefined&&v!==null&&v!==''&&u.searchParams.set(k,v));
   const key=u.toString();if(CACHEABLE.has(p)){const c=CACHE.get(key);if(c&&Date.now()-c.t<CACHE_TTL)return c.v}
-  return track(p,q,async()=>{const r=await fetch(u);const j=await r.json();if(j&&j.error&&!(p==='/api/job'&&j.state))throw new Error(j.error);   // a failed job is an answer (state 'error'), not a failed call: waitJob/pollJob used to retry it as a miss (60 s, or for ever)
+  return track(p,q,async()=>{const r=await fetch(u);if(r.status===401){location.reload();throw new Error('Sign in first.')}const j=await r.json();if(j&&j.error&&!(p==='/api/job'&&j.state))throw new Error(j.error);   // a failed job is an answer (state 'error'), not a failed call: waitJob/pollJob used to retry it as a miss (60 s, or for ever)
   if(CACHEABLE.has(p))CACHE.set(key,{t:Date.now(),v:j});return j})};
-const post=async(p,b)=>track(p,b,async()=>{const r=await fetch(p,{method:'POST',body:JSON.stringify(b)});const j=await r.json();if(j.error)throw new Error(j.error);if(p==='/api/rclone/connect')CACHE.clear();return j});
+const post=async(p,b)=>track(p,b,async()=>{const r=await fetch(p,{method:'POST',body:JSON.stringify(b)});if(r.status===401&&p!=='/api/login'){location.reload();throw new Error('Sign in first.')}const j=await r.json();if(j.error)throw new Error(j.error);if(p==='/api/rclone/connect')CACHE.clear();return j});
 // Per-file check of a restore (pool map placer v3). "verified" in the result means: the file's place in the backup was confirmed by
 // its size and every block's checksum matched while reading (not a checksum of the whole file). "identical_copy": restored from an
 // identical copy's entries. "unverified": its place in the backup could not be confirmed. Shown only when the result has the counts.
@@ -1017,8 +1025,16 @@ async function tabRestore(){const el=$('#tab-restore');
 const sleepOrWake=ms=>new Promise(res=>{let t=null;const done=()=>{clearTimeout(t);document.removeEventListener('visibilitychange',done);window.removeEventListener('focus',done);res()};t=setTimeout(done,ms);document.addEventListener('visibilitychange',done);window.addEventListener('focus',done)});
 // Wait for a job to leave the running state. A failed poll (network hiccup, throttled view) is retried, never left hanging;
 // an unknown job id ends the wait with an error result.
+// On a NAS (network mode) the Google sign-in cannot return to the NAS by itself: the job offers the Google page (auth_url) and
+// waits for the address the browser ended on, which the user pastes here.
+function signInAsk(job){const d=$('#dlgSignIn');if(d.open||d.dataset.job===job.id)return;d.dataset.job=job.id;
+  $('#signInLink').href=job.auth_url;$('#signInUrl').value='';$('#signInErr').textContent='';d.showModal();
+  // closing the dialog any way but Continue (Cancel, Esc) ends the sign-in on the NAS, so rclone frees its port for a next try
+  d.dataset.done='';d.onclose=()=>{if(!d.dataset.done)fetch('/api/job/cancel?id='+encodeURIComponent(job.id)).catch(()=>{})};
+  $('#signInGo').onclick=async()=>{$('#signInErr').textContent='';try{await post('/api/rclone/sign_in_return',{job:job.id,url:$('#signInUrl').value});d.dataset.done='1';d.close()}catch(e){$('#signInErr').textContent=e.message}};
+  $('#signInCancel').onclick=()=>d.close()}
 async function waitJob(id,onMsg,ms=1000,onJob){for(let miss=0;;){let x=null;try{x=await api('/api/job',{id});miss=0}catch(e){if(/no such job/i.test(e.message)||++miss>60)return{state:'error',error:e.message}}
-  if(x&&onJob)onJob(x);if(x&&x.state!=='running')return x;if(x&&onMsg)onMsg(x.message||'');await sleepOrWake(ms)}}
+  if(x&&x.auth_url&&x.state==='running')signInAsk(x);if(x&&onJob)onJob(x);if(x&&x.state!=='running')return x;if(x&&onMsg)onMsg(x.message||'');await sleepOrWake(ms)}}
 // A bar redrawn while the mouse button is down under it swallows the click (press and release land on two different elements),
 // so Stop and the error count felt dead or late: the redraw waits while a button is held inside the bar.
 let HELD=null;   // the bar a mouse button is held in; one window-level release listener for all bars (they are replaced on re-render)

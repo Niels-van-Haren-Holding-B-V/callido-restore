@@ -1,0 +1,6 @@
+*
+!callido_restore
+!static
+!LICENSE
+!packaging/rclone-release-signing-key.asc
+**/__pycache__

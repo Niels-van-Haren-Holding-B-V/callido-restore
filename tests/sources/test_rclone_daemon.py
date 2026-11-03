@@ -1,6 +1,6 @@
 """The shared rclone client: subprocess fallback when the daemon is not running, remote-control calls when it is, and (when an
 rclone binary is available) a real daemon round trip on a local folder."""
-import json, os, re, shutil, subprocess, tempfile, unittest
+import json, os, re, shutil, subprocess, tempfile, threading, unittest
 from unittest import mock
 
 from callido_restore.sources import rclone as rc
@@ -342,6 +342,21 @@ class Authorize(unittest.TestCase):
         with mock.patch.object(rc, "RCLONE", "/fake/rclone"), mock.patch.object(subprocess, "Popen", return_value=_FakeAuthorize(self.LINES)) as popen:
             rc.authorize_drive()
         self.assertEqual(popen.call_args[0][0][:6], ["/fake/rclone", "authorize", "drive", "--drive-scope", "drive.readonly", "--auth-no-open-browser"])
+
+    @unittest.skipUnless(os.name == "posix", "a POSIX sleep stands in for a waiting rclone")
+    def test_cancel_ends_a_waiting_sign_in_at_once(self):
+        """Cancel in the sign-in dialog (the job's cancel flag) kills `rclone authorize`, which otherwise keeps its port for 600 s."""
+        import time as _t
+        real = subprocess.Popen; procs = []
+        def popen(args, **kw):
+            p = real(["/bin/sh", "-c", "echo 'NOTICE: Please go to the following link: http://127.0.0.1:53682/auth?state=Z'; exec sleep 60"], **kw)
+            procs.append(p); return p
+        flag = {"cancel": False}
+        threading.Timer(0.5, lambda: flag.__setitem__("cancel", True)).start()
+        t0 = _t.time()
+        with mock.patch.object(rc, "RCLONE", "/fake/rclone"), mock.patch.object(subprocess, "Popen", side_effect=popen):
+            with self.assertRaisesRegex(rc.RcloneError, "cancelled"): rc.authorize_drive(on_url=lambda u: None, cancelled=lambda: flag["cancel"])
+        self.assertLess(_t.time() - t0, 5); self.assertIsNotNone(procs[0].poll())
 
     def test_failure_raises_with_rclone_text(self):
         lines = self.LINES[:4] + ["NOTICE: Fatal error: config failed to refresh token: Error: access_denied"]

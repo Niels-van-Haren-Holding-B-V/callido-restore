@@ -64,6 +64,12 @@ chunk table, `2026-10-31-1530-claude-hbk6.md` for the end-to-end tests).
 builds x64 on recipe PRs and x64/aarch64/armv7 on v* tags and attaches the .spk files to the release. The service runs network
 mode (password from the install wizard in `var/password`). Submitting it to SynoCommunity is a PR to their spksrc with the two
 folders and a `digests` file for the release archive (see `packaging/synology/README.md`).
+## NAS (Docker)
+
+`packaging/docker/Dockerfile` runs the server in network mode (`CALLIDO_LISTEN=0.0.0.0`, `CALLIDO_PASSWORD` required, `HOME=/config`)
+for Synology Container Manager or any Docker host; `.github/workflows/docker.yml` builds it for amd64 and arm64 and publishes it to
+GHCR on a v* tag (the GHCR package must be made public once in the repository's package settings). User guide: `docs/NAS.md`.
+Not covered yet: a native .spk for models without Container Manager; the in-app update is off on the NAS (a new image instead).
 
 ## Known limitations
 
