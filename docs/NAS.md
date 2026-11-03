@@ -16,10 +16,19 @@ There are two ways to install it on a Synology; one is enough:
   those without Container Manager. It runs **inside DSM**: you open it from the DSM main menu, DSM's own login is the
   access check (administrators only), and it has no port, firewall rule or password of its own; the app itself listens
   on the NAS only. The installation asks nothing and there is no password to enter: the app restores straight into the
-  shared folders of this NAS. DSM 7 runs every package that does not come from Synology as its own user, so give the app
-  Read/Write once per shared folder you restore into (Control Panel → Shared Folder → Edit → Permissions → *System internal
-  user* → `sc-callido-restore`). A shared folder from the backup that is not on the NAS yet must be created first (with that
-  permission); the restore screen says per folder what is still needed. It needs SynoCommunity's Python 3.14: first add their package source (Package Center → Settings → Package
+  shared folders of this NAS. One step per shared folder you restore into: give the app Read/Write on it.
+  * *Why:* DSM 7 runs every package that does not come from Synology as a user of its own, never as you or as root, so a
+    package can only write where an administrator allowed it. Callido Restore's user is `sc-callido-restore`.
+  * *You do not create that user:* Package Center creates it when it installs Callido Restore (and removes it on
+    uninstall). It is a *system internal user*, so it is not under User & Group and cannot sign in.
+  * *How:* Control Panel → Shared Folder → select the folder → Edit → Permissions. At the top, switch the list from local
+    users to **System internal user**, find `sc-callido-restore`, tick **Read/Write** and Save. (With the advanced
+    permission list: Create → user `sc-callido-restore` → Allow → Read & Write.)
+  * *Deny wins:* a **Deny** entry for that user, or a Deny left behind for an "unknown user" whose number DSM gave to the
+    package user, overrides the Read/Write. Remove it.
+  * *A shared folder that is not on the NAS yet:* a package cannot create one. Create it (Control Panel → Shared Folder →
+    Create, same name as in the backup) and give `sc-callido-restore` Read/Write on its Permissions step.
+  The restore screen says per folder what is still needed and has a Refresh button. It needs SynoCommunity's Python 3.14: first add their package source (Package Center → Settings → Package
   Sources → Add: name `SynoCommunity`, location `https://packages.synocommunity.com`), then install **Python 3.14** from
   the *Community* tab. See `packaging/synology/README.md`.
 * **Container** (below): any Docker host, or DSM 7.2 models with Container Manager; opened at `http://<NAS>:8765` with
