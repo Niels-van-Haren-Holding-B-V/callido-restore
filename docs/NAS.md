@@ -16,7 +16,10 @@ There are two ways to install it on a Synology; one is enough:
   those without Container Manager. It runs **inside DSM**: you open it from the DSM main menu, DSM's own login is the
   access check (administrators only), and it has no port, firewall rule or password of its own; the app itself listens
   on the NAS only. The installation asks nothing: the first restore asks once for your DSM user and password, and the
-  app then writes to this NAS with your rights, into any shared folder, as the Mac and Windows apps do. It needs SynoCommunity's Python 3.14: first add their package source (Package Center → Settings → Package
+  app then writes to this NAS with that user's rights, into any shared folder, as the Mac and Windows apps do. The password
+  is kept on the NAS in the app's settings, so use a DSM user that has Read/Write on the folders you restore into; it does
+  not need to be an administrator. If DSM's *Auto Block* (Control Panel → Security → Protection) blocks `127.0.0.1` after
+  mistyped passwords, add `127.0.0.1` to its allow list. It needs SynoCommunity's Python 3.14: first add their package source (Package Center → Settings → Package
   Sources → Add: name `SynoCommunity`, location `https://packages.synocommunity.com`), then install **Python 3.14** from
   the *Community* tab. See `packaging/synology/README.md`.
 * **Container** (below): any Docker host, or DSM 7.2 models with Container Manager; opened at `http://<NAS>:8765` with
