@@ -203,6 +203,10 @@ class H(BaseHTTPRequestHandler):
                 return self._send(200, page.read_bytes(), "text/html; charset=utf-8")
             if u.path == "/api/sources":
                 return self._json([s.to_json() for s in SOURCES.values()])
+            if u.path == "/api/app/settings":                      # the app window's settings and what this platform offers
+                from callido_restore import appsettings
+                return self._json({**appsettings.load(), "tray_available": appsettings.TRAY_AVAILABLE[0],
+                                   "platform": "windows" if paths.WINDOWS else "mac" if sys.platform == "darwin" else "other"})
             if u.path == "/api/update":                            # is a newer release published (answers at once; checks daily in the background)
                 from callido_restore import update
                 return self._json(update.status(force=q.get("check") == "1"))
@@ -365,6 +369,11 @@ class H(BaseHTTPRequestHandler):
                 if busy: return self._json({"error": f"Wait until '{busy[0]['label']}' has finished: it may be reading from the cache."}, 409)
                 try: return self._json(cachedir.clear(body.get("part") or None))
                 except ValueError as e: return self._json({"error": str(e)}, 400)
+            if u.path == "/api/app/settings":                      # {tray: bool}
+                from callido_restore import appsettings
+                try: appsettings.update(**{k: body[k] for k in ("tray",) if k in body})
+                except ValueError as e: return self._json({"error": str(e)}, 400)
+                return self._json({**appsettings.load(), "tray_available": appsettings.TRAY_AVAILABLE[0]})
             if u.path == "/api/update/settings":                   # {mode: auto|mention|off}, or {check: bool, auto: bool} (the UI)
                 from callido_restore import update
                 if "auto" in body and "mode" not in body:
