@@ -74,10 +74,12 @@ def main(env=os.environ, stdin=sys.stdin.buffer, auth=dsm_admin, secret=secret):
     # a download link carries the token in its query; it then also lands in DSM's access log and the browser history,
     # acceptable for a token that is bound to the DSM session and ends with it
     token = env.get("HTTP_X_SYNO_TOKEN") or next((v for k, v in pairs if k == "SynoToken"), "")
+    user = None
     if path.startswith("/api/"):
         why = cross_site(env)
         if why: return out("403 Forbidden", ('{"error": "refused: %s"}' % why.replace('"', "'")).encode())
-        if not token or not auth({**env, "HTTP_X_SYNO_TOKEN": token}):
+        user = auth({**env, "HTTP_X_SYNO_TOKEN": token}) if token else None
+        if not user:
             return out("401 Unauthorized", b'{"error": "Sign in to DSM as an administrator, then open Callido Restore from the DSM main menu.", "dsm": true}')
     key = secret()
     if not key: return out("503 Service Unavailable", b'{"error": "Callido Restore is not running (or its key cannot be read). Start it in Package Center."}')
@@ -86,6 +88,7 @@ def main(env=os.environ, stdin=sys.stdin.buffer, auth=dsm_admin, secret=secret):
     body = stdin.read(n) if n > 0 else None
     headers = {"Host": f"{APP[0]}:{APP[1]}", "X-Callido-Prefix": PREFIX, "X-Callido-Secret": key}
     if env.get("CONTENT_TYPE"): headers["Content-Type"] = env["CONTENT_TYPE"]
+    if user: headers["X-Callido-Dsm-User"] = user          # who opened the app: the "this NAS" form suggests that account
     try:
         c = http.client.HTTPConnection(*APP, timeout=120)
         c.request(method, path + ("?" + urlencode(query) if query else ""), body=body, headers=headers)

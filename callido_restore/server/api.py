@@ -271,6 +271,8 @@ class H(BaseHTTPRequestHandler):
                 from callido_restore import appsettings
                 return self._json({**appsettings.load(), "tray_available": appsettings.TRAY_AVAILABLE[0], "network": auth.remote(),
                                    "dsm": os.environ.get("CALLIDO_DSM") == "1",       # the Synology package: "this NAS" is the target
+                                   # the DSM user who opened it (set by the package's CGI, whose key every request needs there)
+                                   "dsm_user": self.headers.get("X-Callido-Dsm-User") if os.environ.get("CALLIDO_DSM") == "1" else None,
                                    "platform": "windows" if paths.WINDOWS else "mac" if sys.platform == "darwin" else "other"})
             if u.path == "/api/update":                            # is a newer release published (answers at once; checks daily in the background)
                 from callido_restore import update

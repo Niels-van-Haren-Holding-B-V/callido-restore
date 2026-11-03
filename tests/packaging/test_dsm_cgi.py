@@ -59,6 +59,11 @@ class CGI(unittest.TestCase):
         head, _, _ = self.run_cgi("/api/sources", HTTP_ORIGIN="http://nas:5000", HTTP_SEC_FETCH_SITE="same-origin")
         self.assertIn("Status: 200", head)
 
+    def test_the_dsm_user_is_passed_on_for_the_this_nas_form(self):
+        head, body, _ = self.run_cgi("/api/app/settings", auth=lambda e: "alice")
+        d = json.loads(body); self.assertTrue(d["dsm"]); self.assertEqual(d["dsm_user"], "alice")
+        head, body, _ = self.run_cgi("/api/app/settings", key="wrong"); self.assertIn("Status: 403", head)   # not without the key
+
     def test_no_token_no_access(self):
         head, _, seen = self.run_cgi("/api/sources", HTTP_X_SYNO_TOKEN="")
         self.assertIn("Status: 401", head); self.assertEqual(seen, {})
