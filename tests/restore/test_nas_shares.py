@@ -20,7 +20,10 @@ class NasShares(unittest.TestCase):
             by = {s["name"]: s for s in got}
             self.assertEqual(by["Documents"]["path"], os.path.join(t, "volume1", "Documents"))
             self.assertTrue(by["Documents"]["writable"])
-            if os.geteuid() != 0: self.assertFalse(by["Photos"]["writable"])
+            if os.geteuid() != 0:
+                self.assertFalse(by["Photos"]["writable"]); self.assertTrue(by["Photos"]["why"])     # DSM's reason is passed on
+            self.assertIsNone(by["Documents"]["why"])
+            self.assertEqual(os.listdir(by["Documents"]["path"]), [])                               # the write test leaves nothing behind
 
     def test_no_volumes(self):
         self.assertEqual(nas_shares("/nonexistent-volume[0-9]*"), [])
