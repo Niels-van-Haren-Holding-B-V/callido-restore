@@ -27,6 +27,7 @@ from callido_restore.sources.source import Source
 from callido_restore.sources.source import is_remote_path
 
 UNVERIFIED_MAX = 2000        # unverified files listed per job (like errors); the counts are complete
+RECOVERED_MAX = 500           # files restored on a later try that the final job lists (with the error they first had)
 
 def mapper_phase(line):
     """(message for the user, job progress or None) for one line the pool mapper logs. The mapper's lines are for the log:
@@ -657,7 +658,7 @@ class Backup:
                                       "next_index": job.get("next_index", 0), "done_files": job.get("done_files", 0), "skipped": job.get("skipped", 0),
                                       "errors": job.get("errors", [])[-200:], "errors_total": job.get("errors_total", len(job.get("errors", []))), "total_files": job.get("total_files"), "total_bytes": job.get("total_bytes"),
                                       "verified": job.get("verified", 0), "identical_copy": job.get("identical_copy", 0), "unverified": job.get("unverified", [])[:UNVERIFIED_MAX], "unverified_total": job.get("unverified_total", len(job.get("unverified", []))),
-                                      "done_bytes": job.get("done_bytes", 0), "check": job.get("check"), "state": state,
+                                      "done_bytes": job.get("done_bytes", 0), "check": job.get("check"), "recovered": job.get("recovered", []), "state": state,
                                       "done_ahead": sorted(k for k in (finished | done_ahead) if k >= job.get("next_index", 0)), "label": job["label"], "started": job["started"], "updated": time.time()}))
         roots = restore_roots(items, dest)                       # every folder written into, local paths or rclone remotes
         existing = {}                                            # remote root -> {path: size} already there (never written over)
@@ -972,6 +973,11 @@ class Backup:
                 for f, have in chk["differs"]:
                     pth = f"{f['share']}/{f['path']}"
                     if pth not in last: errs.append({"path": pth, "error": differs_msg(have, f["size"])})
+                # files that failed earlier but are at the target now (restored on a later try): shown with a check mark, not as errors
+                fixed = {}
+                for e in job["errors"]:
+                    if e["path"] not in wrong and e["path"] not in fixed: fixed[e["path"]] = {"path": e["path"], "error": e["error"]}
+                job["recovered"] = list(fixed.values())[:RECOVERED_MAX]
                 job["errors_total"] = len(errs); job["errors"] = errs                 # the check counts every file: exact, also beyond the saved list
                 job["check"] = {"ok": chk["ok"], "missing": len(chk["missing"]), "differs": len(chk["differs"]), "partial": chk["partial"],
                                 "restored_again": chk_retried[0], "files": len(files)}
