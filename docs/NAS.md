@@ -4,8 +4,9 @@ Callido Restore can run on the NAS itself and be opened from any browser in your
 the backup (for example Google Drive) into the NAS's own shared folders: no computer has to stay on, and the data crosses the
 network once instead of twice (backup → computer → NAS over SMB).
 
-The NAS version is a Docker image for **Container Manager** (DSM 7.2 or later; Synology models with an Intel/AMD or 64-bit
-ARM processor that offer Container Manager in Package Center). The same image runs on any other Docker host.
+The NAS version comes as a **Synology package** (`.spk`, every DSM 7 model) and as a Docker image for **Container Manager**
+(DSM 7.2 or later; Synology models with an Intel/AMD or 64-bit ARM processor that offer Container Manager in Package Center).
+The same image runs on any other Docker host.
 
 ## Package or container
 
