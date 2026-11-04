@@ -193,6 +193,8 @@ class ResumeCountsTests(_Fixture):
         # the final check finds y.txt missing and restores it again (this pool reads it): no error left
         self.assertEqual((res2["restored"], res2["skipped"], res2["errors"]), (4, 0, 0))
         self.assertEqual((job2["errors"], res2["check"]["restored_again"], res2["check"]["ok"]), ([], 1, 4))
+        # the file that failed first is listed as restored on a later try (shown with a check mark), not as an error
+        self.assertEqual([e["path"] for e in job2["recovered"]], [e["path"] for e in saved["errors"]])
 
     def test_error_total_survives_the_capped_list(self):                     # the saved file keeps the last 200 errors; the total must not restart from 200
         job = self.job("cap"); job["cancel"] = True

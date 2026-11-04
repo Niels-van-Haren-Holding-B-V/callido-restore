@@ -1042,8 +1042,12 @@ async function tabRestore(){const el=$('#tab-restore');
       showErrs(job,true)},true,'Stop',job=>{showErrs(job);showXfers(job)})};   // Stop = the saved pause: next_index is kept, Resume goes on from there
   // The error list is shown while the restore runs (it used to appear only at the end), redrawn only when the count changes.
   let errsShown=-1;
-  const showErrs=(job,force)=>{const n=job.errors_total??(job.errors||[]).length;if(!job.errors||!job.errors.length||(!force&&n===errsShown))return;errsShown=n;
-    const el=$('#rsErrors');if(!el)return;el.innerHTML=`<h4 style="font-size:12px;color:var(--muted)">Errors (${n.toLocaleString()})${job.state==='running'?' so far':''}</h4><div class="tablewrap"><table>${job.errors.slice(0,500).map(e=>`<tr><td class="mono">${esc(e.path)}</td><td title="${esc(e.error)}">${esc(plainError(e.error))}</td></tr>`).join('')}</table></div>`};
+  // At the end (force) the list is redrawn even when it is empty: errors the final check fixed by restoring the file again
+  // leave the error list and are shown with a green check mark (job.recovered), so a finished restore never shows stale errors.
+  const showErrs=(job,force)=>{const n=job.errors_total??(job.errors||[]).length;if(!force&&(!job.errors||!job.errors.length||n===errsShown))return;errsShown=n;
+    const el=$('#rsErrors');if(!el)return;const errs=job.errors||[],rec=force?job.recovered||[]:[];
+    el.innerHTML=(errs.length?`<h4 style="font-size:12px;color:var(--muted)">Errors (${n.toLocaleString()})${job.state==='running'?' so far':''}</h4><div class="tablewrap"><table>${errs.slice(0,500).map(e=>`<tr><td class="mono">${esc(e.path)}</td><td title="${esc(e.error)}">${esc(plainError(e.error))}</td></tr>`).join('')}</table></div>`:'')
+      +(rec.length?`<h4 style="font-size:12px;color:var(--ok)">✓ Restored on a later try (${rec.length.toLocaleString()})</h4><div class="tablewrap"><table>${rec.slice(0,500).map(e=>`<tr><td class="mono">${esc(e.path)}</td><td style="color:var(--ok)" title="first try: ${esc(e.error)}">✓ restored</td></tr>`).join('')}</table></div>`:'')};
   if(restoreRun)watchRestore(restoreRun.id);                                 // a restore that runs already keeps its bar after a re-render
   else if(S.queued&&mapOk)startQueued();
   $('#rsGo').onclick=async()=>{const fromCmp=S.cmpGo;S.cmpGo=false;   // started from the comparison (which has just shown what is there): no second question; cleared at once so an early return never carries it over
