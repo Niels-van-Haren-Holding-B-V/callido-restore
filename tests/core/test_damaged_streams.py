@@ -87,6 +87,15 @@ class StreamParse(unittest.TestCase):
         outside = [(k, ids) for k, ids in want if k + 4 + 12 + 8 * (len(ids) + 1) <= a or k >= z]
         self.assertEqual([x for x in got if x in outside], outside)               # every record outside the zone is found
         self.assertTrue(all(x in want for x in got))                                 # and nothing made up from the garbage
+    def test_magic_on_the_window_edge_during_a_resync(self):
+        """Garbage up to a record whose magic straddles the end of what the parse has read: the record is still found."""
+        rng = random.Random(4); r = record([5, 6, 7])
+        for cut in range(len(r) + 8):
+            garbage = bytes(64) + bytes([0x11]) * 3000                               # no 0xa9 in it: one resync over all of it
+            data = garbage + r; first = len(garbage) + 4 + cut - 8
+            got = parse(self.cut(data, [max(1, first)]))
+            self.assertEqual(got, [(len(garbage), [5, 6, 7])], f"cut {cut}")
+
     def test_sizes_cut_a_trailer(self):
         rng = random.Random(3); data, want = stream(rng)
         q = os.path.join(self.d, "0.idx.L0CK3D"); open(q, "wb").write(data + rng.randbytes(RANSOM_TRAILER))
@@ -98,10 +107,37 @@ class DamagedTableRecord(unittest.TestCase):
         d = tempfile.mkdtemp(); self.addCleanup(shutil.rmtree, d, True); os.makedirs(os.path.join(d, "Pool/chunk_index"))
         good = b"\x00" + struct.pack(">II", 7, 64 + 32 * 3) + bytes(15) + b"\x01" + bytes(4)
         bad = b"\x00" + struct.pack(">II", 7, 64 + 32 * 3) + bytes(5) + b"\x99" + bytes(9) + b"\x01" + bytes(4)
-        open(os.path.join(d, "Pool/chunk_index/0.idx"), "wb").write(bytes(64) + good + bad)
+        # bytes 16 and 23 are set in valid records of a real backup (0x03 in byte 16 on 4.3 % of them): never refused for that
+        b16 = b"\x00" + struct.pack(">II", 8, 64 + 32 * 5) + bytes(7) + b"\x03" + bytes(6) + b"\x02" + b"\x01" + bytes(4)
+        open(os.path.join(d, "Pool/chunk_index/0.idx"), "wb").write(bytes(64) + good + bad + b16)
         ci = P.ChunkIndex(_Src(d))
         self.assertEqual(ci.loc(0), (7, 3))
         with self.assertRaisesRegex(KeyError, "damaged"): ci.loc(1)
+        self.assertEqual(ci.loc(2), (8, 5))
+
+
+class Md5Retry(unittest.TestCase):
+    """A table record on the edge of an encrypted zone can pass the record check with a garbage location: the chunk then fails
+    its md5, and with a damaged table and a map loaded the map's location is tried before the file fails."""
+    def reader(self, damaged, have_map):
+        r = P.PoolReader.__new__(P.PoolReader)
+        r.map = {} if have_map else None
+        r.ci = type("CI", (), {"damaged": lambda self: damaged})()
+        r.plan = lambda off: ([(1, 0), (1, 1)], {"ids": [10, 11]})
+        r.locate = lambda g: (2, g)
+        def read_chunk(b, i, fh, job=None, opener=None):
+            if b == 1 and i == 1: raise ValueError("md5 mismatch bucket 1 entry 1")
+            return f"{b}:{i};".encode()
+        r.read_chunk = read_chunk
+        return r
+    def test_map_location_is_tried(self):
+        d = tempfile.mkdtemp(); self.addCleanup(shutil.rmtree, d, True); out = os.path.join(d, "f")
+        self.reader(True, True).extract(0, out)
+        self.assertEqual(open(out, "rb").read(), b"1:0;2:11;")
+    def test_healthy_table_still_fails(self):
+        d = tempfile.mkdtemp(); self.addCleanup(shutil.rmtree, d, True)
+        for damaged, have_map in ((False, True), (True, False)):
+            with self.assertRaisesRegex(ValueError, "md5"): self.reader(damaged, have_map).extract(0, os.path.join(d, "f"))
 
 
 if __name__ == "__main__":

@@ -163,8 +163,8 @@ class ChunkIndex:
         elif len(d) < SLICE: raise KeyError(f"chunk id {g}: beyond Pool/chunk_index")       # the last slice is short
         else: b = d[lo:] + self._slice(k + 1, job)[:lo + self.REC - len(d)]               # a record straddling two slices
         if len(b) != self.REC: raise KeyError(f"chunk id {g}: beyond Pool/chunk_index")
-        if any(b[9:24]):                       # always zero in a real record: these bytes are damaged (a zone the ransomware
-            raise KeyError(f"chunk id {g}: damaged record in Pool/chunk_index")   # encrypted, issue #250); never trust what they say
+        if any(b[9:16]) or any(b[17:23]):      # zero in every real record (byte 16 and 23 are not: FORMAT.md); set means the bytes
+            raise KeyError(f"chunk id {g}: damaged record in Pool/chunk_index")   # are damaged (a zone the ransomware encrypted, #250)
         if b[0] == 1:                                                         # a reference to another chunk record
             target = struct.unpack_from(">Q", b, 1)[0]
             if depth > 8 or target < self.HEADER or (target - self.HEADER) % self.REC: raise KeyError(f"chunk id {g}: bad reference {target}")
@@ -266,7 +266,7 @@ def parse_record_stream(path_iter, on_record, cancelled=None, progress=None, siz
             q = buf.find(b"\xa9\x3b", p + 1 - base)
             if q >= 0: p = base + q; break
             if nxt >= len(paths): return
-            p = base + max(len(buf) - 1, p + 1 - base)         # the magic may straddle the window's end
+            p = base + max(len(buf) - 2, p - base)             # the magic may straddle the window's end: search its last byte again
             fill(p + SLICE)
 
 class PoolMap:
@@ -699,6 +699,14 @@ class PoolReader:
             except KeyError:
                 if not self.v1: raise            # partial v2 map: fall back to the v1 map for this file
         return [self.locate1(g) for g in rec["ids"]], rec
+    def _map_retry(self, g, loc):
+        """Another location for chunk g when the one read failed its md5: the inferred map's, when the chunk table is damaged
+        and a map is loaded (a table record on the edge of an encrypted zone can pass the record check with a garbage location).
+        None when there is nothing else to try."""
+        if self.map is None or not self.ci.damaged(): return None
+        try: alt = self.locate(g)
+        except KeyError: return None
+        return alt if tuple(alt) != tuple(loc) else None
     def _loc_mixed(self, g):
         """Chunk g from the chunk table, else from the inferred map (a wrong location is caught by the md5 check on read)."""
         try: return self.ci.loc(g)
@@ -730,9 +738,14 @@ class PoolReader:
             else:
                 locs, rec = self.plan(off); tmp = out_path + ".part"; n = 0
                 with open(tmp, "wb") as f:
-                    for b, i in locs:
+                    for k, (b, i) in enumerate(locs):
                         if cancelled and cancelled(): raise Stopped("stopped")
-                        d = self.read_chunk(b, i, fh_cache, job, opener); f.write(d); n += len(d)
+                        try: d = self.read_chunk(b, i, fh_cache, job, opener)
+                        except ValueError:
+                            alt = self._map_retry(rec["ids"][k], (b, i))
+                            if alt is None: raise
+                            d = self.read_chunk(alt[0], alt[1], fh_cache, job, opener)
+                        f.write(d); n += len(d)
             if size is not None and n != size: raise ValueError(f"size mismatch: wrote {n}, expected {size}")
             os.replace(tmp, out_path)
             if mtime: os.utime(out_path, (mtime, mtime))
