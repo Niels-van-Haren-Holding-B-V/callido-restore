@@ -1,5 +1,5 @@
 SPK_NAME = callido-restore
-SPK_VERS = 1.3.0
+SPK_VERS = 1.3.1
 SPK_REV = 1
 SPK_ICON = src/callido-restore.png
 
