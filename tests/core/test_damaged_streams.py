@@ -134,6 +134,21 @@ class Md5Retry(unittest.TestCase):
         d = tempfile.mkdtemp(); self.addCleanup(shutil.rmtree, d, True); out = os.path.join(d, "f")
         self.reader(True, True).extract(0, out)
         self.assertEqual(open(out, "rb").read(), b"1:0;2:11;")
+    def test_missing_bucket_or_entry_also_tries_the_map(self):
+        d = tempfile.mkdtemp(); self.addCleanup(shutil.rmtree, d, True)
+        for err in (KeyError((99999, "bucket")), IndexError("list index out of range"), FileNotFoundError("Pool/0/48/1.bucket")):
+            r = self.reader(True, True); ok = r.read_chunk
+            def read_chunk(b, i, fh, job=None, opener=None, err=err):
+                if (b, i) == (1, 1): raise err
+                return ok(b, i, fh, job, opener)
+            r.read_chunk = read_chunk; out = os.path.join(d, "f"); r.extract(0, out)
+            self.assertEqual(open(out, "rb").read(), b"1:0;2:11;", repr(err))
+    def test_stop_is_not_retried(self):
+        r = self.reader(True, True)
+        def stop(b, i, fh, job=None, opener=None): raise P.Stopped("stopped")
+        r.read_chunk = stop
+        d = tempfile.mkdtemp(); self.addCleanup(shutil.rmtree, d, True)
+        with self.assertRaises(P.Stopped): r.extract(0, os.path.join(d, "f"))
     def test_healthy_table_still_fails(self):
         d = tempfile.mkdtemp(); self.addCleanup(shutil.rmtree, d, True)
         for damaged, have_map in ((False, True), (True, False)):

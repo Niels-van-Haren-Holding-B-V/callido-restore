@@ -700,7 +700,7 @@ class PoolReader:
                 if not self.v1: raise            # partial v2 map: fall back to the v1 map for this file
         return [self.locate1(g) for g in rec["ids"]], rec
     def _map_retry(self, g, loc):
-        """Another location for chunk g when the one read failed its md5: the inferred map's, when the chunk table is damaged
+        """Another location for chunk g when reading the one given failed (md5, or no such bucket or entry): the inferred map's, when the chunk table is damaged
         and a map is loaded (a table record on the edge of an encrypted zone can pass the record check with a garbage location).
         None when there is nothing else to try."""
         if self.map is None or not self.ci.damaged(): return None
@@ -741,8 +741,9 @@ class PoolReader:
                     for k, (b, i) in enumerate(locs):
                         if cancelled and cancelled(): raise Stopped("stopped")
                         try: d = self.read_chunk(b, i, fh_cache, job, opener)
-                        except ValueError:
-                            alt = self._map_retry(rec["ids"][k], (b, i))
+                        except Stopped: raise
+                        except Exception:            # md5 mismatch, a bucket or entry that does not exist (KeyError, IndexError,
+                            alt = self._map_retry(rec["ids"][k], (b, i))       # FileNotFoundError), an LZ4 error: garbage location
                             if alt is None: raise
                             d = self.read_chunk(alt[0], alt[1], fh_cache, job, opener)
                         f.write(d); n += len(d)
