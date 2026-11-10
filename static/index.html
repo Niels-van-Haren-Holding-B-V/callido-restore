@@ -341,7 +341,7 @@ const REASONS={'placed without a size check':'Its location in the backup couldn�
   'reads chunks from a record that is placed without a size check':'Part of it comes from data whose location couldn’t be confirmed','located through the v1 map':'Found with the older, less precise map',
   'the pool map gives no status':'The map has no check result for it','reads a chunk that no record stores':'Part of it is missing from the backup’s map'};
 // Restore errors come from the pool reader; the user gets plain words (the original text stays in the tooltip).
-function plainError(err){const s=String(err||'');const cov=PREP.pool&&!PREP.pool.chunk_index&&PREP.pool.bytes_pct!=null?` (the preparation covers ${Math.round(PREP.pool.bytes_pct)} % of the data)`:'';
+function plainError(err){const s=String(err||'');const cov=PREP.pool&&!PREP.pool.chunk_index&&!PREP.pool.chunk_index_damaged&&PREP.pool.bytes_pct!=null?` (the preparation covers ${Math.round(PREP.pool.bytes_pct)} % of the data)`:'';
   if(/not placed yet|map covers up to bucket|not in the pool map|KeyError|no record stores|unplaced/i.test(s))return `This file’s data could not be located in the backup${cov}.`;
   if(/upload failed/i.test(s))return 'Copying the file to the target failed: '+s.replace(/^upload failed:\s*/i,'');
   if(/No space left/i.test(s))return 'The target disk is full.';
@@ -787,7 +787,8 @@ async function prepResume(){try{await post('/api/pool/resume',{src:S.src})}catch
 // What a finished preparation can restore (placer v3): the bucket counts are not progress (a bucket is "owned" only when a verified
 // file covers it), so the sentence uses the data coverage and the files located; loading more shares or runs is what raises it.
 function coverageText(pool){if(!pool)return '';const parts=[];                     // bytes_pct is a percentage, 0-100 (agreed with hbk-1)
-  if(pool.bytes_pct!=null)parts.push(`${Math.round(pool.bytes_pct)} % of the data can be restored`);if(pool.records_placed!=null&&pool.records_total)parts.push(`${pool.records_placed.toLocaleString()} of ${pool.records_total.toLocaleString()} files located`);
+  if(pool.chunk_index_damaged)parts.push(`most data is located by the backup's own chunk table (partly damaged)${pool.bytes_pct!=null?`; the preparation alone covers ${Math.round(pool.bytes_pct)} %`:''}`);   // #250
+  else if(pool.bytes_pct!=null)parts.push(`${Math.round(pool.bytes_pct)} % of the data can be restored`);if(pool.records_placed!=null&&pool.records_total)parts.push(`${pool.records_placed.toLocaleString()} of ${pool.records_total.toLocaleString()} files located`);
   return parts.join(' · ')}
 // Step 4 shows the preparation as one labelled line (the header pill's content), never as the restore's bar.
 function prepLineText(j,exact){const pct=Math.round((j.progress||0)*100);

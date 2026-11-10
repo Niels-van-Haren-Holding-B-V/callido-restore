@@ -1,8 +1,9 @@
 # Synology Hyper Backup `.hbk` format (as reverse engineered, Oct 2026)
 
 Observed on a DSM 7 Hyper Backup task (HB 4.1.2) with a Google Drive target, **no client-side encryption**,
-`data_compress_type=1`, multi-version. Every file name carries a revision suffix `.<N>` (`version_info.db.2334`);
-always take the highest N. Numbers are big-endian unless stated.
+`data_compress_type=1`, multi-version. On a cloud target every file name carries a revision suffix `.<N>`
+(`version_info.db.2334`); always take the highest N. On a local target (USB disk, a shared folder) the names have no suffix
+(`786.db`, `0.idx`, `12.bucket`; issue #250), read as revision 0 (`core/hbkmeta.py` `rev_of`, `split_name`). Numbers are big-endian unless stated.
 
 ## Top level
 | Path | Content |
@@ -66,7 +67,9 @@ A chunk reference `r` in a file record is the byte offset of a **29-byte record*
 |---|---|---|
 | 0 | `0x00` | `0x01` |
 | 1–8 | u32 BE bucket id, u32 BE byte offset of the chunk's 32-byte entry in that bucket's `.index` (`64 + 32 · entry`) | u64 BE byte offset of the record it shares (follow it) |
-| 9–23 | zero | zero |
+| 9–15, 17–22 | zero | zero |
+| 16 | usually zero; `0x03` on 4.3 % of the records of a real backup (99.9 % of its first slice), meaning unknown | |
+| 23 | almost always zero; set on 5 of 121.7 M records (perhaps the refcount is wider than one byte) | |
 | 24 | refcount | refcount |
 | 25–28 | fingerprint | fingerprint |
 
@@ -82,3 +85,13 @@ ownership and stream offsets follow from the anchors, large files are laid out a
 the initial backup), copies alias their stored record, leftover chunks of deleted files are skipped by exact bytes, and every
 placement with a known size is checked against it (`pool/place.py`). Result: `poolmap2.json`. On the real backup it located
 86 % of the bytes; everything it placed agrees with the table.
+
+## Ransomware damage (C3RB3R, `*.L0CK3D`)
+Reported on a real backup (issue #250): the ransomware renames a file `<name>.L0CK3D`, encrypts three zones of about 320 KiB
+in place in each 8 MiB slice (0–328 KiB, 3.84–4.16 MiB, 7.68–8.00 MiB, about 12 %) and appends a 588-byte trailer; bucket
+data and bucket indexes were left alone. The app reads such slices as they are (`SlicedStream`: the first 8 MiB of a full
+slice, the last one without its trailer); what an encrypted zone held is lost and is recognised, not trusted: a chunk-list
+record must carry its magic and trailer marker (`parse_record_stream` resynchronises on the next record), a `Pool/chunk_index`
+record must have bytes 9–15 and 17–22 zero (bytes 16 and 23 are not always zero, see the table above). A damaged chunk table makes the app prepare the inferred map too and take each chunk the
+table cannot give from the map (`PoolReader.plan`); every chunk's md5 is checked on read. Without a readable
+`version_info.db` the version list is rebuilt from the snapshot databases (`Backup._versions_from_snapshots`).

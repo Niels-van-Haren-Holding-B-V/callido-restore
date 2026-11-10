@@ -11,7 +11,7 @@ from callido_restore.core.hbkmeta import RANSOM_SUFFIX
 from callido_restore.core.hbkmeta import ROOT_PARENT
 from callido_restore.core.hbkmeta import SCRIPT_EXT
 from callido_restore.core.hbkmeta import is_sqlite
-from callido_restore.core.hbkmeta import rev_of
+from callido_restore.core.hbkmeta import rev_of, split_name
 from callido_restore.oscompat import popen_kw
 from callido_restore.restore.jobs import log
 from callido_restore.paths import RCLONE, ui_path
@@ -211,11 +211,16 @@ class Backup:
             ents = s.listdir(f"Config/@Share/{sh}")
             vers = {}
             for n, e in ents.items():
-                m = re.match(r"^(\d+)\.db\.(\d+)(" + re.escape(RANSOM_SUFFIX) + r")?$", n)
-                if m: vers[int(m.group(1))] = {"name": n, "size": e["size"], "local": e["local"], "locked": bool(m.group(3))}
+                m = split_name(n, r"(\d+)\.db")                  # <ver>.db.<rev>, or <ver>.db on a local target
+                if m and not e["dir"]:
+                    v = int(m[0][0]); cur = vers.get(v)
+                    if cur is None or (m[1], not m[2]) > (cur["rev"], not cur["locked"]):
+                        vers[v] = {"name": n, "size": e["size"], "local": e["local"], "locked": m[2], "rev": m[1]}
             info["shares"].append({"name": sh, "snapshots": len(vers), "min": min(vers) if vers else None, "max": max(vers) if vers else None,
                                    "locked": sum(1 for v in vers.values() if v["locked"])})
             setattr(self, "_vers_" + sh, vers)
+        if not self.versions and any(getattr(self, "_vers_" + sh) for sh in shares):
+            self._versions_from_snapshots(shares, info)
         for ix in self.src.index_dir.glob("*.sqlite"):
             m = re.match(r"^(.*)__(\d+)\.sqlite$", ix.name)
             if m:
@@ -229,6 +234,29 @@ class Backup:
                 for sh in v["indexed"]:
                     meta = self._meta(sh, v["id"])
                     if meta: v["counts"][sh] = meta
+
+    def _versions_from_snapshots(self, shares, info):
+        """No readable Config/version_info.db (ransomware-encrypted, issue #250): the version list is rebuilt from the snapshot
+        databases each share holds (Config/@Share/<share>/<ver>.db). Their time is the newest file time a readable local
+        snapshot lists (a run is at least that recent), else unknown (0); the status is "Unknown"."""
+        ids = sorted({v for sh in shares for v in getattr(self, "_vers_" + sh)})
+        for vid in ids:
+            ts = 0
+            for sh in shares:
+                e = getattr(self, "_vers_" + sh).get(vid)
+                if not e or e["locked"] or not e["local"]: continue
+                try:
+                    p = self.src.ensure(f"Config/@Share/{sh}/{e['name']}")
+                    if not is_sqlite(p): continue
+                    con = sqlite3.connect(f"file:{p}?mode=ro", uri=True)
+                    try: ts = max(ts, con.execute("select max(mtime_sec) from version_list").fetchone()[0] or 0)
+                    finally: con.close()
+                except (OSError, sqlite3.Error): continue
+            self.versions.append({"id": vid, "ts": ts, "status": "Unknown", "depose": None, "rebuilt": True, "stats": None, "indexed": []})
+        info["problems"].append(f"the version list was rebuilt from {len(ids):,} snapshot databases (no readable version_info.db); "
+                                "dates are the newest file time in each snapshot")
+        info["problems"] = [x for x in info["problems"] if not x.startswith("This folder is not a Hyper Backup root")]
+        info["readable"] = True
 
     def share_versions(self, share): return getattr(self, "_vers_" + share, {})
 
@@ -486,13 +514,14 @@ class Backup:
         out = []
         for sh in self.shares:
             for n, e in self.src.listdir(f"Config/@Share/{sh}").items():
-                if e["local"] and re.match(r"^\d+\.db\.\d+$", n): out.append(str(self.src.ensure(f"Config/@Share/{sh}/{n}")))
+                m = split_name(n, r"\d+\.db")
+                if e["local"] and m and not m[2]: out.append(str(self.src.ensure(f"Config/@Share/{sh}/{n}")))
         return out
     def build_pool(self, job, max_bucket=None):
         from callido_restore.pool import poolmap, indexfetch
         from callido_restore.core import pool
         pool_dir = self.src.index_dir / "pool"; pool_dir.mkdir(parents=True, exist_ok=True)
-        if self.pool.ci.available():
+        if self.pool.ci.available() and not self.pool.ci.damaged():
             # Pool/chunk_index answers "where is chunk g" for every chunk; a restore fetches only the table slices and the
             # bucket indexes it touches. Nothing to prepare (the inferred map is the fallback for backups without the table).
             job["message"] = "nothing to prepare: the backup has its own chunk table"; job["progress"] = 1.0
@@ -512,8 +541,8 @@ class Backup:
                 if job.get("cancel"): return stopped("listing")
                 job["progress"] = 0.05 * i / max(1, len(dirs))
                 for n, e in self.src.listdir(f"Pool/0/{d}", refresh=True).items():
-                    m = re.match(r"^(\d+)\.(bucket|index)\.(\d+)$", n)
-                    if m: out.append({"b": d * 2048 + int(m.group(1)), "t": m.group(2), "rev": int(m.group(3)), "size": e["size"], "mtime": "", "name": n})
+                    m = split_name(n, r"(\d+)\.(bucket|index)")    # no revision on a local target; renamed (.L0CK3D) ones are left out
+                    if m and not m[2]: out.append({"b": d * 2048 + int(m[0][0]), "t": m[0][1], "rev": m[1], "size": e["size"], "mtime": "", "name": n})
             tmp = listing.with_name(".listing.json.part")
             tmp.write_text(json.dumps(out)); os.replace(tmp, listing)
         if job.get("cancel"): return stopped("listing")
@@ -736,7 +765,9 @@ class Backup:
                 job["errors"].append({"path": f"{f['share']}/{f['path']}", "error": str(msg)}); job["errors_total"] += 1   # the list is capped in the saved file, the total is not
                 if job["errors_total"] <= 100 or job["errors_total"] % 100 == 0:          # app.log: the first 100, then every 100th
                     log(f"restore error {job['errors_total']}: {f['share']}/{f['path']}: {msg}")
-                if job["errors_total"] > 2000: fatal.append("too many errors, aborting")
+                # a setup that fails every file stops early; a damaged backup (issue #250) where many files fail but others restore
+                # keeps going: more than 2000 errors abort only while they outnumber the restored files ten to one
+                if job["errors_total"] > 2000 and job["errors_total"] > 10 * job.get("done_files", 0): fatal.append("too many errors, aborting")
         fatal = []
         # verified / identical_copy / unverified: per restored file, how its placement was established
         pool = self.pool; fh_cache = {}; counted = set()
@@ -776,8 +807,8 @@ class Backup:
         cache_limit = int(float(os.environ.get("HBK_CACHE_GB", str(CACHE_GB))) * (1 << 30))
         downloaded = collections.OrderedDict(); dl_lock = threading.Lock(); dl_size = [0]; upcoming = set()
         cdir = getattr(self.src, "cache_dir", None)
-        for bf in sorted(Path(cdir, "Pool").glob("*/*/*.bucket.*") if isinstance(cdir, Path) else [], key=lambda q: q.stat().st_mtime if q.exists() else 0):
-            m = re.fullmatch(r"(\d+)\.bucket\.\d+", bf.name)
+        for bf in sorted(Path(cdir, "Pool").glob("*/*/*.bucket*") if isinstance(cdir, Path) else [], key=lambda q: q.stat().st_mtime if q.exists() else 0):
+            m = re.fullmatch(r"(\d+)\.bucket(?:\.\d+)?", bf.name)
             if m and bf.parent.name.isdigit() and bf.is_file() and not bf.is_symlink():
                 bk = int(bf.parent.name) * 2048 + int(m.group(1))
                 if bk not in downloaded: sz = bf.stat().st_size; downloaded[bk] = (bf, sz); dl_size[0] += sz
@@ -1148,9 +1179,9 @@ class Backup:
                 os.rmdir(tmpdir)
             return {"raw": data, "name": r["name"], "size": r["size"], "pool_file": "pool chunks"}
         n = -off
-        ents = self.src.find("Pool/file_pool", f"{n}.file.*")
+        ents = [x for x in self.src.find("Pool/file_pool", f"{n}.file*") if rev_of(x, f"{n}.file")]
         if not ents: raise FileNotFoundError(f"Pool/file_pool/{n}.file.* not present in this source")
-        name = sorted(ents, key=lambda x: rev_of(x, f"{n}.file")[0])[-1]
+        name = max(ents, key=lambda x: (rev_of(x, f"{n}.file")[0], not rev_of(x, f"{n}.file")[1]))   # newest; readable beats renamed
         if name.endswith(RANSOM_SUFFIX): raise RuntimeError("pool file is ransomware-encrypted")
         p = self.src.ensure(f"Pool/file_pool/{name}", job)
         data = p.read_bytes()
