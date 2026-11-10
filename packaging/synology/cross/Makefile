@@ -1,5 +1,5 @@
 PKG_NAME = callido-restore
-PKG_VERS = 1.3.0
+PKG_VERS = 1.3.1
 PKG_EXT = tar.gz
 PKG_DIST_SITE = https://github.com/Niels-van-Haren-Holding-B-V/callido-restore/archive
 ifeq ($(strip $(CALLIDO_GIT_HASH)),)

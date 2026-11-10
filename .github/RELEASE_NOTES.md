@@ -1,5 +1,13 @@
 **Callido Restore** restores files from a Synology Hyper Backup (`.hbk`) without Hyper Backup or a working NAS. It reads the backup's own metadata, shows every backup run on a timeline, and restores the folders you pick to a NAS share or a local folder. Files already at the destination are never overwritten or deleted, and the backup source is only read.
 
+## What's new in 1.3.1
+
+- **Backups on a USB disk or shared folder open without help.** Hyper Backup names its files without a revision number on a local target (`786.db`, `0.idx`, `12.bucket` instead of `786.db.12`); the app now reads those (#251).
+- **Backups damaged by ransomware: restore what is still there.** Index files the ransomware renamed `*.L0CK3D` and partly encrypted are read as they are; the encrypted parts are recognised and skipped. When the backup's own chunk table is damaged, the app also prepares its own map and takes each piece from the table when it can, from the map otherwise. Every piece is still checked (md5) when it is read. Without a readable version list, the list of backup runs is rebuilt from the per-share snapshots. Files whose own chunk list was encrypted cannot be restored (#250, #251).
+- **Preparing a large backup needs far less memory.** The preparation read each index stream whole and could need more than 10 GB for a large backup; it now reads it piece by piece (#251).
+- **A restore with many failing files keeps going** as long as it is also restoring files; it stops after 2000 errors only when errors outnumber restored files ten to one (#251).
+- **Files fixed on a later try show a green check mark** at the end of a restore instead of their old error (#248).
+
 ## What's new in 1.3.0
 
 - **Run it on the NAS itself.** Callido Restore can now run on a Synology (or any Docker host) and be opened from any browser in your network, with a password. A restore then goes straight from the backup into the NAS's shared folders: no computer has to stay on, and the data no longer crosses the network twice. Two ways to install it: the Synology package below (`callido-restore_<processor>-7.1_1.3.0-1.spk`, Package Center → Manual Install; `x64` for Intel/AMD models, `aarch64` and `armv7` for ARM models; it needs **Python 3.14** from SynoCommunity: add the package source `https://packages.synocommunity.com` and install Python 3.14 from the Community tab first) or the container `ghcr.io/niels-van-haren-holding-b-v/callido-restore:1.3.0` for Container Manager. See [docs/NAS.md](https://github.com/Niels-van-Haren-Holding-B-V/callido-restore/blob/main/docs/NAS.md) (#243, #244).
