@@ -81,6 +81,8 @@ Not covered yet: a native .spk for models without Container Manager; the in-app 
 * Chunk-table slices a restore reads are kept in the app cache (up to about 6.8 GB for a 1.5 TB backup); the user guide says so.
 * Orphaned helper processes (rclone, mapper) are cleaned up at start on macOS only; on Windows that cleanup is a no-op.
 * A backup without `Pool/chunk_index` depends on the inferred map; files it cannot place are reported as errors.
+* Ransomware-damaged index files (`*.L0CK3D`, issue #250) are read as they are: files whose chunk list lies in an encrypted
+  zone cannot be restored (their list is gone); a damaged chunk table is completed per chunk by the inferred map. See FORMAT.md.
 * What `Pool/chunk_index` holds for unused or purged chunk ids is not checked yet.
 * On a slow line a restore is download-bound and fetches whole buckets (see "Restore speed" in `docs/TASKS.md`).
 

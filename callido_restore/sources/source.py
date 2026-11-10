@@ -185,12 +185,12 @@ class Source:
         return {n: e for n, e in self.listdir(rel).items() if fnmatch.fnmatch(n, pattern)}
 
     def latest(self, rel, base):
-        """Highest-revision file 'base.N' in rel. Returns (name, entry, rev, locked) or None."""
+        """Highest-revision file 'base.N' (or plain 'base', revision 0, on a local target) in rel. Returns (name, entry, rev, locked) or None."""
         best = None
         for n, e in self.listdir(rel).items():
             if e["dir"]: continue
-            r = rev_of(n, base)
-            if r and (best is None or r[0] > best[2]): best = (n, e, r[0], r[1])
+            r = rev_of(n, base)          # same revision twice (a plain and a ransomware-renamed copy): the readable one wins
+            if r and (best is None or (r[0], not r[1]) > (best[2], not best[3])): best = (n, e, r[0], r[1])
         return best
 
     def ensure(self, rel, job=None, progress=None, cancelled=None):

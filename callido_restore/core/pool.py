@@ -20,6 +20,7 @@ Layout facts
 """
 import struct, os, re, json, glob, hashlib, collections, bisect, threading
 from callido_restore.sources import transfer
+from callido_restore.core.hbkmeta import split_name, RANSOM_TRAILER
 
 class Stopped(RuntimeError):
     """A Stop of the job that runs the read (not an error of the file)."""
@@ -73,28 +74,46 @@ def rev_sort_key(name):
     m = re.search(r"\.(\d+)$", name); return int(m.group(1)) if m else -1
 
 class SlicedStream:
-    """Random access over <n>.idx.<rev> slices of one logical stream (local files, fetched on demand)."""
+    """Random access over <n>.idx.<rev> slices of one logical stream (local files, fetched on demand). A local target names
+    them <n>.idx (no revision). A slice the ransomware renamed <n>.idx[.<rev>].L0CK3D is used as it is (issue #250: it encrypts
+    a few zones of each slice in place and appends a trailer): its bytes are limited to the slice (``slice_len``), the zones it
+    encrypted read as garbage, which the readers reject (record magic and trailer marker, chunk-table record checks)."""
     def __init__(self, source, reldir):
         self.src, self.reldir = source, reldir
-        self._names = None; self._fh = {}
+        self._names = None; self._locked = set(); self._fh = {}; self._len = {}
         # one lock per stream: a read is seek + read on a shared handle, and a restore to a NAS reads from several threads at once
         # (the upload threads verify each file, the main thread plans the next one, prefetch threads plan ahead). Without it a
         # seek of one thread landed between another's seek and read: "record trailer missing" for a file that is fine.
         self._lock = threading.Lock()
     def names(self):
         if self._names is None:
-            names = {}                                          # filled first, published whole: another thread never sees it half built
+            best = {}                                           # filled first, published whole: another thread never sees it half built
             for n, e in self.src.listdir(self.reldir).items():
-                m = re.match(r"^(\d+)\.idx\.(\d+)$", n)
+                if e.get("dir"): continue
+                m = split_name(n, r"(\d+)\.idx")
                 if m:
-                    k = int(m.group(1))
-                    if k not in names or int(m.group(2)) > rev_sort_key(names[k]): names[k] = n
-            self._names = names
+                    k = int(m[0][0]); key = (m[1], not m[2])      # newest revision; a readable copy beats a renamed one
+                    if k not in best or key > best[k][0]: best[k] = (key, n)
+            self._locked = {k for k, (key, n) in best.items() if not key[1]}
+            self._names = {k: n for k, (key, n) in best.items()}
         return self._names
+    def locked(self):
+        """Slice numbers that are only present ransomware-renamed (*.L0CK3D): partly encrypted, see the class docstring."""
+        self.names(); return set(self._locked)
     def slice_path(self, k, job=None, progress=None, cancelled=None):
         n = self.names().get(k)
         if n is None: raise FileNotFoundError(f"{self.reldir}: slice {k} missing")
         return self.src.ensure(f"{self.reldir}/{n}", job, progress=progress, cancelled=cancelled)
+    def slice_len(self, k, path):
+        """Bytes of slice k that belong to the stream: the whole file, except for a ransomware-renamed slice: a full slice is
+        SLICE bytes (what follows is the trailer), the last one loses the trailer."""
+        size = os.path.getsize(path)
+        if k not in self.locked(): return size
+        return SLICE if k < max(self.names()) else max(0, size - RANSOM_TRAILER)
+    def slice_bytes(self, k, job=None, progress=None, cancelled=None):
+        """The whole of slice k (fetched when needed), limited to ``slice_len``."""
+        p = self.slice_path(k, job, progress=progress, cancelled=cancelled)
+        with open(p, "rb") as f: return f.read(self.slice_len(k, p))
     def read(self, off, n, job=None):
         out = b""
         while n > 0:
@@ -102,8 +121,8 @@ class SlicedStream:
             p = self.slice_path(k, job)                          # outside the lock: fetching a slice may take seconds
             with self._lock:
                 fh = self._fh.get(k)
-                if fh is None: fh = self._fh[k] = open(p, "rb")
-                fh.seek(lo); chunk = fh.read(min(n, SLICE - lo))
+                if fh is None: fh = self._fh[k] = open(p, "rb"); self._len[k] = self.slice_len(k, p)
+                fh.seek(lo); chunk = fh.read(max(0, min(n, SLICE - lo, self._len[k] - lo)))
             if not chunk: raise EOFError(f"{self.reldir} offset {off}")
             out += chunk; off += len(chunk); n -= len(chunk)
         return out
@@ -121,11 +140,16 @@ class ChunkIndex:
     def available(self):
         try: return bool(self.s.names())
         except Exception: return False
+    def damaged(self):
+        """True when some slices are only present ransomware-renamed: part of the table is unreadable, so the inferred map
+        is still needed for the chunks those zones describe (PoolReader.plan falls back per chunk)."""
+        try: return bool(self.s.locked())
+        except Exception: return False
     def _slice(self, k, job=None):
         with self._lock:
             d = self._cache.get(k)
             if d is not None: self._cache.move_to_end(k); return d
-        with open(self.s.slice_path(k, job), "rb") as f: d = f.read()   # outside the lock: a download may take seconds
+        d = self.s.slice_bytes(k, job)                                  # outside the lock: a download may take seconds
         with self._lock:
             self._cache[k] = d
             if len(self._cache) > self.LRU: self._cache.popitem(last=False)
@@ -139,6 +163,8 @@ class ChunkIndex:
         elif len(d) < SLICE: raise KeyError(f"chunk id {g}: beyond Pool/chunk_index")       # the last slice is short
         else: b = d[lo:] + self._slice(k + 1, job)[:lo + self.REC - len(d)]               # a record straddling two slices
         if len(b) != self.REC: raise KeyError(f"chunk id {g}: beyond Pool/chunk_index")
+        if any(b[9:24]):                       # always zero in a real record: these bytes are damaged (a zone the ransomware
+            raise KeyError(f"chunk id {g}: damaged record in Pool/chunk_index")   # encrypted, issue #250); never trust what they say
         if b[0] == 1:                                                         # a reference to another chunk record
             target = struct.unpack_from(">Q", b, 1)[0]
             if depth > 8 or target < self.HEADER or (target - self.HEADER) % self.REC: raise KeyError(f"chunk id {g}: bad reference {target}")
@@ -187,30 +213,61 @@ class Cancelled(Exception):
     """Raised inside a long parse when the caller's ``cancelled()`` says stop (the Stop button of the pool job)."""
 
 
-def parse_record_stream(path_iter, on_record, cancelled=None, progress=None):
+PARSE_WINDOW = 4 * SLICE          # parse_record_stream holds at most about this much of a stream (plus one slice) in memory
+MAX_TLV = 1 << 26                 # a chunk list longer than this is damaged (64 MiB = 8 M chunk references)
+MAX_MARKER = 4096                 # the marker TLVs between records are 4 or 28 bytes; a longer one is garbage
+
+def parse_record_stream(path_iter, on_record, cancelled=None, progress=None, sizes=None):
     """Sequentially parse a set's slices (list of local paths in order); calls on_record(stream_off, ids).
+    The slices are read one at a time into a sliding window: a whole stream in memory reached 12 GB for a 790,000-file
+    backup (issue #250). ``sizes``: optional per-path byte counts to use (SlicedStream.slice_len; default: the file size).
+    A record's trailer marker is checked, so a zone of garbage (ransomware) is skipped up to the next valid record.
     ``cancelled``: optional callable checked every few thousand records; raises Cancelled when it returns true.
     ``progress``: optional callable given the fraction of bytes parsed, every few thousand records."""
-    data = b"".join(open(p, "rb").read() for p in path_iter)
-    n = len(data); p = 64; seen = 0
-    while p + 8 <= n:
+    paths = list(path_iter); lens = list(sizes) if sizes is not None else [os.path.getsize(q) for q in paths]
+    total = sum(lens) or 1
+    buf = b""; base = 0; nxt = 0                 # buf holds stream bytes [base, base + len(buf)); nxt: next slice to read
+    def fill(upto):
+        """Read slices until the window reaches stream byte ``upto`` (or the stream ends); False at the end."""
+        nonlocal buf, base, nxt
+        if base + len(buf) >= upto: return True
+        parts = [buf]; have = base + len(buf)
+        while have < upto and nxt < len(paths):
+            with open(paths[nxt], "rb") as f: d = f.read(lens[nxt])
+            parts.append(d); have += len(d); nxt += 1
+        buf = b"".join(parts)
+        return base + len(buf) >= upto
+    def drop(before):
+        """Forget the bytes before stream offset ``before`` once the window has grown past PARSE_WINDOW."""
+        nonlocal buf, base
+        if before - base > PARSE_WINDOW: buf = buf[before - base:]; base = before
+    p = 64; seen = 0
+    while fill(p + 8):
         seen += 1
         if seen % 5000 == 0:
             if cancelled is not None and cancelled(): raise Cancelled()
-            if progress is not None: progress(p / n)
-        magic, ln = struct.unpack_from(">II", data, p)
-        if (magic >> 16) != 0xa93b:
-            q = data.find(b"\xa9\x3b", p + 1)
-            if q < 0: break
-            p = q; continue
-        if magic == REC_MAGIC and ln % 8 == 0 and ln >= 8 and p + 8 + ln <= n:
-            refs = struct.unpack_from(f">{ln // 8}Q", data, p + 8)
-            if (refs[-1] >> 32) == 0x74000000:
-                # the record's key is virtual-file pointer B: the header (flags word) at p - 4, or, when a 28-byte attribute TLV
-                # (0xa93b0186) precedes it, that TLV's body at p - 28 (the flags word is the body's last word; FORMAT.md)
-                key = p - 28 if p >= 36 and struct.unpack_from(">II", data, p - 36) == (ATTR_MAGIC, 28) else p - 4
-                on_record(key, [(r - 64) // 29 for r in refs[:-1] if (r - 64) % 29 == 0])
-        p += 8 + ln
+            if progress is not None: progress(p / total)
+        drop(p - 64)                                             # keep the attribute TLV in front of a record (36 bytes back)
+        magic, ln = struct.unpack_from(">II", buf, p - base)
+        if (magic >> 16) == 0xa93b:
+            if magic == REC_MAGIC and ln % 8 == 0 and 8 <= ln <= MAX_TLV and fill(p + 8 + ln):
+                refs = struct.unpack_from(f">{ln // 8}Q", buf, p + 8 - base)
+                if (refs[-1] >> 32) == 0x74000000:
+                    # the record's key is virtual-file pointer B: the header (flags word) at p - 4, or, when a 28-byte attribute TLV
+                    # (0xa93b0186) precedes it, that TLV's body at p - 28 (the flags word is the body's last word; FORMAT.md)
+                    key = p - 28 if p >= 36 and struct.unpack_from(">II", buf, p - 36 - base) == (ATTR_MAGIC, 28) else p - 4
+                    on_record(key, [(r - 64) // 29 for r in refs[:-1] if (r - 64) % 29 == 0])
+                    p += 8 + ln; continue
+            elif magic != REC_MAGIC and ln <= MAX_MARKER:        # a marker TLV (4 or 28 bytes)
+                p += 8 + ln; continue
+        # garbage here (a record whose trailer does not check, a length that cannot be right, no TLV magic): a zone the
+        # ransomware encrypted, or the end of a slice it damaged. Resynchronise on the next TLV magic.
+        while True:
+            q = buf.find(b"\xa9\x3b", p + 1 - base)
+            if q >= 0: p = base + q; break
+            if nxt >= len(paths): return
+            p = base + max(len(buf) - 1, p + 1 - base)         # the magic may straddle the window's end
+            fill(p + SLICE)
 
 class PoolMap:
     """bucket -> (writer, first writer-relative chunk position); writer -> sorted block list."""
@@ -364,7 +421,8 @@ def build_runs(source, outdir, log=print, cancelled=None, progress=None, report=
                     b0, b1 = ids[i] // BLOCK, ids[j - 1] // BLOCK
                     for b in range(b0, b1 + 1): owner_votes[b][w] += j - i
                 i = j
-        try: parse_record_stream(paths, on_record, cancelled, (lambda f: progress((s - 1 + f) / 4)) if progress else None)
+        try: parse_record_stream(paths, on_record, cancelled, (lambda f: progress((s - 1 + f) / 4)) if progress else None,
+                                 sizes=[st.slice_len(k, q) for k, q in zip(sorted(names), paths)])
         except Cancelled: return None
         if progress: progress(s / 4)
         with open(os.path.join(outdir, f"runs_set{s}.bin"), "wb") as f:
@@ -401,7 +459,7 @@ def build_recsizes(source, snapshot_dbs, outdir, log=print, cancelled=None):
     def entry(off):
         k, lo = divmod(off, SLICE); m = maps.get(k)
         if m is None: return None
-        b = m[lo:lo + 56]
+        b = m[lo:min(lo + 56, SLICE)]            # a ransomware-renamed slice carries a trailer past SLICE: not stream bytes
         if len(b) < 56:
             m2 = maps.get(k + 1)
             if m2 is None: return None
@@ -460,7 +518,9 @@ class PoolReader:
               "recsizes": os.path.isfile(os.path.join(self.pool_dir, "recsize_set1.json")), "map": self.map is not None,
               "mapped_buckets": len(self.map.get("buckets", {})) if self.map else 0, "total_buckets": 0, "indexes_local": 0, "index_files": 0,
               "index_bytes": 0, "index_bytes_local": 0,      # bytes of all bucket indexes / of those already here (UI progress text)
-              "chunk_index": self.ci.available(),            # the backup's own chunk table: files are located exactly, no map needed
+              # the backup's own chunk table: files are located exactly, no map needed. A damaged table (slices renamed by
+              # ransomware, issue #250) does not count: the inferred map is prepared for what it cannot give (plan: per chunk)
+              "chunk_index": self.ci.available() and not self.ci.damaged(), "chunk_index_damaged": self.ci.damaged(),
               "map_complete": False, "records_placed": None, "records_total": None, "bytes_pct": None}
         # map_complete: the placer ran over every bucket, whatever the owned count (the buckets without an owner hold files it could
         # not locate; a rerun gives the same map, only more loaded snapshots add tags). The coverage is what the UI shows. The
@@ -496,9 +556,9 @@ class PoolReader:
             if (b, kind) not in self.names and b // 2048 not in self._listed:
                 d = b // 2048
                 for n, e in self.src.listdir(f"Pool/0/{d}").items():
-                    m = re.match(r"^(\d+)\.(bucket|index)\.(\d+)$", n)
-                    if m:
-                        k = (d * 2048 + int(m.group(1)), m.group(2)); rv = int(m.group(3))
+                    m = split_name(n, r"(\d+)\.(bucket|index)")         # a local target has no revision; a renamed (.L0CK3D) one is skipped
+                    if m and not m[2]:
+                        k = (d * 2048 + int(m[0][0]), m[0][1]); rv = m[1]
                         if k not in self.names or rv > self.names[k][1]: self.names[k] = (n, rv)
                 self._listed.add(d)                  # only after the names are in
             if (b, kind) not in self.names: raise KeyError((b, kind))
@@ -631,11 +691,18 @@ class PoolReader:
         if self.ci.available():                  # the backup's own chunk table: exact, no map needed
             try: return [self.ci.loc(g) for g in rec["ids"]], rec
             except (KeyError, FileNotFoundError, RuntimeError): pass      # RuntimeError: a slice could not be fetched (Source.ensure)
+            if self.map is not None:             # a damaged table (issue #250): each chunk it cannot give comes from the inferred map
+                try: return [self._loc_mixed(g) for g in rec["ids"]], rec
+                except KeyError: pass
         if self.v2:
             try: return self.locate2(e["set"], e["rec_off"], rec["ids"]), rec
             except KeyError:
                 if not self.v1: raise            # partial v2 map: fall back to the v1 map for this file
         return [self.locate1(g) for g in rec["ids"]], rec
+    def _loc_mixed(self, g):
+        """Chunk g from the chunk table, else from the inferred map (a wrong location is caught by the md5 check on read)."""
+        try: return self.ci.loc(g)
+        except (KeyError, FileNotFoundError, RuntimeError): return self.locate(g)
     def read_chunk(self, b, i, fh_cache, job=None, opener=None):
         """chunk i of bucket b. ``opener(b)`` -> local path of the bucket's data file, when the caller fetches buckets its own way
         (the restore: with progress, and the next ones queued); default Source.ensure, one at a time and unreported"""
@@ -674,9 +741,10 @@ class PoolReader:
             if own:
                 for fh in fh_cache.values(): fh.close()
     def file_pool_name(self, n):
-        ents = self.src.find("Pool/file_pool", f"{n}.file.*")
-        if not ents: raise FileNotFoundError(f"Pool/file_pool/{n}.file.* missing")
-        return "Pool/file_pool/" + sorted(ents, key=lambda x: int(x.rsplit(".", 1)[1]))[-1]
+        revs = {x: split_name(x, re.escape(f"{n}.file")) for x in self.src.find("Pool/file_pool", f"{n}.file*")}
+        revs = {x: r[1] for x, r in revs.items() if r and not r[2]}
+        if not revs: raise FileNotFoundError(f"Pool/file_pool/{n}.file.* missing")
+        return "Pool/file_pool/" + max(revs, key=revs.get)
     def buckets_for(self, offs):
         """Set of bucket ids needed for a list of virtual offsets (for pre-fetch / size estimate)."""
         bs = set()
@@ -707,7 +775,7 @@ def _recmeta(maps, snapshot_dbs, outdir, log, cancelled):
     def entry(off):
         k, lo = divmod(off, SLICE); m = maps.get(k)
         if m is None: return None
-        b = m[lo:lo + 56]
+        b = m[lo:min(lo + 56, SLICE)]            # a ransomware-renamed slice carries a trailer past SLICE: not stream bytes
         if len(b) < 56:
             m2 = maps.get(k + 1)
             if m2 is None: return None

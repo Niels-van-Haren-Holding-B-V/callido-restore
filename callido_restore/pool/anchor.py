@@ -15,9 +15,13 @@ WORKER_RSS_MB = int(os.environ.get("HBK_SCAN_WORKER_RSS_MB", "1024"))  # a worke
 PARENT_RSS_MB = int(os.environ.get("HBK_SCAN_RSS_MB", "6144"))         # the parent (holds `writers`) likewise
 
 def _rss_mb():
-    """Peak resident memory of this process in MB (the H9 guards compare it with the limits above)."""
+    """Resident memory of this process in MB (the H9 guards compare it with the limits above): the current size on Linux
+    (/proc), the peak elsewhere. A peak counts memory an earlier phase of the same process already gave back."""
     from callido_restore import oscompat
     if oscompat.WINDOWS: return oscompat.peak_rss_mb()        # no `resource` module on Windows: the peak working set
+    try:
+        with open("/proc/self/statm") as f: return int(f.read().split()[1]) * os.sysconf("SC_PAGE_SIZE") / (1 << 20)
+    except (OSError, ValueError, IndexError): pass
     import resource, sys
     r = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
     return r / (1 << 20) if sys.platform == "darwin" else r / 1024
